@@ -1,5 +1,7 @@
 # Ritual
 
+[![CI](https://github.com/hexlace/ritual/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hexlace/ritual/actions/workflows/ci.yml)
+
 **Give every project its own CLI, built from tasks that are just crates.**
 
 Every project grows commands. Build this, seed that, check the other thing. A
