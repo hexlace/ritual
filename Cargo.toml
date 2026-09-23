@@ -1,0 +1,90 @@
+[workspace]
+members = [
+    "crates/rituals-cli",
+    "crates/rituals",
+    "crates/rituals-compose",
+    "crates/rituals-core",
+    "tasks/add",
+    "tasks/create",
+    "tasks/new",
+    "tasks/regenerate",
+]
+resolver = "3"
+
+[workspace.dependencies]
+# Ritual's own crates, each declared once, under the key its dependents use.
+# `path` is what a build in this repository uses; `version` is what a published
+# crate's manifest keeps, since crates.io has no path to follow. Every crate here
+# is released at the workspace version together, so each requirement is that
+# version.
+rituals = { path = "crates/rituals", version = "0.1.0" }
+rituals-compose = { path = "crates/rituals-compose", version = "0.1.0" }
+ritual = { package = "rituals-core", path = "crates/rituals-core", version = "0.1.0" }
+add = { package = "rituals-core-add", path = "tasks/add", version = "0.1.0" }
+create = { package = "rituals-core-create", path = "tasks/create", version = "0.1.0" }
+new = { package = "rituals-core-new", path = "tasks/new", version = "0.1.0" }
+regenerate = { package = "rituals-core-regenerate", path = "tasks/regenerate", version = "0.1.0" }
+# `add` appends to manifests somebody wrote by hand. A whole-file round trip
+# through a plain TOML parser reformats them and drops their comments; this
+# crate edits in place. It is the same crate Cargo's own `add` uses.
+# One declaration rather than one per crate that needs it: Cargo unifies
+# features across the build regardless, so a narrower per-crate declaration
+# would claim a smaller surface while compiling the same code, and this is
+# what stops two declarations drifting on a version bump.
+toml_edit = { version = "0.22", default-features = false, features = [
+    "parse",
+    "display",
+] }
+# cargo metadata speaks JSON and nothing else. rituals-compose reads it to
+# answer what a dependency resolved to; the story tests read it to list this
+# workspace's members the way Cargo does.
+serde_json = { version = "1", default-features = false, features = ["std"] }
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# The oldest toolchain the workspace builds and passes its tests on: what the
+# code uses decides it, and CI checks it with the `msrv` job. Raising it is not a
+# breaking change and lands in a minor release, whenever a newer language or
+# library feature is worth using.
+rust-version = "1.85"
+# MIT alone, rather than MIT OR Apache-2.0: what the Apache half would add is a
+# patent grant, and there is no patent surface here for it to cover. Permissive
+# at all because a framework exists to be linked against, and copyleft terms
+# would defeat the reason it exists.
+license = "MIT"
+repository = "https://github.com/hexlace/ritual"
+keywords = ["cli", "tasks", "task-runner", "cargo", "clap"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "warn"
+print_stderr = "warn"
+missing_errors_doc = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+# Line tables are kept so that a release backtrace carries file and line, not only
+# function names. `strip` has to stay off for that to be true: the line tables live
+# in `.debug_line`, which `strip = "debuginfo"` removes, so that setting cancels
+# `debug = "line-tables-only"` and leaves a binary identical to `debug = false`.
+#
+# The cost is binary size, mostly the standard library's own debug sections: a
+# fixed overhead rather than one that grows with the code. A published crate's
+# manifest carries no profile from this one, so only builds made from a checkout
+# pay it.
+debug = "line-tables-only"
+strip = "none"

@@ -1,0 +1,532 @@
+{
+  "packages": [
+    {
+      "name": "demo-ritual",
+      "version": "0.0.0",
+      "id": "path+file:///scrubbed/checkout/cli#demo-ritual@0.0.0",
+      "license": null,
+      "license_file": null,
+      "description": null,
+      "source": null,
+      "dependencies": [
+        {
+          "name": "task-keyword",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": "move",
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/scrubbed/checkout/task-keyword"
+        },
+        {
+          "name": "task-renamed-source",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": "renamed",
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/scrubbed/checkout/task-renamed-source"
+        },
+        {
+          "name": "task-malformed",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/scrubbed/checkout/task-malformed"
+        },
+        {
+          "name": "task-null",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/scrubbed/checkout/task-null"
+        },
+        {
+          "name": "task-true",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/scrubbed/checkout/task-true"
+        },
+        {
+          "name": "task-dev-only",
+          "source": null,
+          "req": "*",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/scrubbed/checkout/task-dev-only"
+        }
+      ],
+      "targets": [
+        {
+          "kind": [
+            "bin"
+          ],
+          "crate_types": [
+            "bin"
+          ],
+          "name": "demo-ritual",
+          "src_path": "/scrubbed/checkout/cli/src/main.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": false,
+          "test": true
+        }
+      ],
+      "features": {},
+      "manifest_path": "/scrubbed/checkout/cli/Cargo.toml",
+      "metadata": {
+        "ritual": {
+          "tasks": [
+            "task-true",
+            "renamed",
+            "move"
+          ]
+        }
+      },
+      "publish": null,
+      "authors": [],
+      "categories": [],
+      "keywords": [],
+      "readme": null,
+      "repository": null,
+      "homepage": null,
+      "documentation": null,
+      "edition": "2021",
+      "links": null,
+      "default_run": null,
+      "rust_version": null
+    },
+    {
+      "name": "task-dev-only",
+      "version": "0.1.0",
+      "id": "path+file:///scrubbed/checkout/task-dev-only#0.1.0",
+      "license": null,
+      "license_file": null,
+      "description": null,
+      "source": null,
+      "dependencies": [],
+      "targets": [
+        {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "task_dev_only",
+          "src_path": "/scrubbed/checkout/task-dev-only/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        }
+      ],
+      "features": {},
+      "manifest_path": "/scrubbed/checkout/task-dev-only/Cargo.toml",
+      "metadata": null,
+      "publish": null,
+      "authors": [],
+      "categories": [],
+      "keywords": [],
+      "readme": null,
+      "repository": null,
+      "homepage": null,
+      "documentation": null,
+      "edition": "2021",
+      "links": null,
+      "default_run": null,
+      "rust_version": null
+    },
+    {
+      "name": "task-keyword",
+      "version": "0.1.0",
+      "id": "path+file:///scrubbed/checkout/task-keyword#0.1.0",
+      "license": null,
+      "license_file": null,
+      "description": null,
+      "source": null,
+      "dependencies": [],
+      "targets": [
+        {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "task_keyword",
+          "src_path": "/scrubbed/checkout/task-keyword/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        }
+      ],
+      "features": {},
+      "manifest_path": "/scrubbed/checkout/task-keyword/Cargo.toml",
+      "metadata": {
+        "ritual": {
+          "task": true
+        }
+      },
+      "publish": null,
+      "authors": [],
+      "categories": [],
+      "keywords": [],
+      "readme": null,
+      "repository": null,
+      "homepage": null,
+      "documentation": null,
+      "edition": "2021",
+      "links": null,
+      "default_run": null,
+      "rust_version": null
+    },
+    {
+      "name": "task-malformed",
+      "version": "0.1.0",
+      "id": "path+file:///scrubbed/checkout/task-malformed#0.1.0",
+      "license": null,
+      "license_file": null,
+      "description": null,
+      "source": null,
+      "dependencies": [],
+      "targets": [
+        {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "task_malformed",
+          "src_path": "/scrubbed/checkout/task-malformed/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        }
+      ],
+      "features": {},
+      "manifest_path": "/scrubbed/checkout/task-malformed/Cargo.toml",
+      "metadata": {
+        "ritual": {
+          "task": "true"
+        }
+      },
+      "publish": null,
+      "authors": [],
+      "categories": [],
+      "keywords": [],
+      "readme": null,
+      "repository": null,
+      "homepage": null,
+      "documentation": null,
+      "edition": "2021",
+      "links": null,
+      "default_run": null,
+      "rust_version": null
+    },
+    {
+      "name": "task-null",
+      "version": "0.1.0",
+      "id": "path+file:///scrubbed/checkout/task-null#0.1.0",
+      "license": null,
+      "license_file": null,
+      "description": null,
+      "source": null,
+      "dependencies": [],
+      "targets": [
+        {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "task_null",
+          "src_path": "/scrubbed/checkout/task-null/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        }
+      ],
+      "features": {},
+      "manifest_path": "/scrubbed/checkout/task-null/Cargo.toml",
+      "metadata": null,
+      "publish": null,
+      "authors": [],
+      "categories": [],
+      "keywords": [],
+      "readme": null,
+      "repository": null,
+      "homepage": null,
+      "documentation": null,
+      "edition": "2021",
+      "links": null,
+      "default_run": null,
+      "rust_version": null
+    },
+    {
+      "name": "task-renamed-source",
+      "version": "0.1.0",
+      "id": "path+file:///scrubbed/checkout/task-renamed-source#0.1.0",
+      "license": null,
+      "license_file": null,
+      "description": null,
+      "source": null,
+      "dependencies": [],
+      "targets": [
+        {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "task_renamed_source",
+          "src_path": "/scrubbed/checkout/task-renamed-source/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        }
+      ],
+      "features": {},
+      "manifest_path": "/scrubbed/checkout/task-renamed-source/Cargo.toml",
+      "metadata": {
+        "ritual": {
+          "task": true
+        }
+      },
+      "publish": null,
+      "authors": [],
+      "categories": [],
+      "keywords": [],
+      "readme": null,
+      "repository": null,
+      "homepage": null,
+      "documentation": null,
+      "edition": "2021",
+      "links": null,
+      "default_run": null,
+      "rust_version": null
+    },
+    {
+      "name": "task-true",
+      "version": "0.1.0",
+      "id": "path+file:///scrubbed/checkout/task-true#0.1.0",
+      "license": null,
+      "license_file": null,
+      "description": null,
+      "source": null,
+      "dependencies": [],
+      "targets": [
+        {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "task_true",
+          "src_path": "/scrubbed/checkout/task-true/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        }
+      ],
+      "features": {},
+      "manifest_path": "/scrubbed/checkout/task-true/Cargo.toml",
+      "metadata": {
+        "ritual": {
+          "task": true
+        }
+      },
+      "publish": null,
+      "authors": [],
+      "categories": [],
+      "keywords": [],
+      "readme": null,
+      "repository": null,
+      "homepage": null,
+      "documentation": null,
+      "edition": "2021",
+      "links": null,
+      "default_run": null,
+      "rust_version": null
+    }
+  ],
+  "workspace_members": [
+    "path+file:///scrubbed/checkout/cli#demo-ritual@0.0.0",
+    "path+file:///scrubbed/checkout/task-keyword#0.1.0",
+    "path+file:///scrubbed/checkout/task-renamed-source#0.1.0",
+    "path+file:///scrubbed/checkout/task-malformed#0.1.0",
+    "path+file:///scrubbed/checkout/task-null#0.1.0",
+    "path+file:///scrubbed/checkout/task-true#0.1.0",
+    "path+file:///scrubbed/checkout/task-dev-only#0.1.0"
+  ],
+  "workspace_default_members": [
+    "path+file:///scrubbed/checkout/cli#demo-ritual@0.0.0",
+    "path+file:///scrubbed/checkout/task-keyword#0.1.0",
+    "path+file:///scrubbed/checkout/task-renamed-source#0.1.0",
+    "path+file:///scrubbed/checkout/task-malformed#0.1.0",
+    "path+file:///scrubbed/checkout/task-null#0.1.0",
+    "path+file:///scrubbed/checkout/task-true#0.1.0",
+    "path+file:///scrubbed/checkout/task-dev-only#0.1.0"
+  ],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///scrubbed/checkout/cli#demo-ritual@0.0.0",
+        "dependencies": [
+          "path+file:///scrubbed/checkout/task-dev-only#0.1.0",
+          "path+file:///scrubbed/checkout/task-keyword#0.1.0",
+          "path+file:///scrubbed/checkout/task-malformed#0.1.0",
+          "path+file:///scrubbed/checkout/task-null#0.1.0",
+          "path+file:///scrubbed/checkout/task-renamed-source#0.1.0",
+          "path+file:///scrubbed/checkout/task-true#0.1.0"
+        ],
+        "deps": [
+          {
+            "name": "task_dev_only",
+            "pkg": "path+file:///scrubbed/checkout/task-dev-only#0.1.0",
+            "dep_kinds": [
+              {
+                "kind": "dev",
+                "target": null
+              }
+            ]
+          },
+          {
+            "name": "move",
+            "pkg": "path+file:///scrubbed/checkout/task-keyword#0.1.0",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          },
+          {
+            "name": "task_malformed",
+            "pkg": "path+file:///scrubbed/checkout/task-malformed#0.1.0",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          },
+          {
+            "name": "task_null",
+            "pkg": "path+file:///scrubbed/checkout/task-null#0.1.0",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          },
+          {
+            "name": "renamed",
+            "pkg": "path+file:///scrubbed/checkout/task-renamed-source#0.1.0",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          },
+          {
+            "name": "task_true",
+            "pkg": "path+file:///scrubbed/checkout/task-true#0.1.0",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          }
+        ],
+        "features": []
+      },
+      {
+        "id": "path+file:///scrubbed/checkout/task-dev-only#0.1.0",
+        "dependencies": [],
+        "deps": [],
+        "features": []
+      },
+      {
+        "id": "path+file:///scrubbed/checkout/task-keyword#0.1.0",
+        "dependencies": [],
+        "deps": [],
+        "features": []
+      },
+      {
+        "id": "path+file:///scrubbed/checkout/task-malformed#0.1.0",
+        "dependencies": [],
+        "deps": [],
+        "features": []
+      },
+      {
+        "id": "path+file:///scrubbed/checkout/task-null#0.1.0",
+        "dependencies": [],
+        "deps": [],
+        "features": []
+      },
+      {
+        "id": "path+file:///scrubbed/checkout/task-renamed-source#0.1.0",
+        "dependencies": [],
+        "deps": [],
+        "features": []
+      },
+      {
+        "id": "path+file:///scrubbed/checkout/task-true#0.1.0",
+        "dependencies": [],
+        "deps": [],
+        "features": []
+      }
+    ],
+    "root": null
+  },
+  "target_directory": "/scrubbed/checkout/target",
+  "build_directory": "/scrubbed/checkout/target",
+  "version": 1,
+  "workspace_root": "/scrubbed/checkout",
+  "metadata": null
+}

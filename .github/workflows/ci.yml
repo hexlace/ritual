@@ -1,0 +1,163 @@
+# Ritual CI — one independent job per check:
+#
+#   format   — cargo fmt --all -- --check
+#   clippy   — cargo clippy --workspace --all-targets -- -D warnings
+#   test     — cargo test --workspace
+#   doc      — cargo doc --workspace --no-deps, with rustdoc warnings fatal
+#   package  — cargo package --workspace: every crate packages and builds from
+#              its package alone, as crates.io would receive it
+#   msrv     — cargo test on the oldest toolchain `rust-version` declares
+#
+# Nothing here `needs` anything else, and nothing caches: a cold build is fast
+# enough that a shared cache's invalidation and poisoning risks cost more than
+# it saves.
+#
+# The `test` job also builds temporary Cargo projects: the integration tests in
+# crates/rituals-cli/tests/ scaffold real projects with `ritual new`/`create`/
+# `add` and build them, each into a target directory of its own, so no test can
+# run a binary another test built. Those projects carry no lockfile and resolve
+# their dependencies from crates.io.
+
+name: CI
+
+on:
+  # A push to a PR branch already triggers `pull_request` below; scoping `push`
+  # to `main` keeps post-merge validation without running the whole workflow
+  # twice per PR push.
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["**"]
+
+# Cancel superseded runs on rapid re-pushes to the same ref — but never on
+# `main`, so every merge is fully validated to completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Least-privilege GITHUB_TOKEN — only checkout (contents: read) is needed.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  format:
+    name: format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        # rust-toolchain.toml pins the channel and components, and with no
+        # toolchain argument `rustup toolchain install` installs exactly what
+        # that file names. It is installed explicitly because rustup has
+        # deprecated installing a missing toolchain as a side effect of other
+        # commands.
+        # The second command prints what is active, so the log records which
+        # compiler the gate ran under. Every job below repeats this step.
+        run: |
+          rustup toolchain install --no-self-update
+          rustup show active-toolchain
+
+      - name: fmt --check
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update
+          rustup show active-toolchain
+
+      - name: clippy -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update
+          rustup show active-toolchain
+
+      - name: test
+        run: cargo test --workspace
+
+  doc:
+    name: doc
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update
+          rustup show active-toolchain
+
+      - name: doc
+        # A rustdoc warning, such as a broken intra-doc link, fails the job
+        # rather than scrolling past in the log.
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --no-deps
+
+  package:
+    name: package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update
+          rustup show active-toolchain
+
+      - name: package
+        # Packages every crate and builds each one from its package alone,
+        # with its sibling crates' packages standing in for crates.io. A path
+        # dependency without a version, or a file a crate needs that its
+        # package leaves out, fails here rather than at publish time.
+        run: cargo package --workspace --locked
+
+  msrv:
+    name: msrv
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchains
+        # The pinned toolchain reads `rust-version` out of the manifests, so the
+        # version checked here is always the one the crates declare; every
+        # member inherits it from the workspace, and a member that stopped
+        # agreeing fails this step. `1.85` means 1.85.0 to Cargo but the newest
+        # 1.85.x to rustup, so a two-part version gets its `.0` back first.
+        run: |
+          rustup toolchain install --no-self-update
+          msrv=$(cargo metadata --no-deps --format-version 1 | jq -er '
+            [.packages[].rust_version] | unique
+            | if length == 1 then .[0] else error("members disagree on rust-version: \(.)") end
+            | if (split(".") | length) == 2 then . + ".0" else . end')
+          rustup toolchain install "$msrv" --profile minimal --no-self-update
+          echo "MSRV=$msrv" >> "$GITHUB_ENV"
+
+      - name: test on the minimum supported toolchain
+        # The whole suite, not only a check: the story tests scaffold and
+        # build projects with this same toolchain, which is what a user on the
+        # minimum version does.
+        run: cargo "+$MSRV" test --workspace --locked

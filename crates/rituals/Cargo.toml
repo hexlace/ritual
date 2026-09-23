@@ -1,0 +1,33 @@
+[package]
+name = "rituals"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories = ["command-line-interface", "development-tools"]
+description = "Ritual — what a task is, and how a composed command line dispatches to one."
+readme = "readme.md"
+
+[dependencies]
+# clap is the one dependency a task crate pays for. The framework parses
+# arguments and answers `--help` for every task, so something has to own that,
+# and re-exporting one clap from here means a task crate declares no parser
+# dependency of its own and cannot end up with a second version. The
+# alternative is owning an argument parser, which is a larger and less correct
+# thing than owning this dependency.
+# default-features = false drops colour and terminal-width handling, which this
+# framework does not use; every feature below is named because it is used,
+# rather than left to whatever clap's defaults become.
+clap = { version = "4", default-features = false, features = [
+    "std",
+    "derive",           # a task author declares arguments with #[derive(Args)]
+    "help",             # --help
+    "usage",            # the usage line in an error
+    "error-context",    # "For more information, try '--help'"
+    "suggestions",      # "a similar subcommand exists"
+] }
+
+[lints]
+workspace = true

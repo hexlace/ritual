@@ -1,0 +1,22 @@
+[package]
+name = "rituals-core-regenerate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories = ["command-line-interface", "development-tools"]
+description = "Ritual — rewrite the generated task list from the imports."
+readme = "readme.md"
+
+[dependencies]
+rituals.workspace = true
+rituals-compose.workspace = true
+
+[package.metadata.ritual]
+task = true
+
+# See the note on this table in tasks/add/Cargo.toml.
+[lints]
+workspace = true

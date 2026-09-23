@@ -1,0 +1,28 @@
+[package]
+name = "rituals-core-new"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories = ["command-line-interface", "development-tools"]
+description = "Ritual — scaffold a project with a command line of its own."
+readme = "readme.md"
+
+[dependencies]
+rituals.workspace = true
+rituals-compose.workspace = true
+
+[dev-dependencies]
+# The oracle for this crate's own TOML basic-string escaper: parsing what it
+# renders, rather than re-deriving the same escape table in a second,
+# hand-written check.
+toml_edit.workspace = true
+
+[package.metadata.ritual]
+task = true
+
+# See the note on this table in tasks/add/Cargo.toml.
+[lints]
+workspace = true

@@ -1,0 +1,27 @@
+[package]
+name = "rituals-core-add"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories = ["command-line-interface", "development-tools"]
+description = "Ritual — scaffold a task crate in this project, import it, and regenerate."
+readme = "readme.md"
+
+[dependencies]
+rituals.workspace = true
+rituals-compose.workspace = true
+
+[package.metadata.ritual]
+task = true
+
+# A task crate `add` or `create` scaffolds does not carry this table:
+# inheriting an unknown project's lint table would fail that project's own
+# gate, since a scaffolded handler that always returns Ok(()) trips
+# clippy::unnecessary_wraps under pedantic. Ritual's own task crates are held
+# to this workspace's standard, so each carries the table by hand, and its
+# handler has a real body that can fail.
+[lints]
+workspace = true

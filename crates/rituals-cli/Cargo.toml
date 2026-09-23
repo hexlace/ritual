@@ -1,0 +1,38 @@
+[package]
+name = "rituals-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories = ["command-line-utilities", "development-tools"]
+description = "Give every project its own CLI, built from tasks that are just crates."
+readme = "readme.md"
+
+[[bin]]
+name = "ritual"
+path = "src/main.rs"
+
+[dependencies]
+rituals.workspace = true
+ritual.workspace = true
+
+[package.metadata.ritual]
+tasks = ["ritual"]
+
+[dev-dependencies]
+# See the comment on this dependency in the workspace root manifest. The
+# story tests read and edit the manifests ritual writes with it, the way Cargo
+# would read them.
+toml_edit.workspace = true
+serde_json.workspace = true
+
+# The system allocator, not a faster one: this binary's lifetime is dominated
+# by a `cargo metadata` subprocess and a handful of file writes, not
+# allocation. Its `src/main.rs` is generated, by the same renderer that writes
+# every project's composed command line, so declaring a global allocator here
+# would declare one in all of them — which is also why this note lives in the
+# manifest rather than beside the code.
+[lints]
+workspace = true

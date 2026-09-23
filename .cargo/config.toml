@@ -1,0 +1,5 @@
+# `cargo ritual <task>` runs this project's own composed command line, from
+# anywhere inside the checkout. Nothing has to be installed: the alias builds
+# the crate on demand, the way a project-local task runner already does.
+[alias]
+ritual = ["run", "--package", "rituals-cli", "--"]

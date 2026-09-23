@@ -1,0 +1,28 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# Editor
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.*
+
+# Obsidian (.docs/ is a vault; per-person state stays local)
+.docs/.obsidian/workspace.json
+.docs/.obsidian/workspace-mobile.json

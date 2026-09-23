@@ -1,0 +1,22 @@
+[package]
+name = "rituals-core-create"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories = ["command-line-interface", "development-tools"]
+description = "Ritual — scaffold a task crate on its own, for a project to import later."
+readme = "readme.md"
+
+[dependencies]
+rituals.workspace = true
+rituals-compose.workspace = true
+
+[package.metadata.ritual]
+task = true
+
+# See the note on this table in tasks/add/Cargo.toml.
+[lints]
+workspace = true

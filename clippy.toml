@@ -1,0 +1,6 @@
+# A test's `.expect("…")` states a fact about its own fixture, and a failed
+# expectation is the test failing, which is what a test is for. This allows it
+# in `#[test]` functions and `#[cfg(test)]` modules only: production code, and a
+# helper in `tests/` outside a `#[test]` function, are still held to the
+# workspace lints, which refuse `expect`.
+allow-expect-in-tests = true

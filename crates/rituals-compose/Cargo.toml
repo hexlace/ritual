@@ -1,0 +1,25 @@
+[package]
+name = "rituals-compose"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories = ["command-line-interface", "development-tools"]
+description = "Ritual — how a composed command line's generated file and manifests are maintained."
+readme = "readme.md"
+
+[dependencies]
+rituals.workspace = true
+# cargo metadata speaks JSON and nothing else, and it is the only thing that can
+# answer what a dependency resolved to and what that crate declares about itself.
+# The alternative is a hand-written JSON reader, which is a parser to own forever
+# for one subprocess's output.
+serde = { version = "1", default-features = false, features = ["std", "derive"] }
+serde_json.workspace = true
+# See the comment on this dependency in the workspace root manifest.
+toml_edit.workspace = true
+
+[lints]
+workspace = true
