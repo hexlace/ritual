@@ -158,12 +158,15 @@ pub(crate) fn write_text(path: &Path, contents: &str) -> TestOutcome {
 /// distinct across processes.
 static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// A directory under the system temp root that removes itself on drop.
+/// A directory, under the system temp root unless a test names another
+/// parent, that removes itself on drop.
 ///
 /// Every fixture a test needs — a scaffolded project, a hand-written crate
 /// standing in for an unmarked dependency, a working directory for an
-/// adversarial-name attempt — lives inside one of these, never inside this
-/// repository's own tree.
+/// adversarial-name attempt — lives inside one of these, never among this
+/// repository's own sources. The one kind created elsewhere holds a second
+/// name for a built binary, and sits beside that binary in its target
+/// directory; see [`TempDir::new_in`].
 pub(crate) struct TempDir {
     path: PathBuf,
 }
@@ -172,8 +175,22 @@ impl TempDir {
     /// Creates a fresh, empty directory named
     /// `ritual-tests-<prefix>-<pid>-<counter>` under the system temp root.
     pub(crate) fn new(prefix: &str) -> Outcome<Self> {
+        Self::new_in(&std::env::temp_dir(), prefix)
+    }
+
+    /// Creates a fresh, empty directory named
+    /// `ritual-tests-<prefix>-<pid>-<counter>` inside `parent`, for a fixture
+    /// that has to share a filesystem with something already on disk, such
+    /// as a hard link to a built binary.
+    pub(crate) fn new_in(parent: &Path, prefix: &str) -> Outcome<Self> {
+        assert!(
+            parent.is_absolute(),
+            "a temp dir's parent must be absolute, so the fixture does not \
+             depend on the current directory; got {}",
+            parent.display()
+        );
         let unique = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
+        let path = parent.join(format!(
             "ritual-tests-{prefix}-{}-{unique}",
             std::process::id()
         ));
