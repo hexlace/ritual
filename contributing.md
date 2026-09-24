@@ -71,6 +71,15 @@ A release takes three steps, and GitHub Actions does the work between them:
    If it fails partway, run it again: crates already on crates.io at that
    version are skipped.
 
+**Publish** runs as two jobs, so that no build script or proc macro ever runs
+where a crates.io token exists or could be minted. `verify` holds no
+credential: it checks that the tagged commit is on `main`, then runs
+`cargo xtask publish-plan`, which does every build a publish verifies. Then
+`publish` checks out that same commit, gets a token, and runs
+`cargo publish --no-verify`, which packages and uploads without compiling
+anything. Keep it that way: a step that compiles, including `cargo xtask`,
+never goes in the `publish` job.
+
 What changed in a release lives in its GitHub release, not in a file here.
 
 The workflows run `cargo xtask`, and so can you:
@@ -78,15 +87,18 @@ The workflows run `cargo xtask`, and so can you:
 ```sh
 cargo xtask bump v0.1.1            # what step 1 does to the tree
 cargo xtask verify-tag v0.1.1      # refuses unless the workspace is at v0.1.1
-cargo xtask publish v0.1.1 --dry-run
+cargo xtask publish-plan v0.1.1    # dry-runs the publish, prints the plan
 cargo xtask release-notes hexlace/ritual v0.1.1 <commit>   # needs `gh`
 ```
 
-`publish --dry-run` packages and builds every crate that is not yet on
-crates.io, without uploading anything, and it has to run on a committed tree.
-It checks the packages, not the registry: a version crates.io already has,
-such as a yanked one, shows up only as a warning, where a real publish
-refuses it.
+`publish-plan` asks crates.io which crates it already has at the tag's
+version, then packages and builds every other one without uploading
+anything, and it has to run on a committed tree. It prints the plan on
+stdout: a `publish=` line and an `exclude=` line, the form the workflow hands
+from one job to the next. The dry run checks the packages, not the registry:
+a version crates.io already has, such as a yanked one, shows up only as a
+warning, where a real publish refuses it. None of these commands uploads
+anything: only the workflow publishes.
 
 ## Running ritual from a checkout
 

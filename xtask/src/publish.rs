@@ -1,11 +1,20 @@
-//! `cargo xtask publish <tag> [--dry-run]`: publish every crate the tag
-//! releases, skipping any already on crates.io.
+//! `cargo xtask publish-plan <tag>`: work out which crates a publish of
+//! `<tag>` uploads, dry-run that publish, and print the plan.
 //!
-//! Skipping is what makes a failed run safe to run again. `cargo publish
-//! --workspace` publishes the members in dependency order and refuses a
-//! version crates.io already has, so after a run that published some crates
-//! and then failed, a plain re-run would stop at the first of them. This asks
-//! crates.io about each crate first and leaves out the ones it has.
+//! The upload itself is not done here, and nothing here ever holds a
+//! credential. A dry run compiles every crate it would upload, and each build
+//! script and proc macro compiled along the way runs with the environment it
+//! was started in. So `.github/workflows/publish.yml` runs this in a job that
+//! has no token and cannot mint one, and the job that can then runs
+//! `cargo publish --no-verify` with the plan's exclusions, which compiles
+//! nothing.
+//!
+//! Leaving out what crates.io already has is what makes a failed publish safe
+//! to run again. `cargo publish --workspace` publishes the members in
+//! dependency order and refuses a version crates.io already has, so after a
+//! run that published some crates and then failed, a plain re-run would stop
+//! at the first of them. This asks crates.io about each crate first and plans
+//! to leave out the ones it has.
 
 use std::error::Error;
 use std::fmt;
@@ -16,13 +25,6 @@ use serde_json::Value;
 use crate::process::{self, CommandError, Program};
 use crate::verify::{self, VerifyError};
 use crate::version::ReleaseTag;
-
-/// Whether to publish for real or only package and verify.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Mode {
-    Publish,
-    DryRun,
-}
 
 /// One workspace member, by the name and version it publishes under.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,14 +58,42 @@ impl Plan {
     fn excluded(&self) -> impl Iterator<Item = &Member> {
         self.already_published.iter().chain(&self.never_published)
     }
+
+    /// The plan as the publish job reads it: a `publish=` line naming the
+    /// members to upload and an `exclude=` line naming the members to pass
+    /// to `cargo publish --workspace` as `--exclude`, each a space-separated
+    /// list. Both lines are always present, and a list may be empty.
+    ///
+    /// The lines are in the `name=value` form a workflow step appends to
+    /// `$GITHUB_OUTPUT`. The job that reads them checks every name against
+    /// the crate-name grammar itself rather than trusting this, because the
+    /// job that writes them has run third-party build scripts by then.
+    pub(crate) fn outputs(&self) -> String {
+        format!(
+            "publish={}\nexclude={}\n",
+            spaced(self.to_publish.iter()),
+            spaced(self.excluded()),
+        )
+    }
 }
 
-/// Publishes every member the workspace under `root` releases at `tag`.
+/// The members' names, separated by single spaces.
+fn spaced<'a>(members: impl Iterator<Item = &'a Member>) -> String {
+    members
+        .map(|member| member.name.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Plans the publish of every member the workspace under `root` releases at
+/// `tag`, and dry-runs it.
 ///
 /// The tag is checked against the workspace version first, so a release
-/// whose tag and manifests disagree publishes nothing. What happened is
+/// whose tag and manifests disagree plans nothing. The dry run packages and
+/// compiles every member the plan uploads, exactly as `cargo publish` would
+/// verify them, and is skipped when there is nothing to upload. The plan is
 /// returned whether or not anything was left to publish.
-pub(crate) fn run(root: &Path, tag: &str, mode: Mode) -> Result<Plan, PublishError> {
+pub(crate) fn run(root: &Path, tag: &str) -> Result<Plan, PublishError> {
     let tag: ReleaseTag = verify::run(root, tag).map_err(PublishError::Verify)?;
     let metadata = process::query(
         Program::Cargo,
@@ -93,9 +123,9 @@ pub(crate) fn run(root: &Path, tag: &str, mode: Mode) -> Result<Plan, PublishErr
         // The reverse — skipping one that is not there — cannot happen,
         // since success means crates.io answered with it.
         //
-        // A dry run does not refuse a duplicate: `cargo publish --dry-run`
-        // only warns that the version exists. So a dry run checks that every
-        // crate packages and builds, not what crates.io already has.
+        // The dry run below does not refuse a duplicate: `cargo publish
+        // --dry-run` only warns that the version exists. So it checks that
+        // every crate packages and builds, not what crates.io already has.
         process::succeeds(
             Program::Cargo,
             root,
@@ -107,12 +137,9 @@ pub(crate) fn run(root: &Path, tag: &str, mode: Mode) -> Result<Plan, PublishErr
     if plan.to_publish.is_empty() {
         return Ok(plan);
     }
-    let mut arguments = vec!["publish", "--workspace", "--locked"];
+    let mut arguments = vec!["publish", "--workspace", "--locked", "--dry-run"];
     for member in plan.excluded() {
         arguments.extend(["--exclude", member.name.as_str()]);
-    }
-    if mode == Mode::DryRun {
-        arguments.push("--dry-run");
     }
     process::run(Program::Cargo, root, &arguments).map_err(PublishError::Cargo)?;
     Ok(plan)
@@ -297,6 +324,63 @@ mod tests {
         let plan = plan(members, |_| Ok::<_, Infallible>(true)).expect("infallible");
         assert!(plan.to_publish.is_empty());
         assert_eq!(names(&plan.already_published), RELEASED);
+    }
+
+    /// Reads `outputs` back the way the publish job does: two lines, each
+    /// `key=` then names separated by single spaces.
+    fn read_outputs(outputs: &str) -> [(String, Vec<String>); 2] {
+        let lines: Vec<&str> = outputs.split_terminator('\n').collect();
+        assert_eq!(lines.len(), 2, "exactly two lines: {outputs:?}");
+        [lines[0], lines[1]].map(|line| {
+            let (key, value) = line.split_once('=').expect("each line is key=value");
+            let mut names: Vec<String> = value.split(' ').map(str::to_string).collect();
+            names.retain(|name| !name.is_empty());
+            names.sort_unstable();
+            (key.to_string(), names)
+        })
+    }
+
+    #[test]
+    fn the_outputs_name_what_to_upload_and_what_to_exclude() {
+        let members = members(&this_workspace()).expect("the metadata has the expected shape");
+        let plan = plan(members, |member| {
+            Ok::<_, Infallible>(member.name != "rituals-cli" && member.name != "rituals-core-new")
+        })
+        .expect("infallible");
+        let outputs = plan.outputs();
+        assert!(
+            !outputs.contains("  "),
+            "one space between names: {outputs:?}"
+        );
+        let [(publish, to_publish), (exclude, excluded)] = read_outputs(&outputs);
+        assert_eq!((publish.as_str(), exclude.as_str()), ("publish", "exclude"));
+        assert_eq!(to_publish, ["rituals-cli", "rituals-core-new"]);
+        assert_eq!(
+            excluded,
+            [
+                "rituals",
+                "rituals-compose",
+                "rituals-core",
+                "rituals-core-add",
+                "rituals-core-create",
+                "rituals-core-regenerate",
+                "xtask",
+            ]
+        );
+    }
+
+    #[test]
+    fn nothing_to_upload_still_writes_both_lines() {
+        let members = members(&this_workspace()).expect("the metadata has the expected shape");
+        let plan = plan(members, |_| Ok::<_, Infallible>(true)).expect("infallible");
+        let outputs = plan.outputs();
+        assert!(outputs.starts_with("publish=\n"), "{outputs:?}");
+        let [_, (_, excluded)] = read_outputs(&outputs);
+        assert_eq!(
+            excluded.len(),
+            RELEASED.len() + 1,
+            "every member, xtask included"
+        );
     }
 
     #[test]

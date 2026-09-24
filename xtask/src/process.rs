@@ -35,12 +35,17 @@ impl Program {
     }
 }
 
-/// Runs `program` with `arguments` in `root`, its output passed straight
-/// through to this process's own, and refuses unless it succeeds.
+/// Runs `program` with `arguments` in `root`, all of its output passed
+/// through to this process's stderr, and refuses unless it succeeds.
+///
+/// Stdout too goes to stderr, so that this process's stdout carries only
+/// what a command prints for another program to read, such as the plan
+/// `publish-plan` hands to the publish workflow.
 pub(crate) fn run(program: Program, root: &Path, arguments: &[&str]) -> Result<(), CommandError> {
     let status = Command::new(program.path())
         .args(arguments)
         .current_dir(root)
+        .stdout(std::io::stderr())
         .status()
         .map_err(|error| CommandError::spawn(program, arguments, error))?;
     if status.success() {
