@@ -1,0 +1,90 @@
+# Release draft — drafts the GitHub release when a release pull request merges.
+#
+# A release pull request is one release.yml opened: its branch is
+# `release/<tag>`, in this repository. When one merges, this:
+#
+#   1. checks out the merge commit and runs `cargo xtask verify-tag <tag>`,
+#      which refuses unless the workspace there is at exactly the tag's
+#      version;
+#   2. refuses if a release named <tag> already exists, draft or not;
+#   3. writes the body with `cargo xtask release-notes`: a marked place for
+#      prose at the top, then every pull request merged since the previous
+#      release (GitHub's generated notes, configured by .github/release.yml),
+#      then everyone who authored or co-authored a commit in that range;
+#   4. creates a draft release named <tag> that targets the merge commit.
+#
+# A draft has no tag yet. Publishing it creates the tag at the merge commit,
+# and that publication runs publish.yml.
+#
+# The release is found by its branch name, not its title: a title can be
+# edited, and the branch is what release.yml made.
+
+name: Release draft
+
+on:
+  pull_request:
+    types: [closed]
+    branches: ["main"]
+
+concurrency:
+  group: release-draft
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  draft:
+    name: draft the release
+    # Merged, not merely closed; from a `release/v…` branch; and from this
+    # repository, never a fork, whatever its branch is called.
+    if: >-
+      github.event.pull_request.merged == true
+      && startsWith(github.event.pull_request.head.ref, 'release/v')
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the draft release
+    env:
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      # The commit the merge put on main: for a squash merge, the squash
+      # commit itself.
+      MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout the merge commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update
+          rustup show active-toolchain
+
+      - name: Check the merged version matches the branch
+        run: |
+          tag="${HEAD_REF#release/}"
+          cargo xtask verify-tag "$tag"
+          echo "TAG=${tag}" >> "$GITHUB_ENV"
+
+      - name: Refuse a release that already exists
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::a release named ${TAG} already exists"
+            exit 1
+          fi
+
+      - name: Write the release body
+        run: |
+          cargo xtask release-notes "$GITHUB_REPOSITORY" "$TAG" "$MERGE_COMMIT" \
+            > "${RUNNER_TEMP}/notes.md"
+
+      - name: Create the draft release
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
+            --target "$MERGE_COMMIT" --title "$TAG" --notes-file "${RUNNER_TEMP}/notes.md"
