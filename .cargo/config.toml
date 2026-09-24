@@ -3,3 +3,6 @@
 # the crate on demand, the way a project-local task runner already does.
 [alias]
 ritual = ["run", "--package", "rituals-cli", "--"]
+# `cargo xtask <command>` runs this repository's release automation; see
+# xtask/src/main.rs for the commands.
+xtask = ["run", "--package", "xtask", "--quiet", "--"]

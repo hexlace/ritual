@@ -1,0 +1,19 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Ritual's release automation: bump, check and publish the workspace version."
+# Tooling for this repository, run as `cargo xtask`. It is a member so the
+# gate builds, lints and tests it like everything else, and it is never
+# published: nothing outside this checkout has a use for it.
+publish = false
+
+[dependencies]
+toml_edit.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
