@@ -43,14 +43,50 @@ has no lockfile, it needs network access or a warm Cargo registry cache.
 
 ## Releasing
 
-Every crate here is released at the workspace version, together, with
-`cargo publish --workspace`. `new` writes one version for both `rituals` and
-`rituals-core` into a project, so a release of one without the other leaves
-new projects asking for a version that does not exist. Every member inherits
-`version.workspace = true`, every internal requirement in the root
-`[workspace.dependencies]` is that version, and
+Ritual follows [Semantic Versioning](https://semver.org/). Every crate here
+is released at the workspace version, together. `new` writes one version for
+both `rituals` and `rituals-core` into a project, so a release of one without
+the other leaves new projects asking for a version that does not exist. Every
+member inherits `version.workspace = true`, every internal requirement in the
+root `[workspace.dependencies]` is that version, and
 `crates/rituals-cli/tests/every_crate_releases_at_the_workspace_version.rs`
-fails if either stops being true.
+fails if either stops being true. The one member that is never published,
+`xtask`, inherits the version too.
+
+A release takes three steps, and GitHub Actions does the work between them:
+
+1. Run the **Release** workflow from the Actions tab, on `main`, with the tag:
+   `v` then `MAJOR.MINOR.PATCH`, such as `v0.1.1`. It refuses a tag that is
+   not newer than `main`'s version. It moves every version site and
+   `Cargo.lock`, commits that to the branch `release/<tag>` as
+   `chore(release): <tag>`, and opens a pull request. A workflow opened the
+   pull request, so its CI waits for approval: approve the run, or close and
+   reopen the pull request.
+2. Merge the pull request. **Release draft** then drafts the GitHub release
+   `<tag>` at the merge commit. Its body has a marked place for prose at the
+   top, then every pull request merged since the previous release, then
+   everyone who authored or co-authored a commit.
+3. Write the prose and publish the release. Publishing creates the tag, and
+   **Publish** publishes every crate to crates.io through trusted publishing.
+   If it fails partway, run it again: crates already on crates.io at that
+   version are skipped.
+
+What changed in a release lives in its GitHub release, not in a file here.
+
+The workflows run `cargo xtask`, and so can you:
+
+```sh
+cargo xtask bump v0.1.1            # what step 1 does to the tree
+cargo xtask verify-tag v0.1.1      # refuses unless the workspace is at v0.1.1
+cargo xtask publish v0.1.1 --dry-run
+cargo xtask release-notes hexlace/ritual v0.1.1 <commit>   # needs `gh`
+```
+
+`publish --dry-run` packages and builds every crate that is not yet on
+crates.io, without uploading anything, and it has to run on a committed tree.
+It checks the packages, not the registry: a version crates.io already has,
+such as a yanked one, shows up only as a warning, where a real publish
+refuses it.
 
 ## Running ritual from a checkout
 

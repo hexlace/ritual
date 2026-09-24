@@ -12,6 +12,7 @@ principles themselves are in [design.md](design.md).
 | `rituals-core-add`, `-regenerate`, `-new`, `-create` | the four management tasks | `rituals`, `rituals-compose` |
 | `rituals-core` | the bundle of those four | `rituals`, the four leaves |
 | `rituals-cli` | the `ritual` binary | `rituals`, `rituals-core` |
+| `xtask` | release tooling, never published | — |
 
 ## `rituals` — the floor
 
@@ -80,3 +81,11 @@ The command line of this repository: `rituals` plus `rituals-core` mounted
 under `ritual`, with the binary `ritual`, so the bundle is flattened. Its
 `src/main.rs` is its generated file, rewritten by `cargo ritual regenerate`
 and never edited by hand. The global tool is a command line like any other.
+
+## `xtask` — release tooling, never published
+
+`cargo xtask` bumps the workspace version, checks a tag against it, writes a
+draft release's body and publishes the crates; the release workflows in
+`.github/workflows/` are thin wrappers around it. It is a workspace member so
+the gate builds and tests it, and `publish = false` keeps it off crates.io.
+Nothing depends on it, and it depends on none of ritual's crates.

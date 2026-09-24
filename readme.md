@@ -239,7 +239,8 @@ project: use `cargo ritual add`.
 - [`.docs/design.md`](.docs/design.md) explains why ritual is shaped the way
   it is, and [`.docs/crates.md`](.docs/crates.md) shows how its crates divide
   the work.
-- [`changelog.md`](changelog.md) lists what changed in each release.
+- [Releases](https://github.com/hexlace/ritual/releases) lists what changed
+  in each release.
 - [`contributing.md`](contributing.md) covers working on ritual itself.
 
 ## Contributing
@@ -247,7 +248,10 @@ project: use `cargo ritual add`.
 Contributions are welcome. The process for them is being worked out as of
 September 22, 2026, and issues and pull requests are expected to open soon.
 
-## Rust version
+## Versions
+
+Ritual follows [Semantic Versioning](https://semver.org/), and every one of
+its crates is released at the same version, together.
 
 Ritual needs a recent stable Rust. The minimum supported version is the
 `rust-version` each crate declares. Raising it is not a breaking change, and
