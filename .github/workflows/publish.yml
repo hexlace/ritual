@@ -1,12 +1,15 @@
 # Publish — publishes every crate to crates.io when a GitHub release is
 # published.
 #
-#   1. `cargo xtask verify-tag <tag>` refuses unless the workspace at the
+#   1. refuses unless the tagged commit is on `main`: a release can be
+#      published on a tag at any commit, and only what `main` holds was
+#      reviewed;
+#   2. `cargo xtask verify-tag <tag>` refuses unless the workspace at the
 #      tagged commit is at exactly the tag's version;
-#   2. crates.io trusted publishing exchanges this job's GitHub OIDC token for
+#   3. crates.io trusted publishing exchanges this job's GitHub OIDC token for
 #      a crates.io token that lasts 30 minutes and is revoked when the job
 #      ends: https://crates.io/docs/trusted-publishing
-#   3. `cargo xtask publish <tag>` runs `cargo publish --workspace`, leaving
+#   4. `cargo xtask publish <tag>` runs `cargo publish --workspace`, leaving
 #      out every crate crates.io already has at this version, so a run that
 #      failed partway can be run again.
 #
@@ -46,12 +49,30 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.release.tag_name }}
+          # The whole history, so the check below can walk from main back to
+          # the tagged commit.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Install Rust toolchain
         run: |
           rustup toolchain install --no-self-update
           rustup show active-toolchain
+
+      - name: Refuse a tagged commit that is not on main
+        # The `crates-io` environment's tag rule restricts the tag's name, not
+        # the commit it points at. Before any token exists, like the check
+        # after it. Fetched from the public URL, since git keeps no
+        # credential here.
+        run: |
+          git fetch --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" \
+            "+refs/heads/main:refs/remotes/origin/main"
+          tagged=$(git rev-parse HEAD)
+          if ! git merge-base --is-ancestor "$tagged" origin/main; then
+            echo "::error::${TAG} points at ${tagged}, which is not on main; only a commit main holds is published"
+            exit 1
+          fi
+          echo "${TAG} points at ${tagged}, which is on main"
 
       - name: Check the tag matches the workspace version
         # Before any token exists, so a mismatched release never gets one.
