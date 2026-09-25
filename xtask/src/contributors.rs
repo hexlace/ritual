@@ -1,20 +1,20 @@
-//! `cargo xtask release-notes <owner/repo> <tag> <target>`: the body a draft
-//! release starts with.
+//! `cargo xtask release-contributors <owner/repo> <tag> <target> <dir>`: the
+//! part of a draft release's body that needs only read access.
 //!
-//! The body has three parts: a marked place at the top for the release's
+//! A draft's body has four parts: a marked place at the top for the release's
 //! prose, which a person writes before publishing; GitHub's generated list of
 //! every pull request merged since the previous release; and every person who
-//! authored or co-authored a commit in that range.
+//! authored or co-authored a commit in that range. This builds the last part,
+//! and finds the previous release that bounds the range. release-draft.yml
+//! assembles the rest, because GitHub's generate-notes endpoint needs a token
+//! that can write, and a job holding one compiles nothing.
 //!
-//! The last part is built here rather than taken from GitHub's notes, whose
-//! "New Contributors" section names only people whose first pull request is
-//! in the release, and names nobody who co-authored a commit without opening
-//! the pull request. `Commit.authors` in GitHub's GraphQL API lists a commit's
-//! author and every `Co-authored-by` trailer, each resolved to an account
-//! where GitHub can match the email.
-//!
-//! Everything here reads: the generate-notes endpoint is a POST, but GitHub
-//! saves nothing it produces.
+//! The contributors are built here rather than taken from GitHub's notes,
+//! whose "New Contributors" section names only people whose first pull
+//! request is in the release, and names nobody who co-authored a commit
+//! without opening the pull request. `Commit.authors` in GitHub's GraphQL API
+//! lists a commit's author and every `Co-authored-by` trailer, each resolved
+//! to an account where GitHub can match the email.
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -29,18 +29,28 @@ use crate::version::{ParseTagError, ReleaseTag};
 /// The most commit IDs GitHub's GraphQL `nodes` field takes in one query.
 const GRAPHQL_NODES_PER_QUERY: usize = 100;
 
-/// Writes the draft body for `tag`, a release of `target`, in `repository`
-/// (`owner/name`).
+/// What the read-only half of a draft release hands on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Credits {
+    /// The release the range starts after, or `None` for a first release.
+    pub(crate) previous: Option<ReleaseTag>,
+    /// The body's Contributors section, heading included.
+    pub(crate) section: String,
+}
+
+/// Finds the previous release for `tag`, a release of `target`, in
+/// `repository` (`owner/name`), and the Contributors section for the commits
+/// since it.
 ///
 /// The range starts at the highest published release below `tag`, or at the
-/// first commit when there is none.
+/// first commit when there is none. Every call here reads.
 pub(crate) fn run(
     root: &Path,
     repository: &str,
     tag: &str,
     target: &str,
-) -> Result<String, NotesError> {
-    let tag = ReleaseTag::parse(tag).map_err(NotesError::Tag)?;
+) -> Result<Credits, CreditsError> {
+    let tag = ReleaseTag::parse(tag).map_err(CreditsError::Tag)?;
     let published = gh(
         root,
         &[
@@ -52,26 +62,6 @@ pub(crate) fn run(
         ],
     )?;
     let previous = previous_release(published.lines(), tag);
-
-    let mut generate = vec![
-        "api".to_string(),
-        "--method".to_string(),
-        "POST".to_string(),
-        format!("repos/{repository}/releases/generate-notes"),
-        "-f".to_string(),
-        format!("tag_name={tag}"),
-        "-f".to_string(),
-        format!("target_commitish={target}"),
-        "--jq".to_string(),
-        ".body".to_string(),
-    ];
-    if let Some(previous) = previous {
-        generate.extend(["-f".to_string(), format!("previous_tag_name={previous}")]);
-    }
-    let generated = gh(
-        root,
-        &generate.iter().map(String::as_str).collect::<Vec<_>>(),
-    )?;
 
     let range = previous.map_or_else(
         || format!("repos/{repository}/commits?sha={target}&per_page=100"),
@@ -102,20 +92,23 @@ pub(crate) fn run(
         )?;
         responses.push(
             serde_json::from_str::<Value>(&response)
-                .map_err(|_| NotesError::Response("GraphQL printed invalid JSON"))?,
+                .map_err(|_| CreditsError::Response("GraphQL printed invalid JSON"))?,
         );
     }
     let contributors = contributors(&responses)?;
 
-    Ok(compose(generated.trim_end(), previous, &contributors))
+    Ok(Credits {
+        previous,
+        section: section(previous, &contributors),
+    })
 }
 
 /// Every author of each commit, co-authors included.
 const COMMIT_AUTHORS_QUERY: &str = "query($ids: [ID!]!) { nodes(ids: $ids) { \
      ... on Commit { oid authors(first: 100) { nodes { name user { login } } } } } }";
 
-fn gh(root: &Path, arguments: &[&str]) -> Result<String, NotesError> {
-    process::query(Program::Gh, root, arguments).map_err(NotesError::Gh)
+fn gh(root: &Path, arguments: &[&str]) -> Result<String, CreditsError> {
+    process::query(Program::Gh, root, arguments).map_err(CreditsError::Gh)
 }
 
 /// The highest release in `published` below `tag`. Tags that are not release
@@ -166,26 +159,26 @@ impl fmt::Display for Contributor {
 /// Bots are left out. GitHub names every bot `<name>[bot]`, both as a commit
 /// author and as the login it resolves to: `github-actions[bot]`, which
 /// authors the release pull request's own commit, arrives with that login.
-pub(crate) fn contributors(responses: &[Value]) -> Result<Vec<Contributor>, NotesError> {
+pub(crate) fn contributors(responses: &[Value]) -> Result<Vec<Contributor>, CreditsError> {
     let mut by_sort_key = BTreeMap::new();
     for response in responses {
         if response.get("errors").is_some() {
-            return Err(NotesError::Response("GraphQL answered with errors"));
+            return Err(CreditsError::Response("GraphQL answered with errors"));
         }
         let commits = response["data"]["nodes"]
             .as_array()
-            .ok_or(NotesError::Response("GraphQL answered with no nodes"))?;
+            .ok_or(CreditsError::Response("GraphQL answered with no nodes"))?;
         for commit in commits {
             let authors = commit["authors"]["nodes"]
                 .as_array()
-                .ok_or(NotesError::Response("a commit has no authors"))?;
+                .ok_or(CreditsError::Response("a commit has no authors"))?;
             for author in authors {
                 let contributor = if let Some(login) = author["user"]["login"].as_str() {
                     Contributor::Account(login.to_string())
                 } else {
                     let name = author["name"]
                         .as_str()
-                        .ok_or(NotesError::Response("an author has no name"))?;
+                        .ok_or(CreditsError::Response("an author has no name"))?;
                     Contributor::Unlinked(name.to_string())
                 };
                 if contributor.is_bot() {
@@ -198,22 +191,8 @@ pub(crate) fn contributors(responses: &[Value]) -> Result<Vec<Contributor>, Note
     Ok(by_sort_key.into_values().collect())
 }
 
-/// Marks the top of the body as the author's. An HTML comment, so it shows
-/// while editing and never on the published page.
-const PROSE_MARKER: &str = "<!-- Release prose: write it here, above the line. \
-     Everything below the line was generated. -->";
-
-/// Stands in for the prose, visibly, so a release published without any says
-/// so on its page.
-const PROSE_PLACEHOLDER: &str = "_Write about this release here._";
-
-/// The draft body: the place for prose, then GitHub's notes, then every
-/// contributor.
-pub(crate) fn compose(
-    generated: &str,
-    previous: Option<ReleaseTag>,
-    contributors: &[Contributor],
-) -> String {
+/// The body's Contributors section: every contributor since `previous`.
+pub(crate) fn section(previous: Option<ReleaseTag>, contributors: &[Contributor]) -> String {
     let since = previous.map_or_else(
         || "in this release".to_string(),
         |previous| format!("since {previous}"),
@@ -228,21 +207,18 @@ pub(crate) fn compose(
             .join("\n");
         format!("Everyone who authored or co-authored a commit {since}:\n\n{list}\n")
     };
-    format!(
-        "{PROSE_MARKER}\n\n{PROSE_PLACEHOLDER}\n\n---\n\n{generated}\n\n\
-         ## Contributors\n\n{credits}"
-    )
+    format!("## Contributors\n\n{credits}")
 }
 
-/// Why the draft body could not be written.
+/// Why the Contributors section could not be written.
 #[derive(Debug)]
-pub(crate) enum NotesError {
+pub(crate) enum CreditsError {
     Tag(ParseTagError),
     Gh(CommandError),
     Response(&'static str),
 }
 
-impl fmt::Display for NotesError {
+impl fmt::Display for CreditsError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Tag(error) => write!(formatter, "{error}"),
@@ -252,7 +228,7 @@ impl fmt::Display for NotesError {
     }
 }
 
-impl Error for NotesError {
+impl Error for CreditsError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Tag(error) => Some(error),
@@ -265,10 +241,6 @@ impl Error for NotesError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// `POST repos/hexlace/ritual/releases/generate-notes` for v0.1.1 at
-    /// 9360276 since v0.1.0, as GitHub answered it on 2026-09-24.
-    const GENERATE_NOTES: &str = include_str!("../tests/fixtures/generate-notes.json");
 
     /// The `COMMIT_AUTHORS_QUERY` answer for 9360276, a commit Bee authored
     /// with a `Co-authored-by` trailer for Delphi, captured the same day.
@@ -300,22 +272,14 @@ mod tests {
     }
 
     #[test]
-    fn the_captured_release_composes_into_prose_notes_and_contributors() {
-        let generated = json(GENERATE_NOTES)["body"]
-            .as_str()
-            .expect("generate-notes has a body")
-            .to_string();
+    fn the_captured_release_credits_its_author_and_co_author() {
         let contributors = contributors(&[json(COMMIT_AUTHORS)]).expect("the answer parses");
-        let body = compose(&generated, Some(tag("v0.1.0")), &contributors);
-
-        let expected = format!(
-            "{PROSE_MARKER}\n\n{PROSE_PLACEHOLDER}\n\n---\n\n{generated}\n\n\
-             ## Contributors\n\n\
+        assert_eq!(
+            section(Some(tag("v0.1.0")), &contributors),
+            "## Contributors\n\n\
              Everyone who authored or co-authored a commit since v0.1.0:\n\n\
              * @beeauvin\n* @delphimoon\n"
         );
-        assert_eq!(body, expected);
-        assert!(body.contains("https://github.com/hexlace/ritual/pull/1"));
     }
 
     fn author(name: &str, login: Option<&str>) -> Value {
@@ -392,7 +356,7 @@ mod tests {
             serde_json::json!({ "data": { "nodes": [null] }, "errors": [{ "type": "NOT_FOUND" }] });
         assert!(matches!(
             contributors(&[answer]),
-            Err(NotesError::Response(_))
+            Err(CreditsError::Response(_))
         ));
     }
 
@@ -426,9 +390,9 @@ mod tests {
 
     #[test]
     fn a_first_release_says_so_instead_of_naming_a_previous_one() {
-        let body = compose("## What's Changed", None, &[]);
-        assert!(body.ends_with(
-            "## What's Changed\n\n## Contributors\n\nNobody has authored a commit in this release.\n"
-        ));
+        assert_eq!(
+            section(None, &[]),
+            "## Contributors\n\nNobody has authored a commit in this release.\n"
+        );
     }
 }

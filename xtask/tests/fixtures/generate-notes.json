@@ -1,1 +1,0 @@
-{"name":"v0.1.1","body":"## What's Changed\n* fix(ci): msrv tests flaking on linux due to copied binary by @beeauvin in https://github.com/hexlace/ritual/pull/1\n\n## New Contributors\n* @beeauvin made their first contribution in https://github.com/hexlace/ritual/pull/1\n\n**Full Changelog**: https://github.com/hexlace/ritual/compare/v0.1.0...v0.1.1"}
