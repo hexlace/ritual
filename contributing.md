@@ -71,14 +71,32 @@ A release takes three steps, and GitHub Actions does the work between them:
    If it fails partway, run it again: crates already on crates.io at that
    version are skipped.
 
-**Publish** runs as two jobs, so that no build script or proc macro ever runs
-where a crates.io token exists or could be minted. `verify` holds no
-credential: it checks that the tagged commit is on `main`, then runs
-`cargo xtask publish-plan`, which does every build a publish verifies. Then
-`publish` checks out that same commit, gets a token, and runs
-`cargo publish --no-verify`, which packages and uploads without compiling
-anything. Keep it that way: a step that compiles, including `cargo xtask`,
-never goes in the `publish` job.
+Each of these workflows runs as two jobs, split on one rule: **a token that
+can write, to this repository or to crates.io, only ever exists in a job that
+compiles nothing.** `cargo xtask` is `cargo run`, so it compiles xtask and runs
+its dependencies' build scripts, and every step in a job runs as the same user
+on the same machine, so code one step runs can read what a later step is
+given. Moving a token to a later step does not keep it away from an earlier
+one.
+
+- **Release**: `bump` runs `cargo xtask bump` with read access only, and hands
+  `Cargo.toml` and `Cargo.lock` on. `open-pull-request` checks the tag and
+  that those two files are all that changed, then commits them and opens the
+  pull request.
+- **Release draft**: `verify` runs `cargo xtask verify-tag` and
+  `cargo xtask release-contributors` with read access only, and hands the
+  previous release and the Contributors section on. `draft` asks GitHub for
+  its generated notes, which needs write access, assembles the body and
+  creates the draft.
+- **Publish**: `verify` holds no credential: it checks that the tagged commit
+  is on `main`, then runs `cargo xtask publish-plan`, which does every build a
+  publish verifies. Then `publish` checks out that same commit, gets a token,
+  and runs `cargo publish --no-verify`, which packages and uploads without
+  compiling anything.
+
+Each writing job checks what it was handed in shell, because the job that
+produced it had run third-party code by then. Keep it that way: a step that
+compiles, including `cargo xtask`, never goes in a job that can write.
 
 What changed in a release lives in its GitHub release, not in a file here.
 
@@ -88,7 +106,7 @@ The workflows run `cargo xtask`, and so can you:
 cargo xtask bump v0.1.1            # what step 1 does to the tree
 cargo xtask verify-tag v0.1.1      # refuses unless the workspace is at v0.1.1
 cargo xtask publish-plan v0.1.1    # dry-runs the publish, prints the plan
-cargo xtask release-notes hexlace/ritual v0.1.1 <commit>   # needs `gh`
+cargo xtask release-contributors hexlace/ritual v0.1.1 <commit> <dir>   # needs `gh`
 ```
 
 `publish-plan` asks crates.io which crates it already has at the tag's
