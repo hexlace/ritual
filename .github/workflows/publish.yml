@@ -138,6 +138,16 @@ jobs:
           fi
           # Each list whole, before anything splits it: crate names separated
           # by single spaces, and nothing else, not even a newline.
+          #
+          # This checks the lists' shape, not that they are the plan verify
+          # computed: a build script in verify can write $GITHUB_OUTPUT
+          # itself. That is left open on purpose. `--exclude` can only
+          # subtract workspace members at the checked-out SHA, and anything
+          # shaped like a flag is refused here, so the worst a changed plan
+          # does is leave a crate out of the release or skip this job, and
+          # running the workflow again repairs either. It never reaches the
+          # token. Closing it would mean recomputing the plan here, in shell,
+          # for no gain in what can reach crates.io.
           name='[A-Za-z][A-Za-z0-9_-]{0,63}'
           list="^(${name}( ${name})*)?\$"
           for value in "$PUBLISH" "$EXCLUDE"; do
