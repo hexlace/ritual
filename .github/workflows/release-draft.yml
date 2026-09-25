@@ -1,0 +1,198 @@
+# Release draft — drafts the GitHub release when a release pull request merges.
+#
+# A release pull request is one release.yml opened: its branch is
+# `release/<tag>`, in this repository. When one merges, two jobs run, split
+# so that a token that can write to this repository never exists where
+# anything compiles. `cargo xtask` is `cargo run`, which builds xtask and runs
+# its dependencies' build scripts, and every step in a job runs as the same
+# user on the same machine: code one step runs can read what a later step is
+# given.
+#
+# `verify` can read this repository and nothing more. It
+#   1. checks out the merge commit and runs `cargo xtask verify-tag <tag>`,
+#      which refuses unless the workspace there is at exactly the tag's
+#      version;
+#   2. runs `cargo xtask release-contributors`, which finds the previous
+#      release and lists everyone who authored or co-authored a commit since,
+#      and hands both on as an artifact.
+#
+# `draft` holds the write token, which GitHub's generate-notes endpoint needs,
+# and runs no Rust. It
+#   3. refuses if a release named <tag> already exists, draft or not;
+#   4. writes the body: a marked place for prose at the top, then every pull
+#      request merged since the previous release (GitHub's generated notes,
+#      configured by .github/release.yml), then the contributors `verify`
+#      listed;
+#   5. creates a draft release named <tag> that targets the merge commit.
+#
+# `verify` had run third-party build scripts by the time it produced its
+# artifact, so `draft` holds the previous release to the tag grammar before
+# passing it to GitHub. The contributors list is text that lands in a draft,
+# which a person reads before publishing it: untrusted, and gated by that
+# reading, the same as a pull request's description.
+#
+# A draft has no tag yet. Publishing it creates the tag at the merge commit,
+# and that publication runs publish.yml.
+#
+# The release is found by its branch name, not its title: a title can be
+# edited, and the branch is what release.yml made.
+
+name: Release draft
+
+on:
+  pull_request:
+    types: [closed]
+    branches: ["main"]
+
+concurrency:
+  group: release-draft
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  verify:
+    name: verify the merge and list its contributors
+    # Merged, not merely closed; from a `release/v…` branch; and from this
+    # repository, never a fork, whatever its branch is called.
+    if: >-
+      github.event.pull_request.merged == true
+      && startsWith(github.event.pull_request.head.ref, 'release/v')
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # check out the merge commit; read releases and commits
+    env:
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      # The commit the merge put on main: for a squash merge, the squash
+      # commit itself.
+      MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+    steps:
+      - name: Checkout the merge commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update
+          rustup show active-toolchain
+
+      - name: Check the merged version matches the branch
+        run: |
+          tag="${HEAD_REF#release/}"
+          cargo xtask verify-tag "$tag"
+          echo "TAG=${tag}" >> "$GITHUB_ENV"
+
+      - name: List the contributors since the previous release
+        # This token only reads, and everything it reads is public.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir "${RUNNER_TEMP}/credits"
+          cargo xtask release-contributors "$GITHUB_REPOSITORY" "$TAG" "$MERGE_COMMIT" \
+            "${RUNNER_TEMP}/credits"
+
+      - name: Hand the contributors on
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: credits
+          path: ${{ runner.temp }}/credits/
+          if-no-files-found: error
+          retention-days: 1
+
+  draft:
+    name: draft the release
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # generate the notes and create the draft release
+    env:
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+    # No checkout, no Rust toolchain and no cargo in this job, ever: it holds
+    # a token that can write to every branch but main.
+    steps:
+      - name: Refuse a tag that is not vMAJOR.MINOR.PATCH
+        # From the branch name, which the event supplies; `verify` checked it,
+        # but `verify` ran third-party code. The same grammar xtask holds it
+        # to: three decimal numbers, none with a leading zero, and nothing
+        # else.
+        run: |
+          tag="${HEAD_REF#release/}"
+          number='(0|[1-9][0-9]*)'
+          if [[ ! "$tag" =~ ^v${number}\.${number}\.${number}$ ]]; then
+            echo "::error::'${tag}' is not v then MAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          echo "TAG=${tag}" >> "$GITHUB_ENV"
+
+      - name: Fetch the contributors
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: credits
+          path: ${{ runner.temp }}/credits
+
+      - name: Check what verify handed on
+        # Exactly the two files `release-contributors` writes, and a previous
+        # release that is empty or a release tag, since it goes to GitHub as
+        # the start of the range.
+        run: |
+          handed=$(cd "${RUNNER_TEMP}/credits" && find . -mindepth 1 -printf '%y %P\n' | LC_ALL=C sort)
+          if [ "$handed" != $'f contributors.md\nf previous-release' ]; then
+            echo "::error::the artifact is not exactly contributors.md and previous-release"
+            printf '%s\n' "$handed"
+            exit 1
+          fi
+          previous=$(cat "${RUNNER_TEMP}/credits/previous-release"; printf x)
+          previous=${previous%x}
+          number='(0|[1-9][0-9]*)'
+          if [ -n "$previous" ] && [[ ! "$previous" =~ ^v${number}\.${number}\.${number}$'\n'$ ]]; then
+            echo "::error::verify handed over '${previous}' as the previous release, which is not a release tag"
+            exit 1
+          fi
+          echo "PREVIOUS=${previous%$'\n'}" >> "$GITHUB_ENV"
+
+      - name: Refuse a release that already exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::a release named ${TAG} already exists"
+            exit 1
+          fi
+
+      - name: Write the release body
+        # generate-notes is a POST, but GitHub saves nothing it produces.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          range=()
+          if [ -n "$PREVIOUS" ]; then
+            range=(-f "previous_tag_name=${PREVIOUS}")
+          fi
+          generated=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f "tag_name=${TAG}" -f "target_commitish=${MERGE_COMMIT}" "${range[@]}" \
+            --jq '.body')
+          # The marker is an HTML comment, so it shows while editing and never
+          # on the published page; the placeholder shows on the page, so a
+          # release published without prose says so.
+          {
+            printf '%s\n\n' '<!-- Release prose: write it here, above the line. Everything below the line was generated. -->'
+            printf '%s\n\n' '_Write about this release here._'
+            printf -- '---\n\n'
+            printf '%s\n\n' "$generated"
+            cat "${RUNNER_TEMP}/credits/contributors.md"
+          } > "${RUNNER_TEMP}/notes.md"
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
+            --target "$MERGE_COMMIT" --title "$TAG" --notes-file "${RUNNER_TEMP}/notes.md"

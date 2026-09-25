@@ -1,0 +1,265 @@
+# Release — opens the pull request that moves every crate to a new version.
+#
+# Run by hand from the Actions tab, on `main`, with the release tag as its
+# input: `v` then MAJOR.MINOR.PATCH, such as v0.1.1.
+#
+# Two jobs, split so that a token that can write to this repository never
+# exists where anything compiles. `cargo xtask` is `cargo run`, which builds
+# xtask and runs its dependencies' build scripts, and every step in a job runs
+# as the same user on the same machine, with passwordless sudo: code one step
+# runs can read what a later step is given. So the job that compiles holds no
+# write token at all, and the job that writes compiles nothing.
+#
+# `bump` can read this repository and nothing more. It
+#   1. runs `cargo xtask bump <tag>`, which refuses a tag that is not a full
+#      release or is not newer than main's version, and otherwise rewrites
+#      every version site in the root manifest and Cargo.lock;
+#   2. checks that only those two files changed, and hands them on as an
+#      artifact.
+#
+# `open-pull-request` holds the write token and runs no Rust. It checks the
+# tag again and that the artifact changes exactly those two files, because
+# `bump` had run third-party build scripts by the time it produced either.
+# Then it
+#   3. creates the branch `release/<tag>` at the commit `bump` started from,
+#      and makes one commit on it through GitHub's GraphQL
+#      `createCommitOnBranch`, so GitHub signs it: message
+#      `chore(release): <tag>`, and no body;
+#   4. opens a pull request from that branch into `main`.
+#
+# What reaches the pull request is a two-file diff that a person reviews
+# before merging, the same as any contributor's.
+#
+# Nothing here writes to `main`; merging the pull request does. After that,
+# release-draft.yml drafts the GitHub release, and publishing the draft runs
+# publish.yml.
+#
+# The pull request is opened with GITHUB_TOKEN, and GitHub holds the CI run of
+# a pull request opened that way until someone with write access approves it:
+# https://docs.github.com/en/actions/concepts/security/github_token
+#
+# Opening a pull request with GITHUB_TOKEN needs the repository setting
+# Settings → Actions → General → "Allow GitHub Actions to create and approve
+# pull requests".
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag: v then MAJOR.MINOR.PATCH, such as v0.1.1"
+        required: true
+        type: string
+
+# One release at a time: a second run waits for the first rather than racing
+# it for the branch.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# Nothing at the workflow level; each job asks for what it needs.
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  bump:
+    name: bump the version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # check out main
+    env:
+      # Inputs reach the scripts through the environment, never through
+      # `${{ }}` inside a script, so no input is ever read as shell.
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Refuse any branch but main
+        # A release is cut from main. Run from anywhere else, the version this
+        # bumps from, and the commit the branch starts at, would be wrong.
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::run this workflow on main, not ${GITHUB_REF}"
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update
+          rustup show active-toolchain
+
+      - name: Bump every version site
+        run: cargo xtask bump "$TAG"
+
+      - name: Check the bump changed the manifest and the lockfile, and nothing else
+        # The commit sends exactly these two files. Anything else changing
+        # means the bump no longer does what this workflow assumes.
+        run: |
+          changed=$(git status --porcelain=v1 --untracked-files=all)
+          expected=$' M Cargo.lock\n M Cargo.toml'
+          if [ "$changed" != "$expected" ]; then
+            echo "::error::the bump changed something other than Cargo.toml and Cargo.lock"
+            printf '%s\n' "$changed"
+            exit 1
+          fi
+
+      - name: Hand the bumped files on
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bump
+          path: |
+            Cargo.toml
+            Cargo.lock
+          if-no-files-found: error
+          retention-days: 1
+
+  open-pull-request:
+    name: open the release pull request
+    needs: bump
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create release/<tag>, commit to it, delete it after a failure
+      pull-requests: write # open the pull request
+    env:
+      TAG: ${{ inputs.tag }}
+    # No Rust toolchain and no cargo in this job, ever: it holds a token that
+    # can write to every branch but main.
+    steps:
+      - name: Refuse a tag that is not vMAJOR.MINOR.PATCH
+        # `bump` checked this already, but `bump` ran third-party code, and the
+        # tag becomes a ref name below. The same grammar xtask holds it to:
+        # three decimal numbers, none with a leading zero, and nothing else.
+        run: |
+          number='(0|[1-9][0-9]*)'
+          if [[ ! "$TAG" =~ ^v${number}\.${number}\.${number}$ ]]; then
+            echo "::error::'${TAG}' is not v then MAJOR.MINOR.PATCH"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Every write to the repository goes through the API with GH_TOKEN;
+          # git itself never pushes, so it keeps no credential.
+          persist-credentials: false
+
+      - name: Fetch the bumped files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bump
+          path: ${{ runner.temp }}/bump
+
+      - name: Check the bumped files change the manifest and the lockfile, and nothing else
+        # The artifact came from a job that had run third-party code, so it is
+        # held to exactly what `bump` should have produced: two regular files,
+        # and a tree that differs from the commit it started at in those two
+        # files alone.
+        run: |
+          handed=$(cd "${RUNNER_TEMP}/bump" && find . -mindepth 1 -printf '%y %P\n' | LC_ALL=C sort)
+          if [ "$handed" != $'f Cargo.lock\nf Cargo.toml' ]; then
+            echo "::error::the artifact is not exactly Cargo.toml and Cargo.lock"
+            printf '%s\n' "$handed"
+            exit 1
+          fi
+          cp "${RUNNER_TEMP}/bump/Cargo.toml" "${RUNNER_TEMP}/bump/Cargo.lock" .
+          changed=$(git status --porcelain=v1 --untracked-files=all)
+          if [ "$changed" != $' M Cargo.lock\n M Cargo.toml' ]; then
+            echo "::error::the artifact does not change exactly Cargo.toml and Cargo.lock"
+            printf '%s\n' "$changed"
+            exit 1
+          fi
+
+      - name: Create the release branch
+        id: branch
+        # At the commit the bump started from, so the commit below is the only
+        # difference between the branch and main.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f "ref=refs/heads/release/${TAG}" -f "sha=${GITHUB_SHA}" --silent || {
+            echo "::error::could not create release/${TAG}. If it already exists, a pull request for ${TAG} is open, or one was closed without merging and its branch is still there; delete the branch to start again"
+            exit 1
+          }
+
+      - name: Commit the bump
+        # `createCommitOnBranch` makes the commit on GitHub's side, where
+        # GitHub signs it; `expectedHeadOid` refuses if the branch moved.
+        # The message is the headline alone: `chore(release): <tag>`.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          base64 -w0 < Cargo.toml > "${RUNNER_TEMP}/manifest.b64"
+          base64 -w0 < Cargo.lock > "${RUNNER_TEMP}/lockfile.b64"
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg branch "release/${TAG}" \
+            --arg head "$GITHUB_SHA" \
+            --arg headline "chore(release): ${TAG}" \
+            --rawfile manifest "${RUNNER_TEMP}/manifest.b64" \
+            --rawfile lockfile "${RUNNER_TEMP}/lockfile.b64" \
+            '{
+              query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
+              variables: { input: {
+                branch: { repositoryNameWithOwner: $repository, branchName: $branch },
+                expectedHeadOid: $head,
+                message: { headline: $headline },
+                fileChanges: { additions: [
+                  { path: "Cargo.toml", contents: $manifest },
+                  { path: "Cargo.lock", contents: $lockfile }
+                ] }
+              } }
+            }' > "${RUNNER_TEMP}/commit.json"
+          oid=$(gh api graphql --input "${RUNNER_TEMP}/commit.json" \
+            --jq '.data.createCommitOnBranch.commit.oid')
+          echo "committed ${oid} to release/${TAG}"
+          echo "COMMIT=${oid}" >> "$GITHUB_ENV"
+
+      - name: Check the commit holds exactly the bump
+        # Reads the commit back from GitHub and compares it with the tree
+        # checked above, so a commit that differs from it cannot reach a pull
+        # request.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --no-tags --depth=1 "https://github.com/${GITHUB_REPOSITORY}.git" "$COMMIT"
+          git diff --exit-code FETCH_HEAD -- || {
+            echo "::error::the commit on release/${TAG} differs from the bumped tree"
+            exit 1
+          }
+          verified=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${COMMIT}" \
+            --jq '.commit.verification.verified')
+          if [ "$verified" != "true" ]; then
+            # Not fatal: main only takes squash merges, and GitHub signs the
+            # squash commit whatever it is made from.
+            echo "::warning::GitHub did not sign ${COMMIT}"
+          fi
+
+      - name: Open the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          body=$(cat <<EOF
+          Moves every crate to ${TAG#v}: \`[workspace.package]\`, the internal requirements in \`[workspace.dependencies]\`, and \`Cargo.lock\`, by \`cargo xtask bump ${TAG}\`.
+
+          Merging this drafts the GitHub release ${TAG} at the merge commit. Write the prose at the top of the draft, then publish it: publishing creates the tag and publishes every crate to crates.io.
+
+          A workflow opened this pull request, so its CI waits for approval: approve the run, or close and reopen the pull request.
+          EOF
+          )
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "release/${TAG}" \
+            --title "chore(release): ${TAG}" --body "$body"
+
+      - name: Delete the release branch after a failure
+        # So the same tag can simply be run again once the cause is fixed.
+        if: failure() && steps.branch.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/release/${TAG}"

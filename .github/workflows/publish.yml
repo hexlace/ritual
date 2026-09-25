@@ -1,0 +1,183 @@
+# Publish — publishes every crate to crates.io when a GitHub release is
+# published.
+#
+# Two jobs, split so that no build script or proc macro ever runs where a
+# crates.io token exists or can be minted. `cargo publish` normally compiles
+# each crate to verify it, and that code runs with the job's environment:
+# the token, and in any job granted `id-token: write`, the two
+# `ACTIONS_ID_TOKEN_REQUEST_*` variables GitHub gives every step, which are
+# enough to mint a token directly.
+#
+# `verify` has no token, no `id-token` permission and no environment. It
+#   1. refuses unless the tagged commit is on `main`: a release can be
+#      published on a tag at any commit, and only what `main` holds was
+#      reviewed. That commit's SHA is this job's first output, written before
+#      anything compiles;
+#   2. runs `cargo xtask publish-plan <tag>`, which refuses unless the
+#      workspace is at exactly the tag's version, asks crates.io which crates
+#      it already has at that version, and dry-runs `cargo publish` for the
+#      rest: every verify build happens here. It outputs which crates to
+#      upload and which to leave out, so a run that failed partway can be run
+#      again.
+#
+# `publish` runs in the `crates-io` environment, and each crate's trusted
+# publisher on crates.io names this file and that environment, so a token is
+# only ever issued to this job. It compiles nothing. It checks out the SHA
+# `verify` checked, and refuses unless the tag still points at it and every
+# crate name it was handed is a crate name, because `verify` has run
+# third-party build scripts by the time it writes its plan. Then trusted
+# publishing exchanges this job's GitHub OIDC token for a crates.io token that
+# lasts 30 minutes and is revoked when the job ends
+# (https://crates.io/docs/trusted-publishing), and `cargo publish --no-verify`
+# uploads the plan. When crates.io already has every crate, the job is
+# skipped and no token is minted.
+
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+# Never two publishes at once; a second waits for the first.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  verify:
+    name: verify the release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # check out the tagged commit
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+      publish: ${{ steps.plan.outputs.publish }}
+      exclude: ${{ steps.plan.outputs.exclude }}
+    steps:
+      - name: Checkout the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          # The whole history, so the check below can walk from main back to
+          # the tagged commit.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Refuse a tagged commit that is not on main
+        id: commit
+        # The `crates-io` environment's tag rule restricts the tag's name, not
+        # the commit it points at. First, before anything compiles, so the SHA
+        # this writes is one nothing third-party could have touched. Fetched
+        # from the public URL, since git keeps no credential here.
+        run: |
+          git fetch --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" \
+            "+refs/heads/main:refs/remotes/origin/main"
+          tagged=$(git rev-parse HEAD)
+          if ! git merge-base --is-ancestor "$tagged" origin/main; then
+            echo "::error::${TAG} points at ${tagged}, which is not on main; only a commit main holds is published"
+            exit 1
+          fi
+          echo "${TAG} points at ${tagged}, which is on main"
+          echo "sha=${tagged}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update
+          rustup show active-toolchain
+
+      - name: Check the tag, plan the publish and dry-run it
+        id: plan
+        run: cargo xtask publish-plan "$TAG" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: publish to crates.io
+    needs: verify
+    if: needs.verify.outputs.publish != ''
+    runs-on: ubuntu-latest
+    environment: crates-io
+    permissions:
+      contents: read # check out the verified commit
+      id-token: write # the OIDC token trusted publishing exchanges for a crates.io token
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      SHA: ${{ needs.verify.outputs.sha }}
+      PUBLISH: ${{ needs.verify.outputs.publish }}
+      EXCLUDE: ${{ needs.verify.outputs.exclude }}
+    steps:
+      - name: Checkout the verified commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # By SHA, not by the tag name again: a tag can move between jobs.
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+
+      - name: Refuse anything but what verify checked
+        # Shell rather than xtask, because running xtask means compiling it.
+        # The SHA was written before verify compiled anything; the names were
+        # written after, so each one is held to crates.io's name grammar
+        # before it reaches cargo.
+        run: |
+          if [[ ! "$SHA" =~ ^[0-9a-f]{40}$ ]] || [ "$(git rev-parse HEAD)" != "$SHA" ]; then
+            echo "::error::the checkout is not the commit verify checked (${SHA})"
+            exit 1
+          fi
+          git fetch --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" \
+            "+refs/tags/${TAG}:refs/tags/${TAG}"
+          tagged=$(git rev-parse "refs/tags/${TAG}^{commit}")
+          if [ "$tagged" != "$SHA" ]; then
+            echo "::error::${TAG} now points at ${tagged}, not ${SHA}, which verify checked"
+            exit 1
+          fi
+          # Each list whole, before anything splits it: crate names separated
+          # by single spaces, and nothing else, not even a newline.
+          #
+          # This checks the lists' shape, not that they are the plan verify
+          # computed: a build script in verify can write $GITHUB_OUTPUT
+          # itself. That is left open on purpose. `--exclude` can only
+          # subtract workspace members at the checked-out SHA, and anything
+          # shaped like a flag is refused here, so the worst a changed plan
+          # does is leave a crate out of the release or skip this job, and
+          # running the workflow again repairs either. It never reaches the
+          # token. Closing it would mean recomputing the plan here, in shell,
+          # for no gain in what can reach crates.io.
+          name='[A-Za-z][A-Za-z0-9_-]{0,63}'
+          list="^(${name}( ${name})*)?\$"
+          for value in "$PUBLISH" "$EXCLUDE"; do
+            if [[ ! "$value" =~ $list ]]; then
+              echo "::error::verify handed over '${value}', which is not a list of crate names"
+              exit 1
+            fi
+          done
+          echo "publishing ${SHA} as ${TAG}: ${PUBLISH}"
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update
+          rustup show active-toolchain
+
+      - name: Get a crates.io token
+        id: crates-io
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+
+      - name: Publish
+        # `--no-verify`: verify already built every crate, and a build here
+        # would run third-party code beside the token.
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io.outputs.token }}
+        run: |
+          # Checked above to be names and single spaces, so splitting on
+          # spaces is all this does; `read -a` expands no glob either way.
+          read -ra names <<< "$EXCLUDE"
+          excluded=()
+          for name in "${names[@]}"; do
+            excluded+=(--exclude "$name")
+          done
+          cargo publish --workspace --locked --no-verify "${excluded[@]}"
