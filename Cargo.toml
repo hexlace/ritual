@@ -18,13 +18,13 @@ resolver = "3"
 # crate's manifest keeps, since crates.io has no path to follow. Every crate here
 # is released at the workspace version together, so each requirement is that
 # version.
-rituals = { path = "crates/rituals", version = "0.1.0" }
-rituals-compose = { path = "crates/rituals-compose", version = "0.1.0" }
-ritual = { package = "rituals-core", path = "crates/rituals-core", version = "0.1.0" }
-add = { package = "rituals-core-add", path = "tasks/add", version = "0.1.0" }
-create = { package = "rituals-core-create", path = "tasks/create", version = "0.1.0" }
-new = { package = "rituals-core-new", path = "tasks/new", version = "0.1.0" }
-regenerate = { package = "rituals-core-regenerate", path = "tasks/regenerate", version = "0.1.0" }
+rituals = { path = "crates/rituals", version = "0.1.1" }
+rituals-compose = { path = "crates/rituals-compose", version = "0.1.1" }
+ritual = { package = "rituals-core", path = "crates/rituals-core", version = "0.1.1" }
+add = { package = "rituals-core-add", path = "tasks/add", version = "0.1.1" }
+create = { package = "rituals-core-create", path = "tasks/create", version = "0.1.1" }
+new = { package = "rituals-core-new", path = "tasks/new", version = "0.1.1" }
+regenerate = { package = "rituals-core-regenerate", path = "tasks/regenerate", version = "0.1.1" }
 # `add` appends to manifests somebody wrote by hand. A whole-file round trip
 # through a plain TOML parser reformats them and drops their comments; this
 # crate edits in place. It is the same crate Cargo's own `add` uses.
@@ -42,7 +42,7 @@ toml_edit = { version = "0.22", default-features = false, features = [
 serde_json = { version = "1", default-features = false, features = ["std"] }
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 # The oldest toolchain the workspace builds and passes its tests on: what the
 # code uses decides it, and CI checks it with the `msrv` job. Raising it is not a
