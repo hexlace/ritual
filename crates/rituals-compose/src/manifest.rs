@@ -292,6 +292,74 @@ impl Manifest {
 
         Ok(())
     }
+
+    /// Appends `key` to `[package.metadata.ritual] tasks`, and writes
+    /// nothing else.
+    ///
+    /// This is the list half of an import, for a dependency somebody else
+    /// wrote: `cargo add` has already declared it, so only the list that
+    /// makes it a command is left to edit. [`Manifest::import_task`] writes
+    /// both halves, for a dependency ritual writes itself. Like every append
+    /// here, only the positioning of the list's last entry is copied, so the
+    /// change is one line in a diff and its comments stay where they were.
+    ///
+    /// Each table on the way to the list is read as the TOML table it is,
+    /// whether it is written as `[package.metadata.ritual]` or inline as
+    /// `metadata = { ritual = { tasks = [] } }`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`Failure`] naming [`Manifest::path`] when there is no
+    /// `[package.metadata.ritual] tasks` list, leaving the document as it
+    /// was.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rituals::Name;
+    /// use rituals_compose::manifest::Manifest;
+    /// use rituals_compose::rollback;
+    ///
+    /// # let directory = std::env::temp_dir()
+    /// #     .join(format!("rituals-compose-doctest-manifest-append-task-{}", std::process::id()));
+    /// # std::fs::create_dir_all(&directory)?;
+    /// let manifest_path = directory.join("Cargo.toml");
+    /// # std::fs::write(
+    /// #     &manifest_path,
+    /// #     "[dependencies]\ngreeter = \"0.1.0\"\n\n[package.metadata.ritual]\ntasks = [\"new\"]\n",
+    /// # )?;
+    /// let mut manifest = Manifest::read(&manifest_path)?;
+    ///
+    /// // `cargo add` wrote the dependency; the list is what is left to edit.
+    /// manifest.append_task(&Name::new("greeter")?)?;
+    /// rollback::attempt("running `import greeter` again", |changes| manifest.write(changes))?;
+    ///
+    /// let on_disk = std::fs::read_to_string(&manifest_path)?;
+    /// assert!(on_disk.contains("tasks = [\"new\", \"greeter\"]"));
+    /// # std::fs::remove_dir_all(&directory)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn append_task(&mut self, key: &Name) -> Result<(), Failure> {
+        let tasks = self
+            .document
+            .get_mut("package")
+            .and_then(Item::as_table_like_mut)
+            .and_then(|package| package.get_mut("metadata"))
+            .and_then(Item::as_table_like_mut)
+            .and_then(|metadata| metadata.get_mut("ritual"))
+            .and_then(Item::as_table_like_mut)
+            .and_then(|ritual| ritual.get_mut("tasks"))
+            .and_then(Item::as_array_mut)
+            .ok_or_else(|| {
+                Failure::new(format!(
+                    "{} has no [package.metadata.ritual] tasks list to add `{key}` to",
+                    self.path.display()
+                ))
+            })?;
+
+        push_matching_style(tasks, key.as_str());
+        Ok(())
+    }
 }
 
 fn no_members_list(manifest_path: &Path) -> Failure {
@@ -954,6 +1022,96 @@ mod tests {
             before,
             "the document must be unchanged when import_task is refused"
         );
+        Ok(())
+    }
+
+    /// A manifest whose tasks list a person laid out and commented, to see
+    /// that appending to it is the one added line and nothing else moves.
+    const COMMENTED_MANIFEST: &str = "[package]\nname = \"demo-ritual\"\n\n\
+        [package.metadata.ritual]\n# what this command line runs\ntasks = [\n    \"ritual\",\n    \"wake\", # first\n]\n";
+
+    #[test]
+    fn appending_a_task_is_one_added_line_and_keeps_the_comments() -> TestOutcome {
+        let (_scratch, mut manifest) = manifest("append-task-commented", COMMENTED_MANIFEST)?;
+
+        manifest.append_task(&Name::new("greeter")?)?;
+
+        assert_eq!(
+            manifest.document.to_string(),
+            "[package]\nname = \"demo-ritual\"\n\n\
+             [package.metadata.ritual]\n# what this command line runs\ntasks = [\n    \"ritual\",\n    \"wake\", # first\n    \"greeter\",\n]\n"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn appending_a_task_to_an_empty_list_fills_it() -> TestOutcome {
+        let (_scratch, mut manifest) = manifest(
+            "append-task-empty",
+            "[package.metadata.ritual]\ntasks = []\n",
+        )?;
+
+        manifest.append_task(&Name::new("greeter")?)?;
+
+        assert_eq!(
+            manifest.document.to_string(),
+            "[package.metadata.ritual]\ntasks = [\"greeter\"]\n"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn appending_a_task_reads_inline_tables_as_tables_too() -> TestOutcome {
+        let (_scratch, mut manifest) = manifest(
+            "append-task-inline",
+            "[package]\nname = \"demo-ritual\"\nmetadata = { ritual = { tasks = [\"ritual\"] } }\n",
+        )?;
+
+        manifest.append_task(&Name::new("greeter")?)?;
+
+        assert_eq!(
+            manifest.document.to_string(),
+            "[package]\nname = \"demo-ritual\"\n\
+             metadata = { ritual = { tasks = [\"ritual\", \"greeter\"] } }\n"
+        );
+        Ok(())
+    }
+
+    /// Each manifest here is missing the list at a different depth, from the
+    /// whole `[package]` table down to a `tasks` that is not a list, and each
+    /// must be refused naming the file and leave the document as it was.
+    #[test]
+    fn appending_a_task_with_no_list_to_append_to_is_refused_and_changes_nothing() -> TestOutcome {
+        let shapes = [
+            "[dependencies]\n",
+            "[package]\nname = \"demo-ritual\"\n",
+            "[package.metadata]\nother = true\n",
+            "[package.metadata.ritual]\ntask = true\n",
+            "[package.metadata.ritual]\ntasks = \"ritual\"\n",
+        ];
+        for (index, shape) in shapes.into_iter().enumerate() {
+            let (_scratch, mut manifest) =
+                manifest(&format!("append-task-missing-{index}"), shape)?;
+
+            let result = manifest.append_task(&Name::new("greeter")?);
+
+            assert!(result.is_err(), "expected {shape:?} to be refused");
+            if let Err(failure) = result {
+                assert_eq!(
+                    failure.to_string(),
+                    format!(
+                        "{} has no [package.metadata.ritual] tasks list to add `greeter` to",
+                        manifest.path().display()
+                    ),
+                    "for {shape:?}"
+                );
+            }
+            assert_eq!(
+                manifest.document.to_string(),
+                shape,
+                "the document must be unchanged when append_task is refused"
+            );
+        }
         Ok(())
     }
 

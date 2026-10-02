@@ -43,12 +43,14 @@
 //! # Ok::<(), rituals::InvalidName>(())
 //! ```
 
+pub mod cargo;
 pub mod generated_file;
 pub mod manifest;
 pub mod metadata;
 mod project;
 pub mod rollback;
 pub mod sentence;
+pub mod shell;
 pub mod source;
 pub mod task_crate;
 mod task_list;

@@ -11,11 +11,12 @@
 mod schema;
 
 use std::path::Path;
-use std::process::Command;
 
-use rituals::{Failure, Name};
+use rituals::{Failure, Name, Outcome};
 
+use crate::cargo;
 use crate::generated_file::Entry;
+use crate::workspace::{Located, locate_project};
 
 pub use schema::Metadata;
 pub(crate) use schema::{DepKind, Node, Package};
@@ -42,9 +43,8 @@ const SUPPORTED_FORMAT_VERSION: u64 = 1;
 /// Runs `cargo metadata --format-version 1` in `current_dir` and parses its
 /// output.
 ///
-/// Invokes `cargo` through `$CARGO` when it is set — which it is under
-/// `cargo run` — so a nested call uses the same cargo that launched this
-/// process, never whatever `cargo` resolves to on `$PATH`. No flags beyond
+/// Invokes the cargo that launched this process, through [`cargo::command`],
+/// so a nested call never uses a different cargo than the one in charge. No flags beyond
 /// `--format-version 1`: `--offline` would break a project whose
 /// dependencies are not yet fetched, and `--locked` would break `add`,
 /// which must update the lockfile.
@@ -72,9 +72,7 @@ const SUPPORTED_FORMAT_VERSION: u64 = 1;
 /// # Ok::<(), rituals::Failure>(())
 /// ```
 pub fn fetch(current_dir: &Path) -> Result<Metadata, Failure> {
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-
-    let output = Command::new(&cargo)
+    let output = cargo::command()
         .args(["metadata", "--format-version", "1"])
         .current_dir(current_dir)
         .output()
@@ -89,6 +87,86 @@ pub fn fetch(current_dir: &Path) -> Result<Metadata, Failure> {
     }
 
     parse(&output.stdout)
+}
+
+/// Fetches the metadata of the project `current_dir` is in, and refuses
+/// unless that project is the one `package_name` belongs to.
+///
+/// This is [`fetch`] followed by [`Metadata::ensure_runs_in_its_own_project`],
+/// with one addition: where there is no Cargo project at all, `cargo
+/// metadata` fails with a message that says what is missing and nothing
+/// about what to do, so that case is answered with the same refusal a project
+/// that is not this one gets, which names the command to run inside the right
+/// one. A manifest Cargo cannot read for some other reason keeps Cargo's own
+/// failure, which says what is wrong with it. The question of whether there
+/// is a project is asked only after `cargo metadata` has failed, so the
+/// ordinary run costs one subprocess.
+///
+/// `command` and `arguments` are what the person typed after the binary's
+/// name, as for [`Metadata::ensure_runs_in_its_own_project`].
+///
+/// # Errors
+///
+/// Returns a [`Failure`] that names the command to run instead when there is
+/// no Cargo manifest at or above `current_dir`, or when no workspace member
+/// is called `package_name`, and [`fetch`]'s own failure when `cargo
+/// metadata` cannot be run, fails for another reason, or answers with
+/// something this framework does not understand.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+///
+/// use rituals_compose::metadata;
+///
+/// // Shells out to a real `cargo metadata` and needs a workspace on disk
+/// // to run against, so this example is `no_run`.
+/// let document = metadata::fetch_in_its_own_project(
+///     Path::new("."),
+///     "demo-ritual",
+///     "import",
+///     "greeter",
+/// )?;
+/// let project = document.locate_project("demo-ritual")?;
+/// println!("workspace root: {}", project.workspace_root().display());
+/// # Ok::<(), rituals::Failure>(())
+/// ```
+pub fn fetch_in_its_own_project(
+    current_dir: &Path,
+    package_name: &str,
+    command: &str,
+    arguments: &str,
+) -> Result<Metadata, Failure> {
+    let document = match fetch(current_dir) {
+        Ok(document) => document,
+        Err(failure) => {
+            return Err(if is_inside_a_cargo_project(current_dir)? {
+                failure
+            } else {
+                outside_its_project_refusal(command, arguments)
+            });
+        }
+    };
+    document.ensure_runs_in_its_own_project(package_name, command, arguments)?;
+    Ok(document)
+}
+
+/// Whether Cargo finds a manifest at or above `directory`, whether or not it
+/// can resolve a workspace for it.
+///
+/// Asks for the workspace first, which is what a person in a project gets
+/// an answer to, and for the nearest manifest only when that fails, which is
+/// what tells a package under a root that does not list it from no
+/// project at all.
+fn is_inside_a_cargo_project(directory: &Path) -> Result<bool, Failure> {
+    match locate_project(directory, true)? {
+        Located::Found(_workspace_root) => Ok(true),
+        Located::NotFound(_no_workspace) => match locate_project(directory, false)? {
+            Located::Found(_nearest_manifest) => Ok(true),
+            Located::NotFound(_no_manifest) => Ok(false),
+        },
+    }
 }
 
 /// Parses `cargo metadata --format-version 1`'s JSON output.
@@ -187,6 +265,47 @@ impl Metadata {
     /// ```
     pub fn resolve_task_list(&self, package_name: &str) -> Result<Vec<Entry>, Failure> {
         crate::task_list::resolve(self, package_name)
+    }
+
+    /// Refuses unless the dependency `package_name` declares under `key` is a
+    /// task: a normal dependency, present on every target, that resolves to
+    /// a crate declaring `[package.metadata.ritual] task = true`.
+    ///
+    /// This is the question an import asks of a dependency somebody else
+    /// wrote, once Cargo has declared it and before it joins the task list.
+    /// The dependency is found the way [`Metadata::resolve_task_list`] finds
+    /// the one a listed name stands for, by the extern-crate name rustc gives
+    /// `key` (the key with `-` read as `_`), and judged by the same rule, so
+    /// whatever this accepts the resolver accepts once `key` is in the list.
+    /// Nothing is read from the dependency's own manifest: what the crate
+    /// declares about itself is in this document, whether it came from a
+    /// registry, a git repository or a path.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`Failure`] saying what is wrong and what to do about it
+    /// when `package_name` cannot be located, when it has no dependency
+    /// under `key`, when that dependency is only a dev- or build-dependency
+    /// or only present under a `cfg(...)` target, when the crate it
+    /// resolves to does not declare `task = true`, or when it declares
+    /// `task` as something other than a boolean.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    ///
+    /// use rituals::Name;
+    /// use rituals_compose::metadata;
+    ///
+    /// // Reads a document `fetch` already produced from a real
+    /// // `cargo metadata` call, so this example stays `no_run`.
+    /// let document = metadata::fetch(Path::new("."))?;
+    /// document.ensure_dependency_is_a_task("demo-ritual", &Name::new("hail")?)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn ensure_dependency_is_a_task(&self, package_name: &str, key: &Name) -> Outcome {
+        crate::task_list::ensure_dependency_is_a_task(self, package_name, key)
     }
 
     /// Reports whether any workspace member in this document is already
@@ -313,8 +432,8 @@ fn outside_its_project_refusal(command: &str, arguments: &str) -> Failure {
 mod tests {
     use rituals::Name;
 
-    use super::{Metadata, outside_its_project_refusal, parse};
-    use crate::test_support::TestOutcome;
+    use super::{Metadata, fetch_in_its_own_project, outside_its_project_refusal, parse};
+    use crate::test_support::{ScratchDir, TestOutcome};
 
     #[test]
     fn the_outside_project_refusal_hands_back_the_command_to_run() {
@@ -330,6 +449,100 @@ mod tests {
              project, run `cargo ritual regenerate` (or `cargo <name> ritual regenerate` if it \
              was made with `--cli <name>`)"
         );
+    }
+
+    /// A workspace with one package, `demo`, that has no dependencies, so
+    /// `cargo metadata` runs against it with nothing to fetch.
+    fn scratch_package(tag: &str) -> Result<ScratchDir, Box<dyn std::error::Error>> {
+        let scratch = ScratchDir::new(tag)?;
+        std::fs::create_dir_all(scratch.path().join("src"))?;
+        std::fs::write(
+            scratch.path().join("Cargo.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )?;
+        std::fs::write(scratch.path().join("src/lib.rs"), "")?;
+        Ok(scratch)
+    }
+
+    #[test]
+    fn outside_any_workspace_the_refusal_says_to_work_inside_a_project() -> TestOutcome {
+        // Cargo's own words here are "could not find `Cargo.toml`", which
+        // says nothing about what to do; the person is told the command to
+        // run inside their project instead.
+        let scratch = ScratchDir::new("fetch-outside-any-workspace")?;
+
+        let outcome = fetch_in_its_own_project(scratch.path(), "demo-ritual", "import", "greeter");
+
+        assert!(
+            outcome.is_err(),
+            "expected a directory with no project to be refused"
+        );
+        if let Err(failure) = outcome {
+            assert_eq!(
+                failure.to_string(),
+                outside_its_project_refusal("import", "greeter").to_string()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn inside_another_projects_workspace_the_refusal_is_the_same() -> TestOutcome {
+        let scratch = scratch_package("fetch-another-workspace")?;
+
+        let outcome = fetch_in_its_own_project(scratch.path(), "demo-ritual", "import", "greeter");
+
+        assert!(
+            outcome.is_err(),
+            "expected a workspace without the package to be refused"
+        );
+        if let Err(failure) = outcome {
+            assert_eq!(
+                failure.to_string(),
+                outside_its_project_refusal("import", "greeter").to_string()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn inside_the_workspace_the_package_belongs_to_the_document_is_returned() -> TestOutcome {
+        let scratch = scratch_package("fetch-own-workspace")?;
+
+        let document = fetch_in_its_own_project(scratch.path(), "demo", "import", "greeter")?;
+
+        assert!(document.has_workspace_member(&valid_name("demo")));
+        Ok(())
+    }
+
+    /// A manifest under a workspace root that does not list it has a
+    /// project, but one Cargo cannot read. Cargo's own refusal says what is
+    /// wrong with it, which "work inside a project" would hide.
+    #[test]
+    fn a_workspace_cargo_cannot_read_keeps_cargos_own_refusal() -> TestOutcome {
+        let scratch = ScratchDir::new("fetch-unreadable-workspace")?;
+        let member = scratch.path().join("not-listed");
+        std::fs::create_dir_all(member.join("src"))?;
+        std::fs::write(
+            scratch.path().join("Cargo.toml"),
+            "[workspace]\nmembers = []\nresolver = \"3\"\n",
+        )?;
+        std::fs::write(
+            member.join("Cargo.toml"),
+            "[package]\nname = \"not-listed\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )?;
+        std::fs::write(member.join("src/lib.rs"), "")?;
+
+        let outcome = fetch_in_its_own_project(&member, "not-listed", "import", "greeter");
+
+        assert!(outcome.is_err(), "expected cargo to refuse this directory");
+        if let Err(failure) = outcome {
+            assert!(
+                failure.to_string().starts_with("cargo metadata failed: "),
+                "expected cargo's own refusal; got: {failure}"
+            );
+        }
+        Ok(())
     }
 
     fn assert_send<T: Send>() {}

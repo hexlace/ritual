@@ -14,11 +14,10 @@
 //! metadata by design, so this lives here rather than there.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use rituals::{Failure, Outcome};
 
-use crate::manifest;
+use crate::{cargo, manifest};
 
 /// What `cargo locate-project` answered.
 pub(crate) enum Located {
@@ -29,19 +28,18 @@ pub(crate) enum Located {
 }
 
 /// Runs `cargo locate-project [--workspace] --message-format plain` in
-/// `directory`, through `$CARGO` when set.
+/// `directory`, through [`cargo::command`].
 ///
 /// A non-zero exit is one of the two answers this decision tree reads, not
 /// a tool failure — only a failure to run `cargo` at all is a [`Failure`].
 pub(crate) fn locate_project(directory: &Path, workspace: bool) -> Result<Located, Failure> {
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let mut arguments = vec!["locate-project"];
     if workspace {
         arguments.push("--workspace");
     }
     arguments.extend(["--message-format", "plain"]);
 
-    let output = Command::new(&cargo)
+    let output = cargo::command()
         .args(&arguments)
         .current_dir(directory)
         .output()

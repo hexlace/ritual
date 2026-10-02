@@ -83,9 +83,16 @@ impl Project<'_> {
     }
 
     /// Reports whether this project's manifest already declares a
-    /// dependency under `key` — matched by name or, when the dependency is
-    /// renamed, by its `package = "…"` rename, since either one occupies
-    /// the key a new import would need.
+    /// dependency under `key` — the dependency's key being its rename when it
+    /// has one, and its name otherwise — since that key is the one a new
+    /// import would need.
+    ///
+    /// Keys are compared as rustc names them, with `-` read as `_`: a
+    /// dependency declared as `a_b` occupies the key `a-b`. Cargo accepts
+    /// two dependencies whose keys differ only that way, and `cargo build`
+    /// then refuses the pair (`E0464`, multiple candidates for the one name),
+    /// so a literal comparison would let a manifest through that does not
+    /// build.
     ///
     /// # Examples
     ///
@@ -108,8 +115,10 @@ impl Project<'_> {
     /// ```
     #[must_use]
     pub fn declares_dependency_key(&self, key: &Name) -> bool {
+        let extern_identifier = key.as_str().replace('-', "_");
         self.package.dependencies.iter().any(|dependency| {
-            dependency.rename.as_deref().unwrap_or(&dependency.name) == key.as_str()
+            let dependency_key = dependency.rename.as_deref().unwrap_or(&dependency.name);
+            dependency_key.replace('-', "_") == extern_identifier
         })
     }
 
@@ -353,6 +362,17 @@ mod tests {
             assert!(!project.declares_dependency_key(&valid_name("task-renamed-source")));
         }
         Ok(())
+    }
+
+    /// Rust reads `a-b` and `a_b` as one name, `a_b`, so a dependency
+    /// declared either way occupies the key written the other way.
+    #[test]
+    fn declares_dependency_key_reads_a_hyphen_and_an_underscore_as_one_name() {
+        let package = package_with(&["a_b", "c-d"], &[]);
+        let project = project_over(&package);
+        assert!(project.declares_dependency_key(&valid_name("a-b")));
+        assert!(project.declares_dependency_key(&valid_name("c-d")));
+        assert!(!project.declares_dependency_key(&valid_name("a-bc")));
     }
 
     #[test]

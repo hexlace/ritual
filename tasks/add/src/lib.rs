@@ -73,8 +73,7 @@ fn prepare(command_line: &CommandLine, arguments: &AddArguments) -> Result<Impor
 
     let current_dir = std::env::current_dir()
         .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
-    let document = metadata::fetch(&current_dir)?;
-    document.ensure_runs_in_its_own_project(package, "add", name.as_str())?;
+    let document = metadata::fetch_in_its_own_project(&current_dir, package, "add", name.as_str())?;
     let project = document.locate_project(package)?;
 
     // Runs before the leftover check below: whether `name` is already a
@@ -196,6 +195,11 @@ fn bin_name_refusal(binary_name: &str) -> Failure {
 /// `acme add` can mean the project's own scaffolder while `acme ritual add`
 /// stays ritual's.
 ///
+/// A dependency counts as already declared when its key reads as `name` to
+/// rustc, with `-` as `_` (see [`rituals_compose::metadata::Project::declares_dependency_key`]),
+/// so the second arm names the underscore spelling too when `name` has a
+/// hyphen: the manifest line it is about may be spelled either way.
+///
 /// `regenerate` is how a person types this command line's `regenerate`, as
 /// [`top_level::management_command`] spells it, so every remedy here can be
 /// copied as written.
@@ -212,9 +216,10 @@ fn already_imported_refusal(
              command line, run `{regenerate}`"
         ))),
         (true, false) => Err(Failure::new(format!(
-            "`{package}` already has a dependency called `{name}` that is not in \
+            "`{package}` already has a dependency called `{name}`{other_spelling} that is not in \
              [package.metadata.ritual] tasks; add `\"{name}\"` to that list and run \
-             `{regenerate}`"
+             `{regenerate}`",
+            other_spelling = underscore_spelling_clause(name),
         ))),
         (false, true) => Err(Failure::new(format!(
             "`{name}` is named in [package.metadata.ritual] tasks but `{package}` has no \
@@ -223,6 +228,19 @@ fn already_imported_refusal(
         ))),
         (false, false) => Ok(()),
     }
+}
+
+/// The clause naming the underscore spelling of `name`, when it has a hyphen,
+/// led by a space: " (or `a_b`, which Rust reads as the same name)" for
+/// `a-b`. Empty when there is no other spelling to name.
+fn underscore_spelling_clause(name: &Name) -> String {
+    if !name.as_str().contains('-') {
+        return String::new();
+    }
+    format!(
+        " (or `{}`, which Rust reads as the same name)",
+        name.as_str().replace('-', "_")
+    )
 }
 
 /// The refusal for a workspace that already has a package called `name` —
@@ -327,6 +345,41 @@ mod tests {
         assert!(result.is_err(), "expected the import to be refused");
         if let Err(error) = result {
             assert!(error.to_string().contains("not in"));
+        }
+    }
+
+    /// Rust reads a hyphen and an underscore in a key as one name, so a key
+    /// the person typed with a hyphen can be taken by a dependency declared
+    /// with an underscore they cannot find by searching for what they typed.
+    /// The refusal names both spellings, so the manifest line it is about is
+    /// the one they find.
+    #[test]
+    fn already_imported_refusal_names_the_underscore_spelling_of_a_hyphenated_key() {
+        let result =
+            already_imported_refusal("demo-ritual", &valid_name("a-b"), true, false, REGENERATE);
+        assert!(result.is_err(), "expected the import to be refused");
+        if let Err(error) = result {
+            assert_eq!(
+                error.to_string(),
+                "`demo-ritual` already has a dependency called `a-b` (or `a_b`, which Rust reads \
+                 as the same name) that is not in [package.metadata.ritual] tasks; add `\"a-b\"` \
+                 to that list and run `cargo ritual regenerate`"
+            );
+        }
+    }
+
+    #[test]
+    fn already_imported_refusal_offers_no_second_spelling_for_a_key_with_no_hyphen() {
+        let result =
+            already_imported_refusal("demo-ritual", &valid_name("lint"), true, false, REGENERATE);
+        assert!(result.is_err(), "expected the import to be refused");
+        if let Err(error) = result {
+            assert_eq!(
+                error.to_string(),
+                "`demo-ritual` already has a dependency called `lint` that is not in \
+                 [package.metadata.ritual] tasks; add `\"lint\"` to that list and run \
+                 `cargo ritual regenerate`"
+            );
         }
     }
 
