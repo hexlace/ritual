@@ -35,8 +35,8 @@ static SCRATCH_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub(crate) struct ScratchDir(PathBuf);
 
 impl ScratchDir {
-    /// Creates a fresh, empty directory named `ritual-remove-<tag>-<pid>-<counter>`
-    /// under the system temp root.
+    /// Creates a fresh, empty directory named
+    /// `ritual-remove-<tag>-<pid>-<counter>` under the system temp root.
     pub(crate) fn new(tag: &str) -> Result<Self, Box<dyn Error>> {
         let unique = SCRATCH_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(

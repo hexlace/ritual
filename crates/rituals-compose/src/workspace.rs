@@ -65,8 +65,9 @@ pub(crate) fn locate_project(directory: &Path, workspace: bool) -> Result<Locate
 ///
 /// `cargo metadata` creates or rewrites the lockfile when it is missing or
 /// behind the manifests, and the one it writes is beside the root manifest
-/// of the workspace Cargo resolves for `directory`. Found with `cargo locate-project --workspace`, which resolves nothing
-/// and so writes nothing. A run that records this path in
+/// of the workspace Cargo resolves for `directory`. Found with `cargo
+/// locate-project --workspace`, which resolves nothing and so writes
+/// nothing. A run that records this path in
 /// [`Changes`](crate::rollback::Changes) before running `cargo metadata` can
 /// put the lockfile back, byte for byte or to absent, whatever directory of
 /// the workspace it ran from.

@@ -3,10 +3,11 @@
 //!
 //! `render` is the text this file always starts and ends with — the `//
 //! @generated` banner, one `("<name>", <crate>::task())` line per imported
-//! task, and the call into `rituals::run`. Both forms of the operation write that
-//! text only when it actually differs from what is already on disk, which is what
-//! makes running the operation twice with nothing changed in between leave the
-//! file's own modification time untouched, not merely its bytes unchanged.
+//! task, and the call into `rituals::run`. Both forms of the operation write
+//! that text only when it actually differs from what is already on disk,
+//! which is what makes running the operation twice with nothing changed in
+//! between leave the file's own modification time untouched, not merely its
+//! bytes unchanged.
 //!
 //! The operation comes in two forms that share one rendering path:
 //! [`regenerate`], for a task with no run of its own, and
@@ -180,8 +181,8 @@ pub fn regenerate(command_line: &CommandLine) -> Outcome {
 /// Rewrites the generated file as a step of a run, so a later failure puts
 /// it back.
 ///
-/// The run is one already inside [`rollback::attempt`](crate::rollback::attempt).
-/// The file is rewritten from `command_line`'s composed CLI's current
+/// The run is one already inside
+/// [`rollback::attempt`](crate::rollback::attempt). The file is rewritten from `command_line`'s composed CLI's current
 /// imports, and a run that fails afterwards puts it back with everything
 /// else the run changed.
 ///
