@@ -2,9 +2,10 @@
 
 use std::path::Path;
 
+use super::process::run_binary;
 use super::{
-    Checkout, Outcome, Project, RunOutput, TempDir, TestOutcome, assert_trees_identical, git, help,
-    manifest, snapshot_tree,
+    Checkout, Outcome, Project, ResultContext, RunOutput, TempDir, TestOutcome,
+    assert_trees_identical, git, help, manifest, snapshot_tree,
 };
 
 /// A project with one task `add` scaffolded under `tasks/<task>`, committed
@@ -107,6 +108,71 @@ pub(crate) fn assert_invocation_is_refused_and_writes_nothing(
         &snapshot_tree(project.root())?,
     );
     Ok(())
+}
+
+/// The same check, with the workspace's `Cargo.lock` held to it too, after
+/// `unsettle` has left that lockfile stale or absent.
+///
+/// The tree snapshot skips `Cargo.lock`, which a build legitimately
+/// rewrites, so this builds the command line first, then calls `unsettle`
+/// with the lockfile's path, then runs the built binary itself: a refusal
+/// must leave the lockfile exactly as `unsettle` did, byte for byte or
+/// absent, though `remove` reads the project with `cargo metadata`, which
+/// creates or rewrites a lockfile that is missing or behind.
+#[track_caller]
+pub(crate) fn assert_remove_is_refused_and_leaves_the_lockfile(
+    project: &Project,
+    name: &str,
+    expected: &[&str],
+    unsettle: impl FnOnce(&Path) -> TestOutcome,
+) -> TestOutcome {
+    let binary = project.build()?;
+    let lockfile = project.root().join("Cargo.lock");
+    unsettle(&lockfile)?;
+
+    let before = snapshot_tree(project.root())?;
+    let lockfile_before = read_if_present(&lockfile)?;
+    let bin_name = project.bin_name()?;
+    let what = format!("`{bin_name} remove {name}`");
+
+    let output = run_binary(&binary, project.root(), &["remove", name])?;
+    let message = assert_a_refusal(&output, &bin_name, &what);
+    for needle in expected {
+        assert!(
+            message.contains(needle),
+            "expected the refusal of {what} to contain `{needle}`; stderr was:\n{message}"
+        );
+    }
+
+    assert_trees_identical(
+        &format!("a refused {what} must write nothing"),
+        &before,
+        &snapshot_tree(project.root())?,
+    );
+    assert!(
+        read_if_present(&lockfile)? == lockfile_before,
+        "a refused {what} must leave Cargo.lock as it found it: it was {}, and is now {}",
+        describe(lockfile_before.as_deref()),
+        describe(read_if_present(&lockfile)?.as_deref()),
+    );
+    Ok(())
+}
+
+/// The bytes at `path`, or `None` when there is no file there.
+fn read_if_present(path: &Path) -> Outcome<Option<Vec<u8>>> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).context(&format!("reading {} failed", path.display())),
+    }
+}
+
+/// A lockfile's state, for a failure message.
+fn describe(bytes: Option<&[u8]>) -> String {
+    bytes.map_or_else(
+        || "absent".to_string(),
+        |bytes| format!("{} bytes", bytes.len()),
+    )
 }
 
 /// The members of the project's `[workspace]`, as written.

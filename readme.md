@@ -230,7 +230,7 @@ loses only its dependency line: its directory stays where it is. Nothing is
 committed for you. Look at the change, and commit it when it is what you
 meant.
 
-It refuses before writing anything when:
+It refuses, and leaves the project as it found it, `Cargo.lock` included, when:
 
 - the name is neither a key nor a crate one of them imports, or the crate is
   imported by more than one key (remove one by its key);

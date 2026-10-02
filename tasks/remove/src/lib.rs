@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 use git::Obstacle;
 use removal::{Manifests, Member, Removal};
 use rituals::{CommandLine, Failure, Outcome, Task, clap};
-use rituals_compose::metadata::{self, TaskImport};
+use rituals_compose::metadata::{self, Metadata, TaskImport};
 use rituals_compose::sentence::join_with_and;
-use rituals_compose::top_level;
+use rituals_compose::{top_level, workspace};
 
 /// The package every composed command line's own commands come from: the
 /// bundle of `add`, `regenerate` and the rest, which nothing could put back
@@ -49,24 +49,36 @@ pub fn task() -> Task {
 }
 
 fn run(command_line: &CommandLine, arguments: &RemoveArguments) -> Outcome {
-    let removal = prepare(command_line, arguments)?;
-    removal::finish(command_line, removal)
+    let current_dir = std::env::current_dir()
+        .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
+    // Asked before anything runs that could write it: `cargo metadata`
+    // creates or rewrites a missing or stale lockfile, and a refusal has to
+    // be able to put it back.
+    let lockfile = workspace::lockfile(&current_dir)?;
+    removal::finish(command_line, &arguments.name, |changes| {
+        let document =
+            changes.run_changing(&[lockfile.as_path()], || metadata::fetch(&current_dir))?;
+        prepare(command_line, arguments, &document, lockfile)
+    })
 }
 
 /// Reads the project and decides what `remove` would write, refusing when
-/// that would be unsafe. Nothing is written until every refusal here has
-/// passed.
+/// that would be unsafe. Runs inside the rollback, after the one read that
+/// can write, the `cargo metadata` that fetched `document`, so a refusal
+/// puts `lockfile` back as it was; everything here only reads.
 ///
 /// The order is from the cheapest and most specific question to the widest:
 /// which task the argument names, whether it is the one task that cannot be
 /// removed, whether the rest of the list still resolves without it, and,
 /// only for a task whose directory would be deleted, whether anything else
 /// depends on that directory and whether git can give its files back.
-fn prepare(command_line: &CommandLine, arguments: &RemoveArguments) -> Result<Removal, Failure> {
+fn prepare(
+    command_line: &CommandLine,
+    arguments: &RemoveArguments,
+    document: &Metadata,
+    lockfile: PathBuf,
+) -> Result<Removal, Failure> {
     let package = command_line.identity().package_name();
-    let current_dir = std::env::current_dir()
-        .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
-    let document = metadata::fetch(&current_dir)?;
     document.ensure_runs_in_its_own_project(package, "remove", &arguments.name)?;
 
     let imports = document.task_imports(package)?;
@@ -84,8 +96,7 @@ fn prepare(command_line: &CommandLine, arguments: &RemoveArguments) -> Result<Re
 
     // The same resolver `regenerate` runs, with this key left out, against
     // the metadata already fetched. Its refusal is returned as-is: it says
-    // what is wrong and what to do, and nothing has been written for it to
-    // undo.
+    // what is wrong and what to do.
     document.resolve_task_list_excluding(package, import.key())?;
 
     let project = document.locate_project(package)?;
@@ -106,7 +117,6 @@ fn prepare(command_line: &CommandLine, arguments: &RemoveArguments) -> Result<Re
 
     Ok(Removal {
         key: import.key().to_string(),
-        argument: arguments.name.clone(),
         has_dependency: import.package_name().is_some(),
         // Dropped only when nothing else in the workspace depends on the
         // crate: another package's own dependency on it would otherwise stop
@@ -115,6 +125,7 @@ fn prepare(command_line: &CommandLine, arguments: &RemoveArguments) -> Result<Re
             && import.other_dependents().is_empty(),
         manifests,
         workspace_root,
+        lockfile,
         member,
     })
 }

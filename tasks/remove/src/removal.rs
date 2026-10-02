@@ -1,5 +1,6 @@
-//! Writing everything `remove` has prepared, putting the project back if a
-//! write fails, and deleting the task's directory once nothing can.
+//! Preparing and writing everything `remove` does, putting the project back
+//! if it is refused or a write fails, and deleting the task's directory once
+//! nothing can.
 //
 // `redundant_pub_crate` (clippy nursery) wants `pub` here because this
 // module is private, but `pub(crate)` is the visibility that is actually
@@ -79,16 +80,18 @@ pub(crate) struct Member {
 
 /// Everything `remove` is about to write, captured before the first write.
 ///
-/// [`finish`] runs the writes inside [`rollback::attempt`], so a run that
-/// fails partway is put back: a `remove` that does not finish leaves the
-/// project exactly as it found it, and says so.
+/// [`finish`] prepares it and runs the writes inside one
+/// [`rollback::attempt`], so a run that is refused or fails partway is put
+/// back: a `remove` that does not finish leaves the project exactly as it
+/// found it, and says so.
 pub(crate) struct Removal {
     /// The key in `[package.metadata.ritual] tasks`.
     pub(crate) key: String,
-    /// What the person typed, which a retry types again.
-    pub(crate) argument: String,
     pub(crate) manifests: Manifests,
     pub(crate) workspace_root: PathBuf,
+    /// The workspace's `Cargo.lock`, which every `cargo metadata` this run
+    /// makes may write, recorded before each one.
+    pub(crate) lockfile: PathBuf,
     /// Whether a normal dependency of the composed CLI has this key.
     pub(crate) has_dependency: bool,
     /// Whether the `[workspace.dependencies]` entry the dependency inherits
@@ -106,13 +109,13 @@ struct Written {
     workspace_manifest: bool,
 }
 
-impl Removal {
-    /// What a person runs again once they have checked whatever a failed
-    /// run could not put back.
-    pub(crate) fn retry(&self) -> String {
-        format!("running `remove {}` again", self.argument)
-    }
+/// What a person runs again once they have checked whatever a failed run
+/// could not put back, given what they typed as the task's name.
+pub(crate) fn retry(argument: &str) -> String {
+    format!("running `remove {argument}` again")
+}
 
+impl Removal {
     /// The writes, in the order that keeps the project building at every
     /// step: the key leaves `tasks` and the generated file is rewritten
     /// without it before the dependency it mounted is removed, because a
@@ -187,8 +190,7 @@ impl Removal {
     /// build that must not change it fails until something brings it up to
     /// date.
     fn ensure_it_still_resolves(&self, changes: &mut Changes, package: &str) -> Outcome {
-        let lockfile = self.workspace_root.join("Cargo.lock");
-        let document = changes.run_changing(&[lockfile.as_path()], || {
+        let document = changes.run_changing(&[self.lockfile.as_path()], || {
             metadata::fetch(&self.workspace_root)
         })?;
 
@@ -225,11 +227,24 @@ impl Removal {
     }
 }
 
-/// Writes everything `removal` describes: either every write, then the
-/// deletion, or none of the writes and a report of why.
-pub(crate) fn finish(command_line: &CommandLine, mut removal: Removal) -> Outcome {
-    let retry = removal.retry();
-    let written = rollback::attempt(&retry, |changes| removal.write(changes, command_line))?;
+/// Prepares a removal with `prepare` and writes everything it describes:
+/// either every write, then the deletion, or none of the writes and a
+/// report of why.
+///
+/// `prepare` runs inside the same [`rollback::attempt`] as the writes, so
+/// whatever it records, such as the lockfile its `cargo metadata` may
+/// write, is put back when it refuses. `argument` is what the person typed
+/// as the task's name, for the retry a failure names.
+pub(crate) fn finish(
+    command_line: &CommandLine,
+    argument: &str,
+    prepare: impl FnOnce(&mut Changes) -> Result<Removal, Failure>,
+) -> Outcome {
+    let (removal, written) = rollback::attempt(&retry(argument), |changes| {
+        let mut removal = prepare(changes)?;
+        let written = removal.write(changes, command_line)?;
+        Ok((removal, written))
+    })?;
 
     let relative_cli_manifest =
         relative_to(removal.manifests.cli().path(), &removal.workspace_root);
@@ -320,6 +335,7 @@ mod tests {
 
     use super::{
         Manifests, Member, Removal, deletion_failure, ensure_it_is_gone, relative_to, report_lines,
+        retry,
     };
     use crate::test_support::{ScratchDir, TestOutcome};
 
@@ -389,9 +405,9 @@ mod tests {
         fn removal(&self) -> Result<Removal, Box<dyn Error>> {
             Ok(Removal {
                 key: "lint".to_string(),
-                argument: "lint".to_string(),
                 manifests: Manifests::read(&self.cli_manifest_path, &self.workspace_manifest_path)?,
                 workspace_root: self.workspace_root.clone(),
+                lockfile: self.workspace_root.join("Cargo.lock"),
                 has_dependency: true,
                 drops_inherited_entry: true,
                 member: Some(Member {
@@ -430,8 +446,7 @@ mod tests {
         removal: &mut Removal,
         steps: impl FnOnce(&mut Removal, &mut Changes) -> Outcome,
     ) -> Failure {
-        let retry = removal.retry();
-        let outcome = rollback::attempt(&retry, |changes| {
+        let outcome = rollback::attempt(&retry("lint"), |changes| {
             steps(removal, changes)?;
             Err::<(), _>(Failure::new("simulated failure"))
         });
@@ -446,12 +461,11 @@ mod tests {
     }
 
     #[test]
-    fn the_retry_names_remove_and_what_the_person_typed() -> TestOutcome {
-        let project = ScratchProject::new("retry-wording")?;
-        let mut removal = project.removal()?;
-        removal.argument = "rituals-core-lint".to_string();
-        assert_eq!(removal.retry(), "running `remove rituals-core-lint` again");
-        Ok(())
+    fn the_retry_names_remove_and_what_the_person_typed() {
+        assert_eq!(
+            retry("rituals-core-lint"),
+            "running `remove rituals-core-lint` again"
+        );
     }
 
     #[test]
@@ -608,8 +622,7 @@ mod tests {
     }
 
     fn fail_after_taking_out_a_missing_dependency(removal: &mut Removal) -> String {
-        let retry = removal.retry();
-        let outcome = rollback::attempt(&retry, |changes| {
+        let outcome = rollback::attempt(&retry("lint"), |changes| {
             removal.unlist(changes)?;
             removal.take_out_dependency(changes)
         });
