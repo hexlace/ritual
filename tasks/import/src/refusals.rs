@@ -47,6 +47,20 @@ pub(crate) fn ensure_the_key_is_not_the_bin_name(key: &Name, binary_name: &str) 
     Ok(())
 }
 
+/// The two commands an already-imported refusal can send a person to, each
+/// spelled as [`rituals_compose::top_level::management_command`] spells it
+/// for this command line.
+///
+/// Both are plain command strings, so as two positional arguments they could
+/// be swapped without the compiler noticing; named fields cannot be.
+pub(crate) struct RemedyCommands<'a> {
+    /// How a person types this command line's `regenerate`.
+    pub(crate) regenerate: &'a str,
+    /// How a person types this import again, from the command through its
+    /// arguments.
+    pub(crate) import_again: &'a str,
+}
+
 /// Refuses when `key` is already spoken for in the composed CLI's own
 /// manifest: a dependency, whether or not it is also listed, or listed with
 /// no matching dependency.
@@ -56,7 +70,9 @@ pub(crate) fn ensure_the_key_is_not_the_bin_name(key: &Name, binary_name: &str) 
 /// left out. `regenerate` is how a person types this command line's
 /// `regenerate`, and `import_again` how they type this import again, each as
 /// [`rituals_compose::top_level::management_command`] spells it, so every
-/// remedy here can be copied as written.
+/// remedy here can be copied as written. They are named fields of
+/// [`RemedyCommands`] because both are command strings, and a swap would
+/// compile and send a person to the wrong command.
 ///
 /// A dependency counts as declared when its key reads as `key` to rustc,
 /// with `-` as `_`, so the second arm names the underscore spelling too when
@@ -67,9 +83,12 @@ pub(crate) fn already_imported_refusal(
     key: &Name,
     already_a_dependency: bool,
     already_listed: bool,
-    regenerate: &str,
-    import_again: &str,
+    commands: &RemedyCommands,
 ) -> Outcome {
+    let RemedyCommands {
+        regenerate,
+        import_again,
+    } = commands;
     match (already_a_dependency, already_listed) {
         (true, true) => Err(Failure::new(format!(
             "`{key}` is already a task of `{package}`; import this crate under another key, or, \
@@ -94,7 +113,8 @@ mod tests {
     use rituals::Name;
 
     use super::{
-        already_imported_refusal, ensure_the_key_is_not_the_bin_name, unusable_default_key,
+        RemedyCommands, already_imported_refusal, ensure_the_key_is_not_the_bin_name,
+        unusable_default_key,
     };
 
     const REGENERATE: &str = "cargo ritual regenerate";
@@ -110,8 +130,10 @@ mod tests {
             &valid_name(key),
             already_a_dependency,
             already_listed,
-            REGENERATE,
-            IMPORT_AGAIN,
+            &RemedyCommands {
+                regenerate: REGENERATE,
+                import_again: IMPORT_AGAIN,
+            },
         )
         .err()
         .map(|failure| failure.to_string())

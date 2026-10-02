@@ -73,7 +73,11 @@ impl Import {
         for line in reported_lines(
             &self.cli_manifest_path,
             &self.workspace_root,
-            !changes.recorded_as_absent(&self.lockfile_path),
+            if changes.recorded_as_absent(&self.lockfile_path) {
+                LockfileChange::Created
+            } else {
+                LockfileChange::Updated
+            },
         ) {
             report(line);
         }
@@ -107,20 +111,27 @@ pub(crate) fn finish_by_regenerating(command_line: &CommandLine, import: &Import
     Ok(())
 }
 
+/// What `import` did to the lockfile: `cargo add` made it when the project
+/// had none, and otherwise changed the one it had.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LockfileChange {
+    Created,
+    Updated,
+}
+
 /// The lines `import` reports once it has written: the manifest it appended
-/// to, then the lockfile, which `cargo add` made if there was none.
+/// to, then the lockfile.
 fn reported_lines(
     cli_manifest_path: &Path,
     workspace_root: &Path,
-    lockfile_existed: bool,
+    lockfile: LockfileChange,
 ) -> [String; 2] {
     let manifest = cli_manifest_path
         .strip_prefix(workspace_root)
         .unwrap_or(cli_manifest_path);
-    let lockfile = if lockfile_existed {
-        "updated Cargo.lock"
-    } else {
-        "created Cargo.lock"
+    let lockfile = match lockfile {
+        LockfileChange::Created => "created Cargo.lock",
+        LockfileChange::Updated => "updated Cargo.lock",
     };
     [
         format!("updated {}", manifest.display()),
@@ -150,7 +161,9 @@ mod tests {
     use rituals::{Failure, Name};
     use rituals_compose::rollback;
 
-    use super::{Import, imported_but_not_regenerated, next_step, reported_lines, retry};
+    use super::{
+        Import, LockfileChange, imported_but_not_regenerated, next_step, reported_lines, retry,
+    };
     use crate::cargo_add;
     use crate::test_support::{ScratchProject, TestOutcome, typed_arguments};
 
@@ -187,11 +200,11 @@ mod tests {
         let manifest = root.join("ritual/Cargo.toml");
 
         assert_eq!(
-            reported_lines(&manifest, root, true),
+            reported_lines(&manifest, root, LockfileChange::Updated),
             ["updated ritual/Cargo.toml", "updated Cargo.lock"]
         );
         assert_eq!(
-            reported_lines(&manifest, root, false),
+            reported_lines(&manifest, root, LockfileChange::Created),
             ["updated ritual/Cargo.toml", "created Cargo.lock"]
         );
     }

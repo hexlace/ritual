@@ -98,8 +98,10 @@ fn prepare(
         &key,
         project.declares_dependency_key(&key),
         project.lists_task(&key),
-        &top_level::management_command(command_line, "regenerate"),
-        &format!("{import_command} {again}"),
+        &refusals::RemedyCommands {
+            regenerate: &top_level::management_command(command_line, "regenerate"),
+            import_again: &format!("{import_command} {again}"),
+        },
     )?;
     document.resolve_task_list(package)?;
 
