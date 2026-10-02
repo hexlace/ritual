@@ -6,6 +6,7 @@ members = [
     "crates/rituals-core",
     "tasks/add",
     "tasks/create",
+    "tasks/import",
     "tasks/new",
     "tasks/regenerate",
     "xtask",
