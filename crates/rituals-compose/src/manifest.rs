@@ -1,6 +1,6 @@
-//! Editing a manifest in place with `toml_edit`, so a scaffolding task can
-//! append to a manifest a human wrote without disturbing its comments or
-//! formatting.
+//! Editing a manifest in place with `toml_edit`, so a task can append to a
+//! manifest a human wrote, or take an entry out of it, without disturbing
+//! its comments or formatting.
 
 use std::path::{Path, PathBuf};
 
@@ -9,7 +9,10 @@ use toml_edit::{Array, DocumentMut, InlineTable, Item, RawString, Value};
 
 use crate::rollback::Changes;
 
-/// A manifest a scaffolding task is about to edit.
+mod entry_removal;
+mod removal;
+
+/// A manifest a task is about to edit.
 ///
 /// It is written only through a run's [`Changes`], which records the bytes
 /// on disk before the first write, so a failed run puts exactly those bytes
