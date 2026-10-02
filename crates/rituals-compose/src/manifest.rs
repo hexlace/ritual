@@ -76,7 +76,7 @@ impl Manifest {
     ///
     /// This writes the whole file from the in-memory document, with no
     /// check that the file on disk still matches what [`Manifest::read`]
-    /// saw: two scaffolding tasks running at once in the same checkout, or
+    /// saw: two tasks running at once in the same checkout, or
     /// a hand edit landing between the read and this write, can be
     /// overwritten by it. This is deliberate: it carries the same
     /// property `cargo add` itself has — one person runs this by hand, in

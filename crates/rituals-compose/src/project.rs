@@ -157,8 +157,8 @@ impl Project<'_> {
 /// receive — `Identity::package_name()` — rather than being read directly:
 /// `cargo metadata` walks up from the current directory to find the
 /// workspace root, and this function then identifies the caller among the
-/// workspace's members by name, so `add` and `regenerate` work from any
-/// subdirectory of a project.
+/// workspace's members by name, so `add`, `regenerate` and `remove` work
+/// from any subdirectory of a project.
 ///
 /// # Errors
 ///

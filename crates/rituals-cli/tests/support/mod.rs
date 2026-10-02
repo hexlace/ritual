@@ -48,10 +48,12 @@
 pub(crate) mod checkout;
 pub(crate) mod crates;
 pub(crate) mod generated;
+pub(crate) mod git;
 pub(crate) mod help;
 pub(crate) mod manifest;
 pub(crate) mod process;
 pub(crate) mod project;
+pub(crate) mod removal;
 pub(crate) mod tree;
 
 use std::error::Error;

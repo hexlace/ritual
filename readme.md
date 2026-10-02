@@ -93,9 +93,9 @@ cargo ritual hello world
 hello, world
 ```
 
-`cargo ritual --help` lists `hello` beside ritual's own `add`, `regenerate`,
-`new` and `create`. `new` and `create` refuse inside a project; every
-command line carries all four, so it looks the same wherever it runs.
+`cargo ritual --help` lists `hello` beside ritual's own commands. `new` and
+`create` refuse inside a project; every command line carries all of them, so
+it looks the same wherever it runs.
 
 ## Concepts
 
@@ -164,8 +164,8 @@ task, and bundles nest.
 
 ### Ritual's own commands are a bundle too
 
-`add`, `regenerate`, `new` and `create` come from the bundle `rituals-core`,
-imported under the key `ritual`. A new project's command line is also called
+`add`, `regenerate`, `new`, `create` and `remove` come from the bundle
+`rituals-core`, imported under the key `ritual`. A new project's command line is also called
 `ritual`, so those commands appear directly: `cargo ritual add`, not
 `cargo ritual ritual add`. If you name your command line something else,
 with `ritual new demo --cli acme`, they stay grouped: your tasks run as
@@ -215,22 +215,41 @@ crate's path filled in.
 
 ### Remove a task
 
-The steps go in this order, because the command line has to compile for
-`regenerate` to run:
+Run this anywhere inside the project, with the task's key in
+`[package.metadata.ritual] tasks`, or with the crate it imports:
 
-1. Drop its key from `[package.metadata.ritual] tasks`.
-2. Run `cargo ritual regenerate`, so the generated file stops naming it.
-3. Remove its dependency line. If `add` created it, also remove its
-   workspace member entry and its `tasks/` directory.
+```sh
+cargo ritual remove lint
+```
 
-If you removed the dependency first, the build fails in the generated file.
-Put the line back and start again from step 1.
+`remove` takes the key out of `tasks`, regenerates the command line, and only
+then removes the dependency line, the order the build needs. If the task is a
+crate in your workspace, as `add` creates, it also removes its `members`
+entry and deletes its directory. A path dependency outside the workspace
+loses only its dependency line: its directory stays where it is. Nothing is
+committed for you. Look at the change, and commit it when it is what you
+meant.
+
+It refuses before writing anything when:
+
+- the name is neither a key nor a crate one of them imports, or the crate is
+  imported by more than one key (remove one by its key);
+- the task is `ritual`, the bundle of ritual's own commands, which nothing
+  could put back;
+- the task has a directory to delete and git cannot give back everything in
+  it. That means the project is not a git repository, or the directory holds
+  files that are uncommitted, untracked or ignored; the refusal names them;
+- another crate depends on the task's directory, or the directory holds other
+  workspace members or lies outside the workspace.
+
+If anything fails after `remove` starts writing, the project is put back as
+it was.
 
 ### Inside a project, use `cargo ritual`
 
 `cargo ritual` works from any directory inside the project. The global
-`ritual` carries `add` and `regenerate` too, but they refuse in your
-project: use `cargo ritual add`.
+`ritual` carries `add`, `regenerate` and `remove` too, but they refuse in
+your project: use `cargo ritual add`.
 
 ## Where next
 

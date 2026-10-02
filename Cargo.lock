@@ -141,6 +141,7 @@ dependencies = [
  "rituals-core-create",
  "rituals-core-new",
  "rituals-core-regenerate",
+ "rituals-core-remove",
 ]
 
 [[package]]

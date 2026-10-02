@@ -12,10 +12,10 @@
 //! capability they did not already have, and nothing of its own.
 //!
 //! The children are the packages `rituals-core-add`,
-//! `rituals-core-regenerate`, `rituals-core-new` and `rituals-core-create`,
-//! imported here under the names they answer to — `add`, `regenerate`,
-//! `new` and `create` — the same way a composed command line imports any
-//! task.
+//! `rituals-core-regenerate`, `rituals-core-new`, `rituals-core-create` and
+//! `rituals-core-remove`, imported here under the names they answer to —
+//! `add`, `regenerate`, `new`, `create` and `remove` — the same way a
+//! composed command line imports any task.
 
 use rituals::Task;
 
@@ -25,8 +25,8 @@ use rituals::Task;
 /// The order of the children is load-bearing. Mounted under a key equal to
 /// the compiled binary's own name, this bundle is flattened at startup and
 /// its children take its place at the top level *in this order*, which is
-/// what makes `ritual --help` list `add`, `regenerate`, `new` and `create`
-/// in that order. Reordering them changes that output.
+/// what makes `ritual --help` list `add`, `regenerate`, `new`, `create` and
+/// `remove` in that order. Reordering them changes that output.
 //
 // No `# Examples` section: a `task()` function has exactly one call-site
 // shape — a mount line in a generated file — and an example here could only
@@ -49,6 +49,7 @@ pub fn task() -> Task {
             ("regenerate", regenerate::task()),
             ("new", new::task()),
             ("create", create::task()),
+            ("remove", remove::task()),
         ],
     )
 }
@@ -56,7 +57,7 @@ pub fn task() -> Task {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn the_bundle_names_its_four_children_in_the_order_help_depends_on() {
+    fn the_bundle_names_its_children_in_the_order_help_depends_on() {
         // Task::children is crate-internal to `rituals` by design, so
         // Task's own Debug impl — which exists to print
         // `children: [names]` — is the only door onto the order from
@@ -65,8 +66,8 @@ mod tests {
         // level in exactly this order.
         let rendered = format!("{:?}", super::task());
         assert!(
-            rendered.contains(r#"children: ["add", "regenerate", "new", "create"]"#),
-            "expected the four children in flatten order; Debug was: {rendered}"
+            rendered.contains(r#"children: ["add", "regenerate", "new", "create", "remove"]"#),
+            "expected the children in flatten order; Debug was: {rendered}"
         );
     }
 }
