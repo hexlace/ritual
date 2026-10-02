@@ -18,6 +18,7 @@ use std::path::Path;
 use rituals::{Failure, Name};
 
 use crate::metadata::{Metadata, Package};
+use crate::rust_name::extern_identifier;
 
 /// Everything the framework needs to know about the composed CLI crate it
 /// is running as part of: where the workspace is, which package it is, and
@@ -115,10 +116,10 @@ impl Project<'_> {
     /// ```
     #[must_use]
     pub fn declares_dependency_key(&self, key: &Name) -> bool {
-        let extern_identifier = key.as_str().replace('-', "_");
+        let key_identifier = extern_identifier(key.as_str());
         self.package.dependencies.iter().any(|dependency| {
             let dependency_key = dependency.rename.as_deref().unwrap_or(&dependency.name);
-            dependency_key.replace('-', "_") == extern_identifier
+            extern_identifier(dependency_key) == key_identifier
         })
     }
 

@@ -51,6 +51,7 @@ pub mod manifest;
 pub mod metadata;
 mod project;
 pub mod rollback;
+pub mod rust_name;
 pub mod sentence;
 pub mod shell;
 pub mod source;

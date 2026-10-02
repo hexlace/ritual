@@ -16,6 +16,7 @@
 )]
 
 use rituals::{Failure, InvalidName, Name, Outcome};
+use rituals_compose::rust_name::other_spelling_clause;
 
 /// The refusal for a crate name that cannot be a command's name, when the
 /// person gave no key to import it under.
@@ -78,7 +79,7 @@ pub(crate) fn already_imported_refusal(
             "`{package}` already has a dependency called `{key}`{other_spelling} that is not in \
              [package.metadata.ritual] tasks; import this crate under another key, or, to make \
              that dependency the task, add `\"{key}\"` to that list and run `{regenerate}`",
-            other_spelling = underscore_spelling_clause(key),
+            other_spelling = other_spelling_clause(key.as_str()),
         ))),
         (false, true) => Err(Failure::new(format!(
             "`{key}` is named in [package.metadata.ritual] tasks but `{package}` has no \
@@ -86,19 +87,6 @@ pub(crate) fn already_imported_refusal(
         ))),
         (false, false) => Ok(()),
     }
-}
-
-/// The clause naming the underscore spelling of `key`, when it has a hyphen,
-/// led by a space: " (or `a_b`, which Rust reads as the same name)" for
-/// `a-b`. Empty when there is no other spelling to name.
-fn underscore_spelling_clause(key: &Name) -> String {
-    if !key.as_str().contains('-') {
-        return String::new();
-    }
-    format!(
-        " (or `{}`, which Rust reads as the same name)",
-        key.as_str().replace('-', "_")
-    )
 }
 
 #[cfg(test)]

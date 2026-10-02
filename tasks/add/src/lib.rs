@@ -10,6 +10,7 @@ use std::path::Path;
 use import::Import;
 use rituals::{CommandLine, Failure, Name, Outcome, Task, clap};
 use rituals_compose::manifest::{self, Manifest};
+use rituals_compose::rust_name::other_spelling_clause;
 use rituals_compose::{metadata, top_level};
 
 /// `add`'s one argument: the name the new task will answer to.
@@ -220,7 +221,7 @@ fn already_imported_refusal(
             "`{package}` already has a dependency called `{name}`{other_spelling} that is not in \
              [package.metadata.ritual] tasks; add `\"{name}\"` to that list and run \
              `{regenerate}`",
-            other_spelling = underscore_spelling_clause(name),
+            other_spelling = other_spelling_clause(name.as_str()),
         ))),
         (false, true) => Err(Failure::new(format!(
             "`{name}` is named in [package.metadata.ritual] tasks but `{package}` has no \
@@ -229,19 +230,6 @@ fn already_imported_refusal(
         ))),
         (false, false) => Ok(()),
     }
-}
-
-/// The clause naming the underscore spelling of `name`, when it has a hyphen,
-/// led by a space: " (or `a_b`, which Rust reads as the same name)" for
-/// `a-b`. Empty when there is no other spelling to name.
-fn underscore_spelling_clause(name: &Name) -> String {
-    if !name.as_str().contains('-') {
-        return String::new();
-    }
-    format!(
-        " (or `{}`, which Rust reads as the same name)",
-        name.as_str().replace('-', "_")
-    )
 }
 
 /// The refusal for a workspace that already has a package called `name` —

@@ -21,6 +21,7 @@ use rituals::{Failure, Name, Outcome};
 use crate::generated_file::Entry;
 use crate::metadata::{DepKind, Metadata, Node, Package};
 use crate::project;
+use crate::rust_name::extern_identifier;
 use crate::sentence::join_with_and;
 
 /// Reads `package_name`'s `[package.metadata.ritual] tasks` list from
@@ -196,11 +197,11 @@ fn find_dependency<'a>(key: &Name, node: &'a Node, packages: &'a [Package]) -> D
     // Matched by name alone, regardless of dep_kinds, so a dependency that
     // exists only under a predicate or only as a dev-dependency is found
     // here and refused by the checks below rather than read as absent.
-    let extern_identifier = key.as_str().replace('-', "_");
+    let key_identifier = extern_identifier(key.as_str());
     let node_dependency = node
         .deps
         .iter()
-        .find(|dependency| dependency.name == extern_identifier);
+        .find(|dependency| dependency.name == key_identifier);
     let Some(node_dependency) = node_dependency else {
         return DependencyFound::Absent;
     };
