@@ -74,8 +74,9 @@ Beyond `rituals`, its dependencies are here because of what the job is:
 Ordinary task crates, one per management task. Each depends on
 `rituals` like any task, and on `rituals-compose` for the work. Each is
 marked `task = true` and exposes `task()`. None depends on another. `add`
-finishes by calling the same regenerate path `regenerate` does. That path
-lives in `rituals-compose`, so both can reach it without depending on each
+and `remove` finish by regenerating through the same rendering `regenerate`
+uses, `remove` inside its rollback. That rendering lives in
+`rituals-compose`, so all three can reach it without depending on each
 other.
 
 ## `rituals-core` — a pure bundle
