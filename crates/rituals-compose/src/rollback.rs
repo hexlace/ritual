@@ -100,12 +100,52 @@ use rituals::Failure;
 /// # Errors
 ///
 /// Returns `run`'s own failure, extended as described above.
+///
+/// # Panics
+///
+/// Panics if called inside another [`attempt`] on the same thread. A nested
+/// run's changes would be kept when it succeeds, and then survive the outer
+/// run's failure while that failure says the project was put back. Code that
+/// writes inside a run takes the outer run's `&mut Changes` instead.
 pub fn attempt<T>(
     retry: &str,
     run: impl FnOnce(&mut Changes) -> Result<T, Failure>,
 ) -> Result<T, Failure> {
+    let _inside = InsideAttempt::enter();
     let mut changes = Changes::new();
     run(&mut changes).map_err(|failure| changes.undo(&failure, retry))
+}
+
+// RS-NO-STATICS: a thread-local is the only place a check for nesting can
+// live, because a nested call is handed nothing that ties it to the outer
+// one. The inconsistency the rule warns about, two linked versions of this
+// crate each with their own flag, is a case the check cannot reach anyway:
+// a run under one version cannot hand its `Changes` to the other.
+thread_local! {
+    /// Whether this thread is inside [`attempt`]'s run.
+    static INSIDE_ATTEMPT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Marks this thread as inside [`attempt`] for as long as it is held, and
+/// clears the mark when dropped, so a run that panics does not leave every
+/// later [`attempt`] on the thread refused.
+struct InsideAttempt;
+
+impl InsideAttempt {
+    fn enter() -> Self {
+        assert!(
+            !INSIDE_ATTEMPT.replace(true),
+            "rollback::attempt cannot be nested: the inner run's changes would survive the \
+             outer run's failure; pass the outer run's &mut Changes down instead"
+        );
+        Self
+    }
+}
+
+impl Drop for InsideAttempt {
+    fn drop(&mut self) {
+        INSIDE_ATTEMPT.set(false);
+    }
 }
 
 /// What a run inside [`attempt`] has changed, recorded before each change is
@@ -483,6 +523,42 @@ mod tests {
             let _ = std::fs::remove_file(&probe);
         }
         enforced
+    }
+
+    #[test]
+    #[should_panic(expected = "pass the outer run's &mut Changes down instead")]
+    fn an_attempt_inside_an_attempt_is_refused() {
+        let _ = attempt(RETRY, |_outer| attempt(RETRY, |_inner| Ok(())));
+    }
+
+    #[test]
+    fn attempts_in_sequence_on_one_thread_each_run() -> TestOutcome {
+        let scratch = ScratchDir::new("rollback-sequence")?;
+        let path = scratch.path().join("Cargo.toml");
+
+        attempt(RETRY, |changes| changes.write(&path, "first\n"))?;
+        let _ = fail_after(|changes| changes.write(&path, "second\n"));
+        attempt(RETRY, |changes| changes.write(&path, "third\n"))?;
+
+        assert_eq!(std::fs::read_to_string(&path)?, "third\n");
+        Ok(())
+    }
+
+    #[test]
+    fn an_attempt_after_one_that_panicked_still_runs() {
+        // The refused nested call panics inside the outer run, so the outer
+        // run unwinds without returning: the mark has to be cleared on the
+        // way out regardless.
+        let unwound = std::panic::catch_unwind(|| {
+            let _ = attempt(RETRY, |_outer| attempt(RETRY, |_inner| Ok(())));
+        });
+        assert!(unwound.is_err(), "the nested attempt must have panicked");
+
+        let outcome = attempt(RETRY, |_changes| Ok(()));
+        assert!(
+            outcome.is_ok(),
+            "expected the later run to succeed: {outcome:?}"
+        );
     }
 
     #[test]
