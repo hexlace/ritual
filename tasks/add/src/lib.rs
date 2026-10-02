@@ -88,7 +88,10 @@ fn prepare(command_line: &CommandLine, arguments: &AddArguments) -> Result<Impor
         &name,
         project.declares_dependency_key(&name),
         project.lists_task(&name),
-        &regenerate,
+        &RemedyCommands {
+            regenerate: &regenerate,
+            import: &top_level::management_command(command_line, "import"),
+        },
     )?;
 
     let tasks_directory = project.workspace_root().join("tasks");
@@ -172,6 +175,19 @@ fn bin_name_refusal(binary_name: &str) -> Failure {
     ))
 }
 
+/// The two commands an already-imported refusal can send a person to, each
+/// spelled as [`top_level::management_command`] spells it for this command
+/// line.
+///
+/// Both are plain command strings, so as two positional arguments they could
+/// be swapped without the compiler noticing; named fields cannot be.
+struct RemedyCommands<'a> {
+    /// How a person types this command line's `regenerate`.
+    regenerate: &'a str,
+    /// How a person types this command line's `import`.
+    import: &'a str,
+}
+
 /// Refuses when `name` is already spoken for in the composed CLI's own
 /// manifest — a dependency (whether or not it is also listed), or listed
 /// with no matching dependency. Runs before the `tasks/<name>` directory is
@@ -202,16 +218,17 @@ fn bin_name_refusal(binary_name: &str) -> Failure {
 /// so the second arm names the underscore spelling too when `name` has a
 /// hyphen: the manifest line it is about may be spelled either way.
 ///
-/// `regenerate` is how a person types this command line's `regenerate`, as
-/// [`top_level::management_command`] spells it, so every remedy here can be
-/// copied as written.
+/// `commands` holds how a person types this command line's `regenerate` and
+/// `import`, as [`top_level::management_command`] spells them, so every remedy
+/// here can be copied as written.
 fn already_imported_refusal(
     package: &str,
     name: &Name,
     already_a_dependency: bool,
     already_listed: bool,
-    regenerate: &str,
+    commands: &RemedyCommands,
 ) -> Outcome {
+    let RemedyCommands { regenerate, import } = commands;
     match (already_a_dependency, already_listed) {
         (true, true) => Err(Failure::new(format!(
             "`{name}` is already a task of `{package}`; if its command is missing from the \
@@ -225,8 +242,8 @@ fn already_imported_refusal(
         ))),
         (false, true) => Err(Failure::new(format!(
             "`{name}` is named in [package.metadata.ritual] tasks but `{package}` has no \
-             dependency called `{name}`; drop it from the list and run add again, or add the \
-             dependency by hand and run `{regenerate}`"
+             dependency called `{name}`; drop it from the list, then run add again, or import \
+             the crate it names with `{import} <crate> {name}`"
         ))),
         (false, false) => Ok(()),
     }
@@ -295,11 +312,19 @@ fn leftover_refusal(
 mod tests {
     use rituals::Name;
 
-    use super::{already_imported_refusal, ensure_the_name_is_not_the_bin_name};
+    use super::{RemedyCommands, already_imported_refusal, ensure_the_name_is_not_the_bin_name};
 
     /// How a default project's `regenerate` is typed, handed to the
     /// refusals the way `prepare` hands them the real spelling.
     const REGENERATE: &str = "cargo ritual regenerate";
+
+    /// How a default project's `import` is typed, likewise.
+    const IMPORT: &str = "cargo ritual import";
+
+    const COMMANDS: RemedyCommands<'_> = RemedyCommands {
+        regenerate: REGENERATE,
+        import: IMPORT,
+    };
 
     /// A `Name` from a literal already known to be valid — mirrors
     /// `tasks/create`'s own `demo_name` helper: unwrapping a `Result` this
@@ -317,7 +342,7 @@ mod tests {
     #[test]
     fn already_imported_refusal_refuses_a_dependency_that_is_also_listed() {
         let result =
-            already_imported_refusal("demo-ritual", &valid_name("lint"), true, true, REGENERATE);
+            already_imported_refusal("demo-ritual", &valid_name("lint"), true, true, &COMMANDS);
         assert!(result.is_err(), "expected the import to be refused");
         if let Err(error) = result {
             let message = error.to_string();
@@ -330,7 +355,7 @@ mod tests {
     #[test]
     fn already_imported_refusal_refuses_a_dependency_that_is_not_listed() {
         let result =
-            already_imported_refusal("demo-ritual", &valid_name("lint"), true, false, REGENERATE);
+            already_imported_refusal("demo-ritual", &valid_name("lint"), true, false, &COMMANDS);
         assert!(result.is_err(), "expected the import to be refused");
         if let Err(error) = result {
             assert!(error.to_string().contains("not in"));
@@ -345,7 +370,7 @@ mod tests {
     #[test]
     fn already_imported_refusal_names_the_underscore_spelling_of_a_hyphenated_key() {
         let result =
-            already_imported_refusal("demo-ritual", &valid_name("a-b"), true, false, REGENERATE);
+            already_imported_refusal("demo-ritual", &valid_name("a-b"), true, false, &COMMANDS);
         assert!(result.is_err(), "expected the import to be refused");
         if let Err(error) = result {
             assert_eq!(
@@ -360,7 +385,7 @@ mod tests {
     #[test]
     fn already_imported_refusal_offers_no_second_spelling_for_a_key_with_no_hyphen() {
         let result =
-            already_imported_refusal("demo-ritual", &valid_name("lint"), true, false, REGENERATE);
+            already_imported_refusal("demo-ritual", &valid_name("lint"), true, false, &COMMANDS);
         assert!(result.is_err(), "expected the import to be refused");
         if let Err(error) = result {
             assert_eq!(
@@ -379,14 +404,24 @@ mod tests {
     #[test]
     fn already_imported_refusal_refuses_a_name_listed_without_a_dependency() {
         let result =
-            already_imported_refusal("demo-ritual", &valid_name("zzz"), false, true, REGENERATE);
+            already_imported_refusal("demo-ritual", &valid_name("zzz"), false, true, &COMMANDS);
         assert!(result.is_err(), "expected the import to be refused");
         if let Err(error) = result {
             let message = error.to_string();
             assert!(message.contains("named in [package.metadata.ritual] tasks"));
             assert!(message.contains("no dependency called `zzz`"));
-            assert!(message.contains("run add again"));
-            assert!(message.contains("run `cargo ritual regenerate`"));
+            assert!(message.contains("drop it from the list, then run add again"));
+            assert!(
+                message
+                    .contains("import the crate it names with `cargo ritual import <crate> zzz`"),
+                "expected the import command as the way to supply the dependency; message was: \
+                 {message}"
+            );
+            assert!(
+                !message.contains("by hand"),
+                "a person is never sent to edit the manifest for the dependency; message was: \
+                 {message}"
+            );
         }
     }
 
@@ -397,7 +432,7 @@ mod tests {
             &valid_name("second"),
             false,
             false,
-            REGENERATE,
+            &COMMANDS,
         );
         assert!(
             result.is_ok(),
