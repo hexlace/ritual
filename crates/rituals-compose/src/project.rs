@@ -253,6 +253,8 @@ mod tests {
                     name: (*name).to_string(),
                     kind: None,
                     rename: None,
+                    path: None,
+                    target: None,
                 })
                 .collect(),
             metadata: serde_json::json!({ "ritual": { "tasks": tasks } }),

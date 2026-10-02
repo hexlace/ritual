@@ -18,19 +18,19 @@ use rituals::{Failure, Name};
 use crate::generated_file::Entry;
 
 pub use schema::Metadata;
-pub(crate) use schema::{DepKind, Node, Package};
+pub(crate) use schema::{DepKind, Dependency, Node, NodeDependency, Package};
 
 /// A composed CLI crate, found among a workspace's members. Declared in the
 /// private `crate::project` module and re-exported here, at the path a
 /// caller reaches it by: only ever built by [`Metadata::locate_project`].
 #[doc(inline)]
 pub use crate::project::Project;
-// `Dependency` has no production reader outside this module — `Project`'s
-// own accessors read `Package::dependencies`' elements by field, never
-// construct one — but this crate's tests build one directly, to exercise
-// those accessors without a real `cargo metadata` call.
-#[cfg(test)]
-pub(crate) use schema::Dependency;
+/// One key of a composed CLI's `tasks` list and what it imports. Declared in
+/// the private `crate::task_imports` module and re-exported here, at the
+/// path a caller reaches it by: only ever built by
+/// [`Metadata::task_imports`].
+#[doc(inline)]
+pub use crate::task_imports::TaskImport;
 
 /// The `cargo metadata` schema version this framework was written against.
 ///
@@ -187,6 +187,78 @@ impl Metadata {
     /// ```
     pub fn resolve_task_list(&self, package_name: &str) -> Result<Vec<Entry>, Failure> {
         crate::task_list::resolve(self, package_name)
+    }
+
+    /// Like [`Metadata::resolve_task_list`], with every occurrence of `key`
+    /// left out of the list before anything is checked.
+    ///
+    /// What a task that is about to take `key` out needs to know first: that
+    /// the list it leaves behind still resolves, so that regenerating after
+    /// the removal cannot fail on some other entry. Whatever is wrong with
+    /// `key` itself is not looked at, so a broken key can be the one removed.
+    /// A `key` that is not in the list changes nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`Failure`] [`Metadata::resolve_task_list`] would, for any
+    /// name other than `key`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    ///
+    /// use rituals_compose::metadata;
+    ///
+    /// // Reads a document `fetch` already produced from a real
+    /// // `cargo metadata` call, so this example stays `no_run`.
+    /// let document = metadata::fetch(Path::new("."))?;
+    /// let remaining = document.resolve_task_list_excluding("demo-ritual", "lint")?;
+    /// println!("{} tasks would remain", remaining.len());
+    /// # Ok::<(), rituals::Failure>(())
+    /// ```
+    pub fn resolve_task_list_excluding(
+        &self,
+        package_name: &str,
+        key: &str,
+    ) -> Result<Vec<Entry>, Failure> {
+        crate::task_list::resolve_excluding(self, package_name, key)
+    }
+
+    /// Reads every key in `package_name`'s `[package.metadata.ritual] tasks`
+    /// list, in manifest order, and answers what each one imports: its
+    /// package, its directory, whether that is a member of the workspace,
+    /// and what else in the workspace depends on it.
+    ///
+    /// A pure read that checks less than [`Metadata::resolve_task_list`]. A
+    /// key need not be a usable name or name a task crate, because a person
+    /// taking a broken key out is exactly who needs to see it; a key with no
+    /// normal dependency behind it is reported as having no package.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`Failure`] when `package_name` cannot be located, when its
+    /// `tasks` list is absent or not a list of strings, and when
+    /// `cargo metadata` puts a key's package somewhere other than its
+    /// dependency's `path` says.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    ///
+    /// use rituals_compose::metadata;
+    ///
+    /// // Reads a document `fetch` already produced from a real
+    /// // `cargo metadata` call, so this example stays `no_run`.
+    /// let document = metadata::fetch(Path::new("."))?;
+    /// for task in document.task_imports("demo-ritual")? {
+    ///     println!("{} imports {:?}", task.key(), task.package_name());
+    /// }
+    /// # Ok::<(), rituals::Failure>(())
+    /// ```
+    pub fn task_imports(&self, package_name: &str) -> Result<Vec<TaskImport<'_>>, Failure> {
+        crate::task_imports::read(self, package_name)
     }
 
     /// Reports whether any workspace member in this document is already

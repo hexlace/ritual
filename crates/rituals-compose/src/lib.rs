@@ -51,6 +51,7 @@ pub mod rollback;
 pub mod sentence;
 pub mod source;
 pub mod task_crate;
+mod task_imports;
 mod task_list;
 #[cfg(test)]
 mod test_support;

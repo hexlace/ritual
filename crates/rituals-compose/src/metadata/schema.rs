@@ -25,9 +25,9 @@ use serde::Deserialize;
 /// Get one from [`super::fetch`], which runs `cargo metadata` and parses
 /// what it prints. Its fields are not public: a caller asks it questions
 /// through its methods — [`Metadata::locate_project`],
-/// [`Metadata::resolve_task_list`] and [`Metadata::has_workspace_member`] —
-/// so the subset of Cargo's schema it reads can change without breaking
-/// anyone.
+/// [`Metadata::resolve_task_list`], [`Metadata::task_imports`] and
+/// [`Metadata::has_workspace_member`] — so the subset of Cargo's schema it
+/// reads can change without breaking anyone.
 ///
 /// # Examples
 ///
@@ -91,28 +91,27 @@ pub(crate) struct Target {
 /// `[build-dependencies]`) table, as that package's manifest declares it —
 /// not yet resolved to the package it points at.
 ///
-/// [`crate::metadata::Project::declares_dependency_key`]'s "already a
-/// dependency" check matches by `name`-or-`rename` regardless of `kind` — a
-/// key already spoken for under any kind cannot be reused — so `kind`
-/// itself is read only by this module's own tests, that being a genuine
-/// part of what a parsing test over this schema should cover even though no
-/// production code branches on it.
+/// A key already spoken for under any kind cannot be reused, so
+/// [`crate::metadata::Project::declares_dependency_key`] matches by
+/// `name`-or-`rename` regardless of `kind`. Finding which dependency a task
+/// key imports is stricter: only a normal dependency counts, and one
+/// declared on every target is preferred over one under a `cfg(...)`
+/// predicate.
 #[derive(Debug, Deserialize)]
 pub(crate) struct Dependency {
     pub(crate) name: String,
     /// `null` for a normal dependency, `"dev"` or `"build"` otherwise.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "read by this module's own parsing tests; no production code branches on \
-                      a manifest-level dependency's kind, since the presence check matches \
-                      regardless of it"
-        )
-    )]
     pub(crate) kind: Option<String>,
     /// The `package = "…"` rename, when the manifest gives one.
     pub(crate) rename: Option<String>,
+    /// The directory a `path = "…"` dependency points at, absolute. Absent
+    /// for a registry or git dependency. For a path dependency, `cargo
+    /// metadata` derives the resolved package's `manifest_path` from it.
+    pub(crate) path: Option<PathBuf>,
+    /// `null` when the dependency holds on every target, or the `cfg(...)`
+    /// predicate or target triple it was declared under in
+    /// `[target.<…>.dependencies]`.
+    pub(crate) target: Option<String>,
 }
 
 /// The resolved dependency graph.
