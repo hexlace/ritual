@@ -5,8 +5,9 @@
 //! check of the project as it is can pass for a project that breaks the
 //! moment the directory goes. So each of these asks about the project
 //! without it: a crate that declares a path into the directory, whatever its
-//! kind, feature or place, and a `members` glob whose last match the
-//! directory is. Each story's project builds, and passes `cargo metadata`,
+//! kind, feature or place, a `members` glob whose last match the
+//! directory is, and a `[patch]` into it, in the manifest or in
+//! `.cargo/config.toml`. Each story's project builds, and passes `cargo metadata`,
 //! before `remove` runs; each refusal leaves the tree byte-identical,
 //! `Cargo.lock` included, and then the cause is cleared and the same
 //! `remove` succeeds and leaves a project that builds with `--locked`.
@@ -228,5 +229,48 @@ fn a_member_entry_spelled_any_way_cargo_reads_it_is_taken_out() -> TestOutcome {
             git::commit_everything(project.root())?;
         }
         Ok(())
+    })
+}
+
+/// A `[patch]` entry pointing into the directory, in the workspace manifest
+/// or in the project's `.cargo/config.toml`, is read by Cargo on every build
+/// whether or not anything uses it, so deleting the directory breaks the
+/// build. Each is refused, naming the entry, and once both are gone the
+/// same `remove` succeeds.
+#[test]
+fn a_patch_into_the_directory_is_refused_in_the_manifest_and_in_cargo_config() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("remove-refuses-patch-into-it")?;
+        let project = project_with_a_committed_task(checkout, &working_dir, "greet")?;
+        let patch = "[patch.crates-io]\ngreet = { path = \"tasks/greet\" }\n";
+
+        let workspace_manifest = project.workspace_manifest_path();
+        let manifest_before = support::read_text(&workspace_manifest)?;
+        write_text(&workspace_manifest, &format!("{manifest_before}\n{patch}"))?;
+        assert_it_builds(&project, "with an unused [patch] in the manifest")?;
+        git::commit_everything(project.root())?;
+        assert_remove_is_refused_and_leaves_the_lockfile(
+            &project,
+            "greet",
+            &["[patch.crates-io] greet", "remove or repoint it first"],
+            |_| Ok(()),
+        )?;
+
+        write_text(&workspace_manifest, &manifest_before)?;
+        let cargo_config = project.root().join(".cargo/config.toml");
+        let config_before = support::read_text(&cargo_config)?;
+        write_text(&cargo_config, &format!("{config_before}\n{patch}"))?;
+        assert_it_builds(&project, "with an unused [patch] in .cargo/config.toml")?;
+        git::commit_everything(project.root())?;
+        assert_remove_is_refused_and_leaves_the_lockfile(
+            &project,
+            "greet",
+            &["[patch.crates-io] greet in ", ".cargo/config.toml"],
+            |_| Ok(()),
+        )?;
+
+        write_text(&cargo_config, &config_before)?;
+        git::commit_everything(project.root())?;
+        assert_remove_succeeds_and_it_builds(&project, "greet")
     })
 }
