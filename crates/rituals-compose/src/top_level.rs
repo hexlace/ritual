@@ -1,6 +1,6 @@
-//! The one check `add` and `regenerate` run before they write: whether a
-//! command name a project is about to mount is still free at the top level
-//! of the command line currently running.
+//! The one check `add`, `import` and `regenerate` run before they write:
+//! whether a command name a project is about to mount is still free at the
+//! top level of the command line currently running.
 
 use rituals::{CommandLine, Failure, Outcome};
 

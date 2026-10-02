@@ -1,12 +1,14 @@
 //! How a composed command line's generated file and manifests are
 //! maintained.
 //!
-//! This is what a scaffolding task links against — `add`, `create`, `new` and
-//! `regenerate`, the task crates ritual's own bundle groups — for the renderers
-//! that produce a task crate's own files and a composed command line's
-//! generated file, for the metadata and manifest operations `add` and
-//! `regenerate` need, and for the [`rollback`] that puts a project back when a
-//! task's run does not finish. Nothing here runs on a composed command line's
+//! This is what a scaffolding task links against — `add`, `create`, `import`,
+//! `new` and `regenerate`, the task crates ritual's own bundle groups — for the
+//! renderers that produce a task crate's own files and a composed command
+//! line's generated file, for the metadata and manifest operations `add`,
+//! `import` and `regenerate` need, for the [`cargo`] a task that runs Cargo
+//! uses and the [`shell`] that renders a command for a person to copy, and for
+//! the [`rollback`] that puts a project back when a task's run does not
+//! finish. Nothing here runs on a composed command line's
 //! own path: assembling a command line from a project's imports and
 //! dispatching to one of them live in `rituals`, which a composed CLI crate
 //! depends on directly.

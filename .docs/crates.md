@@ -9,8 +9,8 @@ principles themselves are in [design.md](design.md).
 |---|---|---|
 | `rituals` | what a task needs | — |
 | `rituals-compose` | the composition library | `rituals` |
-| `rituals-core-add`, `-regenerate`, `-new`, `-create` | the four management tasks | `rituals`, `rituals-compose` |
-| `rituals-core` | the bundle of those four | `rituals`, the four leaves |
+| `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import` | the management tasks | `rituals`, `rituals-compose` |
+| `rituals-core` | the bundle of those tasks | `rituals`, the leaves |
 | `rituals-cli` | the `ritual` binary | `rituals`, `rituals-core` |
 | `xtask` | release tooling, never published | — |
 
@@ -41,7 +41,8 @@ off, and only the ones the framework uses are named.
 The composition library: reading `cargo metadata`, resolving a `tasks` list,
 editing manifests in place, rendering a task crate's files and a command
 line's generated file, checking whether a directory can hold a standalone
-crate, and putting a project back when a run does not finish. The four
+crate, running the `cargo` that launched the process, rendering a command for
+a person to copy, and putting a project back when a run does not finish. The
 management tasks depend on it because it is the library their job needs.
 
 **The rollback is shared.** A task that writes to a project promises that a
@@ -66,23 +67,24 @@ Beyond `rituals`, its dependencies are here because of what the job is:
 - **`serde`** and **`serde_json`**, because `cargo metadata` speaks JSON
   and nothing else, and it is the only thing that can say what a dependency
   resolved to and what that crate declares about itself.
-- **`toml_edit`**, because `add` appends to manifests a person wrote. A
+- **`toml_edit`**, because `add` and `import` append to manifests a person
+  wrote. A
   round trip through a plain TOML parser would reformat them and drop their
   comments; `toml_edit` edits in place. It is the crate Cargo's own `cargo
   add` uses.
 
-## `rituals-core-add`, `-regenerate`, `-new`, `-create` — the four leaves
+## `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import` — the leaves
 
-Four ordinary task crates, one per management task. Each depends on
+Ordinary task crates, one per management task. Each depends on
 `rituals` like any task, and on `rituals-compose` for the work. Each is
 marked `task = true` and exposes `task()`. None depends on another. `add`
-finishes by calling the same regenerate path `regenerate` does. That path
-lives in `rituals-compose`, so both can reach it without depending on each
-other.
+and `import` finish by calling the same regenerate path `regenerate` does.
+That path lives in `rituals-compose`, so all three can reach it without
+depending on each other.
 
 ## `rituals-core` — a pure bundle
 
-`Task::group` over the four leaves, and nothing else. It adds no capability
+`Task::group` over the leaves, and nothing else. It adds no capability
 of its own. It has the same shape as any bundle anyone writes, which is the
 point: a project can write a bundle of its own the same way and mount it
 beside this one. The order of its children is the order they appear in

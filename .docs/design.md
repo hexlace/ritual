@@ -103,6 +103,12 @@ itself a task is refused before anything is written, naming the dependency,
 rather than surfacing as a surprise at compile time. Nothing is discovered by
 scanning; both ends are explicit.
 
+`import` runs this check right after `cargo add`, when Cargo has declared the
+dependency and the crate's own manifest is known, whichever source it came
+from. It asks through the same rule the resolver applies when `regenerate`
+reads the list, so whatever `import` accepts, `regenerate` accepts. A refusal
+puts both files `cargo add` could have changed back as they were.
+
 ## Composition by generation
 
 **A command line is composed by generation.** Ritual reads the imports and
@@ -151,7 +157,7 @@ could have. Nothing is special-cased for the global one.
 ## Management tasks are a bundle
 
 Every command line carries ritual's own management tasks, `add`, `regenerate`,
-`new` and `create`, as one bundle: the crate `rituals-core`, imported under
+`new`, `create` and `import`, as one bundle: the crate `rituals-core`, imported under
 the key `ritual` with an ordinary dependency line and an ordinary `tasks`
 entry. Inside a project there is therefore no globally installed tool to keep
 in sync with the project.
@@ -210,6 +216,13 @@ on.
 
 ## Collisions
 
+**A dependency key is taken by the name Rust sees.** `add` and `import`
+refuse a key when a dependency of the CLI crate is already declared under it,
+with `-` read as `_`. Cargo does not: it accepts `a-b` beside an existing
+`a_b` and `cargo metadata` reports both, and only the build fails, because
+rustc finds two crates for the one extern name `a_b` (E0464). The refusal is
+ritual's to make, before anything is written.
+
 **One collision is left: two top-level commands with one name.** The case is
 a flattened bundle whose child shares a name with another top-level mount, or
 a top-level command named `help`. The check runs in dispatch, at startup,
@@ -233,12 +246,13 @@ least one child, that the names are distinct, and that none is `help`. These
 are contract violations in the bundle crate's own source, with no user input
 involved, so they panic, in both build profiles, at every depth.
 
-**Before writing,** `add` and `regenerate` check the name they are about to
-mount against the running command line's own top level, meaning the commands
-a flattened bundle supplies, plus `help`. They refuse with both names before
-anything is written. `add` also refuses the bin's own name. That slot has to
-hold a bundle, `add` only scaffolds plain tasks, and nothing scaffolds a
-bundle.
+**Before writing,** `add`, `import` and `regenerate` check the name they are
+about to mount against the running command line's own top level, meaning the
+commands a flattened bundle supplies, plus `help`. They refuse with both names
+before anything is written. `add` and `import` also refuse the bin's own name.
+That slot has to hold a bundle. `add` only scaffolds plain tasks, nothing
+scaffolds a bundle, and nothing in a crate's manifest tells `import` a bundle
+from a plain task.
 
 **One case no check before writing can see.** It arises when someone mounts
 a bundle under the bin's name by hand and runs `regenerate`. The bundle's
@@ -277,14 +291,14 @@ then handed a `CommandLine` at invocation, carrying the identity and the
 commands the top level got from a flattened bundle. The change is two edits:
 the constructor's name, and one prepended parameter.
 
-`add` and `regenerate` use exactly this. They need it to find their own
+`add`, `import` and `regenerate` use exactly this. They need it to find their own
 project among the workspace's members, and to check a name against the
 running top level before writing.
 
 ## Each task owns its precondition
 
 The whole bundle mounts everywhere. A project's command line carries `new`,
-and the global binary carries `add` and `regenerate`. The alternative was a
+and the global binary carries `add`, `import` and `regenerate`. The alternative was a
 conditional import, where a task is present or absent depending on where the
 command line stands. That would be the first exception to the tree being the
 same shape everywhere. So each task guards itself instead:
@@ -301,11 +315,12 @@ same shape everywhere. So each task guards itself instead:
   `Cargo.toml`, and a walk gets that case wrong. An excluded directory with
   no manifest of its own is still inside the workspace to Cargo, so `create`
   and `new` refuse there.
-- **`add` and `regenerate` refuse outside their own project.** They look for
-  the package their own command line was built from, by name. In any other
-  workspace they refuse and name the command to run in the person's own
-  project. So the global binary's `add` and `regenerate` work only inside the
-  ritual repository, and a project uses its own `cargo ritual add`.
+- **`add`, `import` and `regenerate` refuse outside their own project.** They
+  look for the package their own command line was built from, by name. In any
+  other workspace they refuse and name the command to run in the person's own
+  project. So the global binary's `add`, `import` and `regenerate` work only
+  inside the ritual repository, and a project uses its own `cargo ritual
+  add`.
   Identity by package name is all this checks. A project's built binary run
   by hand inside a different project whose CLI crate has the same package
   name is taken for that project's own, and its collision check then reads
@@ -360,6 +375,48 @@ project's lint table could fail a freshly scaffolded handler before its
 author has written a line. Under `clippy::pedantic`, for example, a handler
 that always returns `Ok(())` trips `unnecessary_wraps`.
 
+## What `import` writes
+
+`import <crate>[@<version>] [<key>]` makes a task crate that someone else
+wrote a command of the project. The crate comes from the registry, or from
+`--git` (with at most one of `--branch`, `--tag` or `--rev`), or from
+`--path`. The key defaults to the crate's name. It writes the two halves of an
+import that [two-sided metadata](#two-sided-metadata) describes, the
+dependency and its entry in `tasks`, and then runs the path `regenerate`
+runs, so `import` keeps no task list of its own either.
+
+The steps, in order:
+
+1. **Resolve the key.** This reads only what was typed, so a key that is not
+   a usable name is refused with nothing to put back.
+2. **Snapshot, then check.** From the first `cargo metadata` on, the run is
+   one rollback. That call creates the workspace's `Cargo.lock` when there is
+   none and rewrites a stale one, so the lockfile is recorded before it runs,
+   and a refusal anywhere after puts it back. Then the project is checked
+   to be the one this command line belongs to, the key against the bin's name
+   and the top level, then against the dependencies the CLI crate declares,
+   and the task list it has already must resolve, because the run ends by
+   regenerating.
+3. **`cargo add`.** It runs in the directory the person typed `import` in,
+   with `--package` naming the CLI crate, so a relative `--path` means what
+   they typed. `--rename <key>` is passed only when the key differs from the
+   crate's name, because with an equal one Cargo writes a redundant `package`
+   field. The version in `<crate>@<version>` goes to Cargo untouched: its
+   grammar is Cargo's. Cargo's output is captured, so a refusal is one line
+   of ritual's own.
+4. **The cross-check.** A fresh `cargo metadata` says what the crate declares
+   about itself, and the dependency under the key must be a task. A crate
+   that is not one is refused.
+5. **The append.** The key joins `[package.metadata.ritual] tasks`.
+6. **Regenerate**, once the run has committed. If it fails, the failure says
+   the task is imported and names the `regenerate` command that finishes it.
+
+A refusal at any of the first five steps puts the CLI crate's manifest and the
+workspace's `Cargo.lock` back, and removes a lockfile the run created. The undo
+restores the recorded bytes rather than running `cargo remove`: that puts back
+exactly what was there, in the lockfile as well as the manifest, and it cannot
+fail the way a second Cargo run can.
+
 ## Removal
 
 Removing a task follows an order Cargo requires. First drop its entry from
@@ -375,8 +432,8 @@ compiles, and so no `regenerate` to fix it. The generated file's header says
 how to recover: put the dependency back, drop the entry, regenerate, then
 remove the dependency.
 
-The same order holds for ritual's own bundle, which takes all four management
-tasks with it, `regenerate` included. After that the command line cannot
+The same order holds for ritual's own bundle, which takes all of its
+management tasks with it, `regenerate` included. After that the command line cannot
 regenerate itself. Putting it back is a hand edit: restore the dependency
 line, the `tasks` entry, and the one mount line in the generated file. That
 is the way this repository's first generated file was written. Removing the
@@ -389,9 +446,9 @@ it found and what to do instead. A run that fails partway through writing
 puts back what it wrote, and says whether it managed to.
 
 What ritual prints is the documentation people read most, so a next step or
-a remedy is written as a command a person can copy. `new`, `add` and
-`create` each end with a `next:` line. A remedy that names one of ritual's
-own commands spells it for the running command line: `cargo ritual
+a remedy is written as a command a person can copy. `new`, `add`, `create`
+and `import` each end with a `next:` line. A remedy that names one of
+ritual's own commands spells it for the running command line: `cargo ritual
 regenerate` in a default project, `cargo acme ritual regenerate` under
 `--cli acme`. The running binary cannot see which key a project mounted
 ritual's bundle under, so a project that remounted it under a key of its own
