@@ -345,10 +345,18 @@ fn git_refusal(
             "refusing to remove `{key}`: `git` could not be run, and remove needs it to check \
              that {directory} can be given back; {by_hand}"
         )),
-        Obstacle::OwnRepository => Failure::new(format!(
-            "refusing to remove `{key}`: {directory} is a git repository of its own, so this \
-             project's git has no record of what is in it; {by_hand}"
-        )),
+        Obstacle::OwnRepository(repository) => {
+            // Joining an empty path would add a trailing separator.
+            let repository = if repository.as_os_str().is_empty() {
+                directory.to_string()
+            } else {
+                Path::new(directory).join(repository).display().to_string()
+            };
+            Failure::new(format!(
+                "refusing to remove `{key}`: {repository} is a git repository of its own, so \
+                 this project's git has no record of what is in it; {by_hand}"
+            ))
+        }
         Obstacle::Failed(message) => Failure::new(format!(
             "refusing to remove `{key}`: git could not say whether {directory} can be given \
              back: {message}"
@@ -590,10 +598,23 @@ mod tests {
     #[test]
     fn a_directory_that_is_its_own_repository_is_told_to_delete_by_hand() {
         assert_eq!(
-            refusal(Obstacle::OwnRepository),
+            refusal(Obstacle::OwnRepository(PathBuf::new())),
             format!(
                 "refusing to remove `greet`: tasks/greet is a git repository of its own, so \
                  this project's git has no record of what is in it; {BY_HAND}"
+            )
+        );
+    }
+
+    /// A submodule inside the directory is named where it is, from the
+    /// workspace root.
+    #[test]
+    fn a_repository_inside_the_directory_is_named_where_it_is() {
+        assert_eq!(
+            refusal(Obstacle::OwnRepository(PathBuf::from("vendor/upstream"))),
+            format!(
+                "refusing to remove `greet`: tasks/greet/vendor/upstream is a git repository of \
+                 its own, so this project's git has no record of what is in it; {BY_HAND}"
             )
         );
     }

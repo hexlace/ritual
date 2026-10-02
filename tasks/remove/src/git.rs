@@ -24,8 +24,14 @@ pub(crate) enum Obstacle {
     /// The directory is not inside a git repository.
     NotARepository,
     /// The directory is, or contains, a git repository of its own, so the
-    /// project's git has no record of what is in it.
-    OwnRepository,
+    /// project's git has no record of what is in it. The path is that
+    /// repository's, relative to the directory, and empty when it is the
+    /// directory itself.
+    ///
+    /// A submodule is one: the project records only the commit it points
+    /// at, so a clean one shows nothing in `git status`, and `git checkout`
+    /// gives back that record, not the submodule's files.
+    OwnRepository(PathBuf),
     /// Git ran and failed for some other reason, or printed something this
     /// module could not read; the text is git's own, or says what was
     /// unreadable.
@@ -37,7 +43,7 @@ pub(crate) enum Obstacle {
 
 /// Checks, with the `git` on `PATH`, that every file in `directory` is one
 /// git can give back: nothing in it is untracked, ignored or changed since
-/// the last commit.
+/// the last commit, and no part of it is a repository of its own.
 ///
 /// Ignored files count against it: a build directory inside the task is
 /// files git cannot give back, and a check that let them through would no
@@ -60,7 +66,20 @@ fn check_with(new_git: impl Fn() -> Command, directory: &Path) -> Result<(), Obs
     // Git's top level is the directory or lies inside it: what it tracks is
     // that repository's own business, not the project's.
     if top_level.starts_with(&directory_itself) {
-        return Err(Obstacle::OwnRepository);
+        return Err(Obstacle::OwnRepository(PathBuf::new()));
+    }
+
+    // A submodule is tracked as a gitlink, mode 160000, and is checked
+    // before the status, which says nothing about a clean one and only
+    // "modified" about a dirty one. Git names each entry from the directory
+    // it was asked in.
+    let staged = run_git(
+        &new_git,
+        directory,
+        &["ls-files", "--stage", "-z", "--", "."],
+    )?;
+    if let Some(submodule) = parse_gitlinks(&staged)?.into_iter().next() {
+        return Err(Obstacle::OwnRepository(submodule));
     }
 
     let status = run_git(
@@ -138,6 +157,29 @@ fn canonical(path: &Path) -> Result<PathBuf, Obstacle> {
         .map_err(|error| Obstacle::Failed(format!("reading {} failed: {error}", path.display())))
 }
 
+/// The path of every gitlink — a submodule — in `git ls-files --stage -z`
+/// output.
+///
+/// An entry is the mode, the object name and the stage, separated by
+/// spaces, then a tab and the path, ended by a NUL. An entry with no tab is
+/// a failure rather than something to skip, since skipping it could hide a
+/// submodule.
+fn parse_gitlinks(output: &[u8]) -> Result<Vec<PathBuf>, Obstacle> {
+    let text = String::from_utf8_lossy(output);
+    let mut gitlinks = Vec::new();
+    for entry in text.split('\0').filter(|entry| !entry.is_empty()) {
+        let Some((fields, path)) = entry.split_once('\t') else {
+            return Err(Obstacle::Failed(format!(
+                "git ls-files printed an entry this check cannot read: {entry:?}"
+            )));
+        };
+        if fields.starts_with("160000 ") {
+            gitlinks.push(PathBuf::from(path));
+        }
+    }
+    Ok(gitlinks)
+}
+
 /// The path of every entry in `git status --porcelain=v1 -z` output.
 ///
 /// An entry is two status letters, a space, then the path, ended by a NUL.
@@ -172,7 +214,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    use super::{Obstacle, check_with, parse_porcelain};
+    use super::{Obstacle, check_with, parse_gitlinks, parse_porcelain};
     use crate::test_support::{ScratchDir, TestOutcome};
 
     /// `git` configured to read nothing from the machine it runs on: no
@@ -363,9 +405,65 @@ mod tests {
 
         assert_eq!(
             check_with(contained_in(scratch.path()), &task),
-            Err(Obstacle::OwnRepository)
+            Err(Obstacle::OwnRepository(PathBuf::new()))
         );
         Ok(())
+    }
+
+    /// A clean submodule leaves nothing in the parent's `git status`, so
+    /// only the gitlink in the index shows it. It is made from a local
+    /// repository, which git refuses to clone as a submodule unless the
+    /// file transport is allowed for that one command.
+    #[test]
+    fn a_directory_holding_a_clean_submodule_is_refused_naming_it() -> TestOutcome {
+        let (scratch, task) = committed_task("git-submodule")?;
+        let upstream = scratch.path().join("upstream");
+        std::fs::create_dir_all(&upstream)?;
+        std::fs::write(upstream.join("vendored.txt"), "a file of its own\n")?;
+        git(&upstream, &["init"])?;
+        commit_everything(&upstream)?;
+        let upstream = upstream
+            .to_str()
+            .ok_or("a scratch path that is not UTF-8")?;
+        git(
+            &task,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                upstream,
+                "vendor/upstream",
+            ],
+        )?;
+        git(scratch.path(), &["commit", "--message", "add a submodule"])?;
+
+        assert_eq!(
+            check_with(contained_in(scratch.path()), &task),
+            Err(Obstacle::OwnRepository(PathBuf::from("vendor/upstream")))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn only_gitlinks_are_read_as_submodules() -> TestOutcome {
+        let output = b"100644 0123456789abcdef0123456789abcdef01234567 0\tsrc/lib.rs\0\
+            160000 89abcdef0123456789abcdef0123456789abcdef 0\tvendor/upstream\0\
+            100755 0123456789abcdef0123456789abcdef01234567 0\trun.sh\0";
+        assert_eq!(
+            parse_gitlinks(output).map_err(|obstacle| format!("{obstacle:?}"))?,
+            [PathBuf::from("vendor/upstream")]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_index_entry_with_no_path_is_a_failure_not_a_skip() {
+        let result = parse_gitlinks(b"160000 89abcdef 0\0");
+        assert!(
+            matches!(&result, Err(Obstacle::Failed(message)) if message.contains("160000")),
+            "expected the unreadable entry to be named, got {result:?}"
+        );
     }
 
     /// A failure other than "not a repository" is passed on in git's words:

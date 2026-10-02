@@ -238,8 +238,9 @@ It refuses, and leaves the project as it found it, `Cargo.lock` included, when:
   whatever its key (`ritual` unless you renamed it), since nothing could put
   it back;
 - the task has a directory to delete and git cannot give back everything in
-  it. That means the project is not a git repository, or the directory holds
-  files that are uncommitted, untracked or ignored; the refusal names them;
+  it. That means the project is not a git repository, the directory is or
+  holds a git repository of its own, a submodule included, or it holds files
+  that are uncommitted, untracked or ignored; the refusal names them;
 - another crate depends on the task's directory, or the directory holds other
   workspace members, lies outside the workspace, or is the only entry in
   `default-members`.
