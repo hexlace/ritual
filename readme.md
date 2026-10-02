@@ -234,13 +234,15 @@ It refuses before writing anything when:
 
 - the name is neither a key nor a crate one of them imports, or the crate is
   imported by more than one key (remove one by its key);
-- the task is `ritual`, the bundle of ritual's own commands, which nothing
-  could put back;
+- the task imports `rituals-core`, the bundle of ritual's own commands,
+  whatever its key (`ritual` unless you renamed it), since nothing could put
+  it back;
 - the task has a directory to delete and git cannot give back everything in
   it. That means the project is not a git repository, or the directory holds
   files that are uncommitted, untracked or ignored; the refusal names them;
 - another crate depends on the task's directory, or the directory holds other
-  workspace members or lies outside the workspace.
+  workspace members, lies outside the workspace, or is the only entry in
+  `default-members`.
 
 If anything fails while `remove` is writing manifests or regenerating, the
 project is put back as it was. The directory's deletion comes last, after
