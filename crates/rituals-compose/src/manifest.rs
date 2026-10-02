@@ -246,21 +246,12 @@ impl Manifest {
                     self.path.display()
                 ))
             })?;
-        self.document
-            .get("package")
-            .and_then(Item::as_table)
-            .and_then(|package| package.get("metadata"))
-            .and_then(Item::as_table)
-            .and_then(|metadata| metadata.get("ritual"))
-            .and_then(Item::as_table)
-            .and_then(|ritual| ritual.get("tasks"))
-            .and_then(Item::as_array)
-            .ok_or_else(|| {
-                Failure::new(format!(
-                    "{} has no [package.metadata.ritual] tasks list to add `{name}` to",
-                    self.path.display()
-                ))
-            })?;
+        if self.tasks_list_mut().is_none() {
+            return Err(Failure::new(format!(
+                "{} has no [package.metadata.ritual] tasks list to add `{name}` to",
+                self.path.display()
+            )));
+        }
 
         // Both destinations exist, so both re-fetches below are infallible:
         // nothing between the checks above and here can have changed the
@@ -275,19 +266,9 @@ impl Manifest {
         inline.insert("path", Value::from(dependency_path));
         dependencies.insert(name.as_str(), Item::Value(Value::from(inline)));
 
-        let tasks = self
-            .document
-            .get_mut("package")
-            .and_then(Item::as_table_mut)
-            .and_then(|package| package.get_mut("metadata"))
-            .and_then(Item::as_table_mut)
-            .and_then(|metadata| metadata.get_mut("ritual"))
-            .and_then(Item::as_table_mut)
-            .and_then(|ritual| ritual.get_mut("tasks"))
-            .and_then(Item::as_array_mut)
-            .unwrap_or_else(|| {
-                unreachable!("[package.metadata.ritual] tasks checked present above")
-            });
+        let tasks = self.tasks_list_mut().unwrap_or_else(|| {
+            unreachable!("[package.metadata.ritual] tasks checked present above")
+        });
         push_matching_style(tasks, name.as_str());
 
         Ok(())
@@ -340,8 +321,26 @@ impl Manifest {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn append_task(&mut self, key: &Name) -> Result<(), Failure> {
-        let tasks = self
-            .document
+        let path = self.path.display().to_string();
+        let tasks = self.tasks_list_mut().ok_or_else(|| {
+            Failure::new(format!(
+                "{path} has no [package.metadata.ritual] tasks list to add `{key}` to"
+            ))
+        })?;
+
+        push_matching_style(tasks, key.as_str());
+        Ok(())
+    }
+
+    /// Finds `[package.metadata.ritual] tasks`, the one list every task that
+    /// edits it appends to.
+    ///
+    /// Each table on the way is read as the TOML table it is, whether it is
+    /// written as a `[package.metadata.ritual]` header or inline as
+    /// `metadata = { ritual = { tasks = [] } }`, because Cargo reads both as
+    /// the same list and so must every writer of it.
+    fn tasks_list_mut(&mut self) -> Option<&mut Array> {
+        self.document
             .get_mut("package")
             .and_then(Item::as_table_like_mut)
             .and_then(|package| package.get_mut("metadata"))
@@ -350,15 +349,6 @@ impl Manifest {
             .and_then(Item::as_table_like_mut)
             .and_then(|ritual| ritual.get_mut("tasks"))
             .and_then(Item::as_array_mut)
-            .ok_or_else(|| {
-                Failure::new(format!(
-                    "{} has no [package.metadata.ritual] tasks list to add `{key}` to",
-                    self.path.display()
-                ))
-            })?;
-
-        push_matching_style(tasks, key.as_str());
-        Ok(())
     }
 }
 
@@ -972,6 +962,27 @@ mod tests {
         let rendered = manifest.document.to_string();
         assert!(rendered.contains("lint = { path = \"../tasks/lint\" }"));
         assert!(rendered.contains("tasks = [\"new\", \"lint\"]"));
+        Ok(())
+    }
+
+    /// Cargo reads `metadata = { ritual = { tasks = [] } }` as the same list
+    /// as `[package.metadata.ritual] tasks`, so `add` and `import` must both
+    /// find it there rather than one of them refusing a manifest Cargo
+    /// accepts.
+    #[test]
+    fn importing_a_task_reads_inline_tables_as_tables_too() -> TestOutcome {
+        let (_scratch, mut manifest) = manifest(
+            "import-task-inline",
+            "[dependencies]\nrituals.workspace = true\n\n\
+             [package]\nname = \"demo-ritual\"\n\
+             metadata = { ritual = { tasks = [\"ritual\"] } }\n",
+        )?;
+
+        manifest.import_task(&Name::new("lint")?, "../tasks/lint")?;
+
+        let rendered = manifest.document.to_string();
+        assert!(rendered.contains("lint = { path = \"../tasks/lint\" }"));
+        assert!(rendered.contains("metadata = { ritual = { tasks = [\"ritual\", \"lint\"] } }"));
         Ok(())
     }
 
