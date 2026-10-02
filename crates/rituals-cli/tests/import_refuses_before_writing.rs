@@ -5,8 +5,8 @@
 //! the crate is not a task. A refused run leaves the project exactly as it
 //! found it, down to the bytes of the lockfile.
 //!
-//! What each message says is read for substance, not wording: it names the
-//! key or crate in question, and it points at something to do. The refusal
+//! What each message says is read for substance: it names the key or crate
+//! in question, and gives a remedy, in the words the program uses for it. The refusal
 //! is the one line the program prefixes with its own name; Cargo's own lines
 //! on the same stream, if any, are not the refusal.
 
@@ -40,39 +40,20 @@ fn refusal_line<'output>(result: &'output RunOutput, bin_name: &str) -> &'output
     lines.first().copied().unwrap_or_default()
 }
 
-/// Asserts that `message` points at something to do rather than only
-/// reporting a problem. The wording is not fixed, so this reads for any of
-/// the ways a remedy is phrased.
+/// Asserts the refusal named `name`, and gave `remedy`: the one thing it
+/// tells the person to do instead, as the program words it. The check is the
+/// remedy's own text, not a list of words any message might contain, so a
+/// refusal that lost its remedy fails here.
 #[track_caller]
-fn assert_says_what_to_do_instead(message: &str) {
-    const REMEDY_WORDS: [&str; 12] = [
-        "instead",
-        "another",
-        "different",
-        "choose",
-        "pick",
-        "rename",
-        "declare",
-        "remove",
-        "run ",
-        "try",
-        "ask",
-        "give",
-    ];
-    assert!(
-        REMEDY_WORDS.iter().any(|word| message.contains(word)),
-        "expected the refusal to say what to do instead; message was:\n{message}"
-    );
-}
-
-/// Asserts the refusal named `name`, and said what to do instead.
-#[track_caller]
-fn assert_refusal_names_and_advises(message: &str, name: &str) {
+fn assert_refusal_names_and_advises(message: &str, name: &str, remedy: &str) {
     assert!(
         message.contains(name),
         "expected the refusal to name `{name}`; message was:\n{message}"
     );
-    assert_says_what_to_do_instead(message);
+    assert!(
+        message.contains(remedy),
+        "expected the refusal to advise `{remedy}`; message was:\n{message}"
+    );
 }
 
 /// A task crate to import from a directory beside the project, so a refusal
@@ -180,7 +161,11 @@ fn the_global_command_outside_any_project_says_to_work_inside_one() -> TestOutco
             message.contains("project"),
             "expected the refusal to say `import` works inside a project; message was:\n{message}"
         );
-        assert_says_what_to_do_instead(message);
+        assert!(
+            message.contains("run `cargo ritual import"),
+            "expected the refusal to hand back the command to run inside a project; message \
+             was:\n{message}"
+        );
         assert!(
             snapshot_tree(empty.path())?.is_empty(),
             "a refused `import` must write nothing, not even into an empty directory"
@@ -208,7 +193,11 @@ fn a_key_that_is_already_a_dependency_is_refused_before_writing() -> TestOutcome
         )?;
 
         result.expect_failure("`import greeter wake`, with `wake` already a dependency");
-        assert_refusal_names_and_advises(refusal_line(&result, "ritual"), "wake");
+        assert_refusal_names_and_advises(
+            refusal_line(&result, "ritual"),
+            "wake",
+            "import this crate under another key",
+        );
         assert_trees_identical(
             "a refused `import` must write nothing",
             &before,
@@ -242,7 +231,11 @@ fn a_key_that_is_a_top_level_command_already_is_refused_before_writing() -> Test
         )?;
 
         result.expect_failure("`import greeter add`, with `add` a top-level command already");
-        assert_refusal_names_and_advises(refusal_line(&result, "ritual"), "add");
+        assert_refusal_names_and_advises(
+            refusal_line(&result, "ritual"),
+            "add",
+            "Give this task another name",
+        );
         assert_trees_identical(
             "a refused `import` must write nothing",
             &before,
@@ -284,7 +277,11 @@ fn a_key_named_after_the_bin_is_refused_before_writing() -> TestOutcome {
         )?;
 
         result.expect_failure("`import greeter chores`, where `chores` is the bin's own name");
-        assert_refusal_names_and_advises(refusal_line(&result, "chores"), "chores");
+        assert_refusal_names_and_advises(
+            refusal_line(&result, "chores"),
+            "chores",
+            "import this crate under another key",
+        );
         assert_trees_identical(
             "a refused `import` must write nothing",
             &before,
@@ -336,7 +333,7 @@ fn a_key_that_collides_with_a_flattened_bundle_child_is_refused_before_writing()
 
         result.expect_failure("`import greeter wake`, colliding with `housework`'s `wake`");
         let message = refusal_line(&result, "chores");
-        assert_refusal_names_and_advises(message, "wake");
+        assert_refusal_names_and_advises(message, "wake", "Give this task another name");
         assert!(
             message.contains("chores"),
             "expected the refusal to name `chores`, the bundle `wake` collides with; message \
@@ -373,7 +370,7 @@ fn a_crate_that_is_not_a_task_is_refused_naming_the_crate() -> TestOutcome {
 
         result.expect_failure("`import plain`, a crate that is not a task");
         let message = refusal_line(&result, "ritual");
-        assert_refusal_names_and_advises(message, "plain");
+        assert_refusal_names_and_advises(message, "plain", "declare `task = true` there first");
         assert!(
             message.contains("task"),
             "expected the refusal to say the crate is not a task; message was:\n{message}"
@@ -485,7 +482,11 @@ fn a_refused_task_check_in_a_project_with_no_lockfile_leaves_none() -> TestOutco
         )?;
 
         result.expect_failure("`import plain`, a crate that is not a task, with no lockfile");
-        assert_refusal_names_and_advises(refusal_line(&result, "ritual"), "plain");
+        assert_refusal_names_and_advises(
+            refusal_line(&result, "ritual"),
+            "plain",
+            "declare `task = true` there first",
+        );
         assert_eq!(
             lockfile(project.root())?,
             None,
@@ -523,7 +524,7 @@ fn a_key_refused_before_writing_in_a_project_with_no_lockfile_leaves_none() -> T
             "the lockfile Cargo wrote on the way to the refusal must be gone"
         );
         let message = refusal_line(&result, "ritual");
-        assert_refusal_names_and_advises(message, "add");
+        assert_refusal_names_and_advises(message, "add", "Give this task another name");
         assert!(
             message.ends_with("; ritual put the project back as it found it"),
             "expected the refusal to say the project was put back; message was:\n{message}"
