@@ -157,10 +157,10 @@ could have. Nothing is special-cased for the global one.
 ## Management tasks are a bundle
 
 Every command line carries ritual's own management tasks, `add`, `regenerate`,
-`new`, `create` and `import`, as one bundle: the crate `rituals-core`, imported under
-the key `ritual` with an ordinary dependency line and an ordinary `tasks`
-entry. Inside a project there is therefore no globally installed tool to keep
-in sync with the project.
+`new`, `create` and `import`, as one bundle: the crate `rituals-core`,
+imported under the key `ritual` with an ordinary dependency line and an
+ordinary `tasks` entry. Inside a project there is therefore no globally
+installed tool to keep in sync with the project.
 
 They are an ordinary imported bundle rather than names built into the
 dispatcher. Built-in names would be reserved in every command line, which

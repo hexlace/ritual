@@ -54,9 +54,10 @@ is TOML, a file the run created is removed, a directory it created goes, and
 anything that could not be put back is named, with the caller's own words
 for trying again. The failure's own full stop is dropped so the report
 continues its sentence, and a run can ask what it found when it first
-recorded a file, to say "created" rather than "updated". A manifest can only be written through a run's record, so
-none is changed without one. One rollback means one set of rules about what
-"put back" means, rather than one per task drifting apart.
+recorded a file, to say "created" rather than "updated". A manifest can only
+be written through a run's record, so none is changed without one. One
+rollback means one set of rules about what "put back" means, rather than one
+per task drifting apart.
 
 An ordinary task never depends on `rituals-compose`, and nothing from
 `rituals` is re-exported through it. A crate that needs `rituals` names it
@@ -68,10 +69,9 @@ Beyond `rituals`, its dependencies are here because of what the job is:
   and nothing else, and it is the only thing that can say what a dependency
   resolved to and what that crate declares about itself.
 - **`toml_edit`**, because `add` and `import` append to manifests a person
-  wrote. A
-  round trip through a plain TOML parser would reformat them and drop their
-  comments; `toml_edit` edits in place. It is the crate Cargo's own `cargo
-  add` uses.
+  wrote. A round trip through a plain TOML parser would reformat them and drop
+  their comments; `toml_edit` edits in place. It is the crate Cargo's own
+  `cargo add` uses.
 
 ## `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import` — the leaves
 

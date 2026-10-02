@@ -27,7 +27,7 @@ create = { package = "rituals-core-create", path = "tasks/create", version = "0.
 import = { package = "rituals-core-import", path = "tasks/import", version = "0.1.2" }
 new = { package = "rituals-core-new", path = "tasks/new", version = "0.1.2" }
 regenerate = { package = "rituals-core-regenerate", path = "tasks/regenerate", version = "0.1.2" }
-# `add` appends to manifests somebody wrote by hand. A whole-file round trip
+# `add` and `import` append to manifests somebody wrote by hand. A whole-file round trip
 # through a plain TOML parser reformats them and drops their comments; this
 # crate edits in place. It is the same crate Cargo's own `add` uses.
 # One declaration rather than one per crate that needs it: Cargo unifies
