@@ -50,13 +50,23 @@ const UNQUOTED_PUNCTUATION: &str = "/._+@:=,-";
 /// closes the quotes, is written as an escaped quote of its own, and reopens
 /// them.
 fn quote(word: &str) -> String {
-    let is_plain = |character: char| {
-        character.is_ascii_alphanumeric() || UNQUOTED_PUNCTUATION.contains(character)
-    };
-    if !word.is_empty() && word.chars().all(is_plain) {
+    // An empty word has no characters to read as plain, and has to be
+    // written as a pair of quotes or the shell would drop it.
+    if word.is_empty() {
+        return "''".to_string();
+    }
+    if word.chars().all(is_plain) {
         return word.to_string();
     }
     format!("'{}'", word.replace('\'', r"'\''"))
+}
+
+/// Whether a shell reads `character` as part of a word with no quoting.
+fn is_plain(character: char) -> bool {
+    if character.is_ascii_alphanumeric() {
+        return true;
+    }
+    UNQUOTED_PUNCTUATION.contains(character)
 }
 
 #[cfg(test)]
