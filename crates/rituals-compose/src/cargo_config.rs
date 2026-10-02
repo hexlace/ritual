@@ -48,6 +48,25 @@ const FILE_NAMES: [&str; 2] = ["config.toml", "config"];
 /// `.cargo` directory, as Cargo reads it, and `directory` should be
 /// absolute.
 ///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+///
+/// use rituals_compose::cargo_config;
+///
+/// // A task about to delete `tasks/lint` asks whether a build would still
+/// // read it because of a configuration file; this reads the files above a
+/// // real directory and in `$CARGO_HOME`, so it is `no_run`.
+/// let workspace_root = Path::new("/w");
+/// let entries =
+///     cargo_config::entries_pointing_under(&[workspace_root], &workspace_root.join("tasks/lint"))?;
+/// if !entries.is_empty() {
+///     println!("still read through {}", entries.join(", "));
+/// }
+/// # Ok::<(), rituals::Failure>(())
+/// ```
+///
 /// # Errors
 ///
 /// Returns a [`Failure`] naming a configuration file that exists but cannot

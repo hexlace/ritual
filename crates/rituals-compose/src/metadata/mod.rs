@@ -290,7 +290,7 @@ impl Metadata {
     /// Reads every key in `package_name`'s `[package.metadata.ritual] tasks`
     /// list, in manifest order, and answers what each one imports: its
     /// package, its directory, whether that is a member of the workspace,
-    /// and what else in the workspace depends on it.
+    /// and what else depends on it.
     ///
     /// A pure read that checks less than [`Metadata::resolve_task_list`]. A
     /// key need not be a usable name or name a task crate, because a person
