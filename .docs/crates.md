@@ -40,9 +40,20 @@ off, and only the ones the framework uses are named.
 
 The composition library: reading `cargo metadata`, resolving a `tasks` list,
 editing manifests in place, rendering a task crate's files and a command
-line's generated file, and checking whether a directory can hold a
-standalone crate. The four management tasks depend on it because it is the
-library their job needs.
+line's generated file, checking whether a directory can hold a standalone
+crate, and putting a project back when a run does not finish. The four
+management tasks depend on it because it is the library their job needs.
+
+**The rollback is shared.** A task that writes to a project promises that a
+run which fails partway leaves the project as it found it, and says so when
+it cannot. `rollback::attempt` keeps that promise for every task: the run
+records each change before making it, and on failure every change is undone,
+the most recent first. A changed file gets its bytes back whether or not it
+is TOML, a file the run created is removed, a directory it created goes, and
+anything that could not be put back is named, with the caller's own words
+for trying again. A manifest can only be written through a run's record, so
+none is changed without one. One rollback means one set of rules about what
+"put back" means, rather than one per task drifting apart.
 
 An ordinary task never depends on `rituals-compose`, and nothing from
 `rituals` is re-exported through it. A crate that needs `rituals` names it
