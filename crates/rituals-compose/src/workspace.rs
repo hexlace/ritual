@@ -12,6 +12,10 @@
 //! party supplies. What Cargo resolves for that directory is asked with
 //! `cargo locate-project`; `rituals` carries nothing about manifests or
 //! metadata by design, so this lives here rather than there.
+//!
+//! The same question answers one more: which `Cargo.lock` a `cargo
+//! metadata` run in a directory may write, so a task can record it before
+//! that run — see [`lockfile`].
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -54,6 +58,50 @@ pub(crate) fn locate_project(directory: &Path, workspace: bool) -> Result<Locate
         Ok(Located::NotFound(
             String::from_utf8_lossy(&output.stderr).trim().to_string(),
         ))
+    }
+}
+
+/// The `Cargo.lock` a `cargo metadata` run in `directory` may write.
+///
+/// `cargo metadata` creates or rewrites the lockfile when it is missing or
+/// behind the manifests, and the one it writes is beside the root manifest
+/// of the workspace Cargo resolves for `directory`. Found with `cargo locate-project --workspace`, which resolves nothing
+/// and so writes nothing. A run that records this path in
+/// [`Changes`](crate::rollback::Changes) before running `cargo metadata` can
+/// put the lockfile back, byte for byte or to absent, whatever directory of
+/// the workspace it ran from.
+///
+/// # Examples
+///
+/// ```no_run
+/// use rituals::Failure;
+/// use rituals_compose::{metadata, rollback, workspace};
+///
+/// // Needs a real project on disk and runs `cargo`, so this example is
+/// // `no_run`.
+/// let directory = std::env::current_dir()
+///     .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
+/// let lockfile = workspace::lockfile(&directory)?;
+/// rollback::attempt("running `remove lint` again", |changes| {
+///     let _document =
+///         changes.run_changing(&[lockfile.as_path()], || metadata::fetch(&directory))?;
+///     // ... a refusal from here on leaves the lockfile as it was found.
+///     Ok(())
+/// })?;
+/// # Ok::<(), Failure>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns a [`Failure`] naming `cargo locate-project` when cargo could not
+/// be run, or with cargo's own words when it found no workspace for
+/// `directory`, the same condition in which `cargo metadata` would fail.
+pub fn lockfile(directory: &Path) -> Result<PathBuf, Failure> {
+    match locate_project(directory, true)? {
+        Located::Found(root_manifest) => Ok(root_manifest.with_file_name("Cargo.lock")),
+        Located::NotFound(stderr) => Err(Failure::new(format!(
+            "cargo locate-project failed: {stderr}"
+        ))),
     }
 }
 

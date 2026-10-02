@@ -191,18 +191,19 @@ pub fn regenerate(command_line: &CommandLine) -> Outcome {
 /// And it prints nothing: it returns a [`Regenerated`], whose `Display` is
 /// the line [`regenerate`] reports, so the caller decides when to say it.
 ///
-/// `workspace_root` is the root the caller already holds. The metadata is
-/// fetched here, from that directory, because `cargo metadata` creates or
-/// rewrites `Cargo.lock` when the manifests changed since it last ran, and
-/// the fetch is recorded in `changes` as a change to that file. The caller
-/// has already checked that this command line runs inside its own project;
-/// this does not repeat the check.
+/// `directory` is where `cargo metadata` runs, as [`regenerate`] runs it
+/// from the current directory; any directory of the project will do.
+/// `cargo metadata` creates or rewrites `Cargo.lock` when it is missing or
+/// behind the manifests, so before it runs, the lockfile it would write is
+/// found with [`workspace::lockfile`](crate::workspace::lockfile) and
+/// recorded in `changes`: the workspace root's, whichever directory
+/// `directory` is. The caller has already checked that this command line
+/// runs inside its own project; this does not repeat the check.
 ///
 /// # Errors
 ///
-/// Returns a [`Failure`] for any reason [`regenerate`] would, and when the
-/// fetched workspace root is not `workspace_root`, since the lockfile
-/// recorded would then not be the one `cargo metadata` wrote.
+/// Returns a [`Failure`] for any reason [`regenerate`] would, and when
+/// Cargo finds no workspace for `directory`.
 ///
 /// # Examples
 ///
@@ -218,14 +219,11 @@ pub fn regenerate(command_line: &CommandLine) -> Outcome {
 /// # );
 /// // Needs a real project on disk and runs `cargo metadata` in it, so this
 /// // example is `no_run`.
-/// let workspace_root = Path::new("/path/to/the/workspace");
+/// let directory = Path::new("/path/to/the/workspace");
 /// let regenerated = rollback::attempt("running `remove lint` again", |changes| {
 ///     // ... edits that must be undone with the generated file, then:
-///     let regenerated = generated_file::regenerate_recording(
-///         changes,
-///         &command_line,
-///         workspace_root,
-///     )?;
+///     let regenerated =
+///         generated_file::regenerate_recording(changes, &command_line, directory)?;
 ///     // ... more steps, any of which may fail.
 ///     Ok::<_, Failure>(regenerated)
 /// })?;
@@ -235,22 +233,10 @@ pub fn regenerate(command_line: &CommandLine) -> Outcome {
 pub fn regenerate_recording(
     changes: &mut Changes,
     command_line: &CommandLine,
-    workspace_root: &Path,
+    directory: &Path,
 ) -> Result<Regenerated, Failure> {
-    let lockfile = workspace_root.join("Cargo.lock");
-    let document =
-        changes.run_changing(&[lockfile.as_path()], || metadata::fetch(workspace_root))?;
-
-    // A panic here would leave what the run already recorded un-undone, so
-    // a root that differs is a refusal, not an assertion.
-    let fetched_root = document.locate_project(command_line.identity().package_name())?;
-    if fetched_root.workspace_root() != workspace_root {
-        return Err(Failure::new(format!(
-            "cargo metadata found the workspace at {}, not at {}",
-            fetched_root.workspace_root().display(),
-            workspace_root.display()
-        )));
-    }
+    let lockfile = crate::workspace::lockfile(directory)?;
+    let document = changes.run_changing(&[lockfile.as_path()], || metadata::fetch(directory))?;
 
     regenerate_from(command_line, &document, |path, content| {
         changes.write(path, content)
@@ -308,11 +294,11 @@ fn regenerate_from(
 ///
 /// # fn example(
 /// #     command_line: &CommandLine,
-/// #     workspace_root: &Path,
+/// #     directory: &Path,
 /// # ) -> Result<(), rituals::Failure> {
 /// // Needs a real project on disk, so this example is `no_run`.
 /// let regenerated = rollback::attempt("running `remove lint` again", |changes| {
-///     generated_file::regenerate_recording(changes, command_line, workspace_root)
+///     generated_file::regenerate_recording(changes, command_line, directory)
 /// })?;
 /// println!("{regenerated}");
 /// # Ok(())
@@ -787,28 +773,32 @@ mod tests {
     }
 
     #[test]
-    fn a_workspace_root_that_is_not_the_one_cargo_found_is_refused() -> TestOutcome {
-        // Fetching from a member's directory still finds the workspace
-        // above it, so a root the caller named that is not that workspace
-        // is a mismatch, and must be a refusal rather than a panic: a panic
-        // would leave what the run recorded un-undone.
-        let scratch = ScratchDir::new("regenerate-root")?;
+    fn a_regeneration_from_a_members_directory_puts_back_the_workspaces_lockfile() -> TestOutcome {
+        // `cargo metadata` run from a member's directory writes the
+        // workspace root's `Cargo.lock`, not one in the member's directory.
+        // The project has none, so a run that fails must leave none at the
+        // root, and must not leave one in the member's directory either.
+        let scratch = ScratchDir::new("regenerate-from-member")?;
         let root = a_project_with_a_stale_generated_file(&scratch)?;
         let command_line = the_demo_command_line();
         let member_directory: &Path = &root.join("hello");
 
         let failure = rollback::attempt("running `remove hello` again", |changes| {
-            regenerate_recording(changes, &command_line, member_directory)
+            regenerate_recording(changes, &command_line, member_directory)?;
+            Err::<(), _>(Failure::new("a later step failed"))
         })
         .err()
-        .ok_or("a mismatched root was meant to be refused")?;
+        .ok_or("the run was meant to fail")?;
 
-        assert!(
-            failure
-                .to_string()
-                .contains("cargo metadata found the workspace at"),
-            "failure was: {failure}"
+        assert_eq!(
+            failure.to_string(),
+            "a later step failed; ritual put the project back as it found it"
         );
+        assert!(
+            !root.join("Cargo.lock").exists(),
+            "the workspace's lockfile the fetch created was kept"
+        );
+        assert!(!member_directory.join("Cargo.lock").exists());
         assert_eq!(
             fs::read_to_string(root.join("src/main.rs"))?,
             STALE_GENERATED_FILE
