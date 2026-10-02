@@ -3,21 +3,29 @@
 //!
 //! `render` is the text this file always starts and ends with — the `//
 //! @generated` banner, one `("<name>", <crate>::task())` line per imported
-//! task, and the call into `rituals::run`. `write_if_changed` writes that text
-//! only when it actually differs from what is already on disk, which is what
+//! task, and the call into `rituals::run`. Both forms of the operation write that
+//! text only when it actually differs from what is already on disk, which is what
 //! makes running the operation twice with nothing changed in between leave the
 //! file's own modification time untouched, not merely its bytes unchanged.
+//!
+//! The operation comes in two forms that share one rendering path:
+//! [`regenerate`], for a task with no run of its own, and
+//! [`regenerate_recording`], for one that is already inside a
+//! [`crate::rollback::attempt`] and needs the file put back with everything
+//! else if the run fails.
 
 mod entry;
 mod identifier;
 
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub use entry::Entry;
 use identifier::render_identifier;
 use rituals::{CommandLine, Failure, Outcome, report};
 
+use crate::metadata::Metadata;
+use crate::rollback::Changes;
 use crate::{metadata, top_level};
 
 /// Renders a composed command line's generated `main.rs`.
@@ -163,6 +171,103 @@ pub fn regenerate(command_line: &CommandLine) -> Outcome {
     let document = metadata::fetch(&current_dir)?;
 
     document.ensure_runs_in_its_own_project(package_name, "regenerate", "")?;
+    let regenerated = regenerate_from(command_line, &document, write_to_disk)?;
+
+    report(regenerated.to_string());
+    Ok(())
+}
+
+/// Rewrites the generated file as a step of a run, so a later failure puts
+/// it back.
+///
+/// The run is one already inside [`rollback::attempt`](crate::rollback::attempt).
+/// The file is rewritten from `command_line`'s composed CLI's current
+/// imports, and a run that fails afterwards puts it back with everything
+/// else the run changed.
+///
+/// It does what [`regenerate`] does, through the same rendering, with two
+/// differences. The file is written through `changes`, and only when its
+/// content differs, so an unchanged file is neither touched nor recorded.
+/// And it prints nothing: it returns a [`Regenerated`], whose `Display` is
+/// the line [`regenerate`] reports, so the caller decides when to say it.
+///
+/// `workspace_root` is the root the caller already holds. The metadata is
+/// fetched here, from that directory, because `cargo metadata` creates or
+/// rewrites `Cargo.lock` when the manifests changed since it last ran, and
+/// the fetch is recorded in `changes` as a change to that file. The caller
+/// has already checked that this command line runs inside its own project;
+/// this does not repeat the check.
+///
+/// # Errors
+///
+/// Returns a [`Failure`] for any reason [`regenerate`] would, and when the
+/// fetched workspace root is not `workspace_root`, since the lockfile
+/// recorded would then not be the one `cargo metadata` wrote.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+///
+/// use rituals::{CommandLine, Failure, Identity};
+/// use rituals_compose::{generated_file, rollback};
+///
+/// # let command_line = CommandLine::from_dispatch(
+/// #     Identity::from_macro_expansion("demo-ritual", "ritual", "0.1.0"),
+/// #     [],
+/// # );
+/// // Needs a real project on disk and runs `cargo metadata` in it, so this
+/// // example is `no_run`.
+/// let workspace_root = Path::new("/path/to/the/workspace");
+/// let regenerated = rollback::attempt("running `remove lint` again", |changes| {
+///     // ... edits that must be undone with the generated file, then:
+///     let regenerated = generated_file::regenerate_recording(
+///         changes,
+///         &command_line,
+///         workspace_root,
+///     )?;
+///     // ... more steps, any of which may fail.
+///     Ok::<_, Failure>(regenerated)
+/// })?;
+/// println!("{regenerated}");
+/// # Ok::<(), Failure>(())
+/// ```
+pub fn regenerate_recording(
+    changes: &mut Changes,
+    command_line: &CommandLine,
+    workspace_root: &Path,
+) -> Result<Regenerated, Failure> {
+    let lockfile = workspace_root.join("Cargo.lock");
+    let document =
+        changes.run_changing(&[lockfile.as_path()], || metadata::fetch(workspace_root))?;
+
+    // A panic here would leave what the run already recorded un-undone, so
+    // a root that differs is a refusal, not an assertion.
+    let fetched_root = document.locate_project(command_line.identity().package_name())?;
+    if fetched_root.workspace_root() != workspace_root {
+        return Err(Failure::new(format!(
+            "cargo metadata found the workspace at {}, not at {}",
+            fetched_root.workspace_root().display(),
+            workspace_root.display()
+        )));
+    }
+
+    regenerate_from(command_line, &document, |path, content| {
+        changes.write(path, content)
+    })
+}
+
+/// What [`regenerate`] and [`regenerate_recording`] have in common: resolve
+/// the task list, check each name is free at the top level, locate the
+/// project, render, and write only if the file's content changes, with
+/// whatever `write` does to put bytes on disk.
+fn regenerate_from(
+    command_line: &CommandLine,
+    document: &Metadata,
+    write: impl FnOnce(&Path, &str) -> Result<(), Failure>,
+) -> Result<Regenerated, Failure> {
+    let package_name = command_line.identity().package_name();
+
     let entries = document.resolve_task_list(package_name)?;
     for entry in &entries {
         top_level::ensure_command_is_free(command_line, entry.command())?;
@@ -170,27 +275,69 @@ pub fn regenerate(command_line: &CommandLine) -> Outcome {
     let project = document.locate_project(package_name)?;
 
     let rendered = render(package_name, &entries);
-    let outcome = write_if_changed(project.binary_src_path, &rendered)?;
+    let outcome = write_with(project.binary_src_path, &rendered, write)?;
 
     let relative_path = project
         .binary_src_path
         .strip_prefix(project.workspace_root())
-        .unwrap_or(project.binary_src_path);
-    let imported = imported_label(&entries);
+        .unwrap_or(project.binary_src_path)
+        .to_path_buf();
 
-    match outcome {
-        WriteOutcome::Created | WriteOutcome::Updated => {
-            report(format!("updated {} ({imported})", relative_path.display()));
-        }
-        WriteOutcome::UpToDate => {
-            report(format!(
-                "{} is already up to date ({imported})",
-                relative_path.display()
-            ));
+    Ok(Regenerated {
+        relative_path,
+        outcome,
+        imported: imported_label(&entries),
+    })
+}
+
+/// What a regeneration did to the generated file, and which tasks it
+/// mounts.
+///
+/// Its `Display` is the one line [`regenerate`] reports: `updated
+/// src/main.rs (tasks: ritual, hello)` when the file was written, or
+/// `src/main.rs is already up to date (tasks: ritual, hello)` when it
+/// already held exactly that content. The path is relative to the workspace
+/// root.
+///
+/// # Examples
+///
+/// ```no_run
+/// use rituals::CommandLine;
+/// use rituals_compose::{generated_file, rollback};
+/// use std::path::Path;
+///
+/// # fn example(command_line: &CommandLine, workspace_root: &Path) -> Result<(), rituals::Failure> {
+/// // Needs a real project on disk, so this example is `no_run`.
+/// let regenerated = rollback::attempt("running `remove lint` again", |changes| {
+///     generated_file::regenerate_recording(changes, command_line, workspace_root)
+/// })?;
+/// println!("{regenerated}");
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Regenerated {
+    relative_path: PathBuf,
+    outcome: WriteOutcome,
+    imported: String,
+}
+
+impl std::fmt::Display for Regenerated {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let path = self.relative_path.display();
+        match self.outcome {
+            WriteOutcome::Created | WriteOutcome::Updated => {
+                write!(formatter, "updated {path} ({})", self.imported)
+            }
+            WriteOutcome::UpToDate => {
+                write!(
+                    formatter,
+                    "{path} is already up to date ({})",
+                    self.imported
+                )
+            }
         }
     }
-
-    Ok(())
 }
 
 /// Names the tasks a generated file mounts, in the words of the manifest
@@ -217,8 +364,13 @@ pub(crate) enum WriteOutcome {
     UpToDate,
 }
 
-/// Writes `content` to `path` only if it differs from what is already
-/// there.
+/// Writes `content` to `path` on disk, replacing whatever is there.
+fn write_to_disk(path: &Path, content: &str) -> Result<(), Failure> {
+    std::fs::write(path, content).map_err(|error| io_failure("writing", path, error))
+}
+
+/// Writes `content` to `path` through `write` only if it differs from what
+/// is already there, or if there is no file.
 ///
 /// Comparing first is what makes `regenerate` idempotent at the filesystem
 /// level, not just at the level of the bytes it would produce: running it
@@ -226,19 +378,22 @@ pub(crate) enum WriteOutcome {
 /// modification time, since a caller has no way to tell "rewritten with
 /// identical content" from "left alone" apart from that.
 ///
-/// # Errors
-///
-/// Returns a [`Failure`] naming `path` when reading the existing file (for
-/// a reason other than it not existing) or writing the new content fails.
-pub(crate) fn write_if_changed(path: &Path, content: &str) -> Result<WriteOutcome, Failure> {
+/// The comparison lives here, once, so that the form that writes straight to
+/// disk and the form that writes through a recorded run cannot disagree
+/// about when a file counts as unchanged.
+fn write_with(
+    path: &Path,
+    content: &str,
+    write: impl FnOnce(&Path, &str) -> Result<(), Failure>,
+) -> Result<WriteOutcome, Failure> {
     match std::fs::read_to_string(path) {
         Ok(existing) if existing == content => Ok(WriteOutcome::UpToDate),
         Ok(_existing) => {
-            std::fs::write(path, content).map_err(|error| io_failure("writing", path, error))?;
+            write(path, content)?;
             Ok(WriteOutcome::Updated)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            std::fs::write(path, content).map_err(|error| io_failure("writing", path, error))?;
+            write(path, content)?;
             Ok(WriteOutcome::Created)
         }
         Err(error) => Err(io_failure("reading", path, error)),
@@ -255,7 +410,12 @@ fn io_failure(operation: &str, path: &Path, cause: std::io::Error) -> Failure {
 mod tests {
     use std::fs;
 
-    use super::{Entry, WriteOutcome, render, write_if_changed};
+    use std::path::{Path, PathBuf};
+
+    use rituals::{CommandLine, Failure, Identity};
+
+    use super::{Entry, WriteOutcome, regenerate_recording, render, write_to_disk, write_with};
+    use crate::rollback;
     use crate::test_support::{ScratchDir, TestOutcome};
 
     #[test]
@@ -378,7 +538,7 @@ mod tests {
         let scratch = ScratchDir::new("create")?;
         let path = scratch.path().join("main.rs");
 
-        let outcome = write_if_changed(&path, "content")?;
+        let outcome = write_with(&path, "content", write_to_disk)?;
         assert_eq!(outcome, WriteOutcome::Created);
         assert_eq!(fs::read_to_string(&path)?, "content");
         Ok(())
@@ -390,7 +550,7 @@ mod tests {
         let path = scratch.path().join("main.rs");
         fs::write(&path, "old")?;
 
-        let outcome = write_if_changed(&path, "new")?;
+        let outcome = write_with(&path, "new", write_to_disk)?;
         assert_eq!(outcome, WriteOutcome::Updated);
         assert_eq!(fs::read_to_string(&path)?, "new");
         Ok(())
@@ -413,13 +573,13 @@ mod tests {
 
         // A process that ignores the read-only bit (root, on Unix) could
         // still write the file, which would make the assertion below pass
-        // whether or not `write_if_changed` skipped the write. This probe
+        // whether or not `write_with` skipped the write. This probe
         // opens for write without writing anything, so it tells the two cases
         // apart without disturbing the file's contents.
         let permission_is_enforced = fs::OpenOptions::new().write(true).open(&path).is_err();
 
         let outcome = if permission_is_enforced {
-            Some(write_if_changed(&path, "same")?)
+            Some(write_with(&path, "same", write_to_disk)?)
         } else {
             None
         };
@@ -447,6 +607,209 @@ mod tests {
             return Ok(());
         };
         assert_eq!(outcome, WriteOutcome::UpToDate);
+        Ok(())
+    }
+
+    /// The text `src/main.rs` holds in a project whose task list is stale.
+    const STALE_GENERATED_FILE: &str = "fn main() {}\n";
+
+    /// A scratch project that `cargo metadata` can read without a network:
+    /// a composed CLI crate called `demo-ritual` at the workspace root that
+    /// imports one task, `hello`, by path, whose generated file does not yet
+    /// mount it. Returns the canonical workspace root, since `cargo
+    /// metadata` reports the root it resolved and a temp directory may be
+    /// behind a symbolic link.
+    fn a_project_with_a_stale_generated_file(
+        scratch: &ScratchDir,
+    ) -> Result<PathBuf, std::io::Error> {
+        let root = fs::canonicalize(scratch.path())?;
+        fs::create_dir_all(root.join("src"))?;
+        fs::create_dir_all(root.join("hello/src"))?;
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"demo-ritual\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+             [package.metadata.ritual]\ntasks = [\"hello\"]\n\n\
+             [dependencies]\nhello = { path = \"hello\" }\n\n[workspace]\n",
+        )?;
+        fs::write(root.join("src/main.rs"), STALE_GENERATED_FILE)?;
+        fs::write(
+            root.join("hello/Cargo.toml"),
+            "[package]\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+             [package.metadata.ritual]\ntask = true\n",
+        )?;
+        fs::write(root.join("hello/src/lib.rs"), "")?;
+        Ok(root)
+    }
+
+    fn the_demo_command_line() -> CommandLine {
+        CommandLine::from_dispatch(
+            Identity::from_macro_expansion("demo-ritual", "ritual", "0.1.0"),
+            [],
+        )
+    }
+
+    #[test]
+    fn a_regeneration_through_changes_is_put_back_when_the_run_fails() -> TestOutcome {
+        // Regenerates the stale file inside a run, then fails the run. The
+        // generated file must be written while the run is going, and must
+        // hold its old bytes afterwards; `Cargo.lock`, which `cargo metadata`
+        // creates in a project that has none, must be gone again.
+        let scratch = ScratchDir::new("regenerate-undone")?;
+        let root = a_project_with_a_stale_generated_file(&scratch)?;
+        let generated = root.join("src/main.rs");
+        let lockfile = root.join("Cargo.lock");
+        let command_line = the_demo_command_line();
+
+        let mut seen_inside_the_run = String::new();
+        let failure = rollback::attempt("running `remove hello` again", |changes| {
+            regenerate_recording(changes, &command_line, &root)?;
+            seen_inside_the_run = fs::read_to_string(&generated)
+                .map_err(|error| Failure::new("reading the generated file").caused_by(error))?;
+            Err::<(), _>(Failure::new("a later step failed"))
+        })
+        .err()
+        .ok_or("the run was meant to fail")?;
+
+        assert!(
+            seen_inside_the_run.contains("(\"hello\", hello::task()),"),
+            "the generated file was not rewritten during the run: {seen_inside_the_run}"
+        );
+        assert_eq!(fs::read_to_string(&generated)?, STALE_GENERATED_FILE);
+        assert!(
+            !lockfile.exists(),
+            "the lockfile the fetch created was kept"
+        );
+        assert!(
+            failure
+                .to_string()
+                .ends_with("ritual put the project back as it found it"),
+            "failure was: {failure}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_successful_regeneration_through_changes_keeps_the_file() -> TestOutcome {
+        let scratch = ScratchDir::new("regenerate-kept")?;
+        let root = a_project_with_a_stale_generated_file(&scratch)?;
+        let command_line = the_demo_command_line();
+
+        let regenerated = rollback::attempt("running `remove hello` again", |changes| {
+            regenerate_recording(changes, &command_line, &root)
+        })?;
+
+        let expected = render("demo-ritual", &[Entry::new("hello", "hello")]);
+        assert_eq!(fs::read_to_string(root.join("src/main.rs"))?, expected);
+        assert_eq!(
+            regenerated.to_string(),
+            "updated src/main.rs (tasks: hello)"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_unchanged_generated_file_is_not_written_through_changes() -> TestOutcome {
+        // The second regeneration finds the file already current, so it must
+        // not write: with the file read-only, a write would fail the run.
+        let scratch = ScratchDir::new("regenerate-unchanged")?;
+        let root = a_project_with_a_stale_generated_file(&scratch)?;
+        let generated = root.join("src/main.rs");
+        let command_line = the_demo_command_line();
+        rollback::attempt("running `remove hello` again", |changes| {
+            regenerate_recording(changes, &command_line, &root)
+        })?;
+
+        let mut permissions = fs::metadata(&generated)?.permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&generated, permissions)?;
+        // See `writing_identical_content_reports_up_to_date_and_does_not_touch_the_file`:
+        // a process that ignores the read-only bit cannot show a blocked write.
+        let permission_is_enforced = fs::OpenOptions::new().write(true).open(&generated).is_err();
+
+        let regenerated = if permission_is_enforced {
+            Some(rollback::attempt(
+                "running `remove hello` again",
+                |changes| regenerate_recording(changes, &command_line, &root),
+            ))
+        } else {
+            None
+        };
+
+        let mut permissions = fs::metadata(&generated)?.permissions();
+        #[expect(
+            clippy::permissions_set_readonly_false,
+            reason = "restoring a scratch file's own permissions before removing it, not \
+                      granting access to anything"
+        )]
+        {
+            permissions.set_readonly(false);
+        }
+        fs::set_permissions(&generated, permissions)?;
+
+        let Some(regenerated) = regenerated else {
+            crate::test_support::report_skip(
+                "an_unchanged_generated_file_is_not_written_through_changes could not \
+                 demonstrate a blocked write because this process does not honour the \
+                 read-only permission bit",
+            );
+            return Ok(());
+        };
+        assert_eq!(
+            regenerated?.to_string(),
+            "src/main.rs is already up to date (tasks: hello)"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn regenerated_displays_the_line_regenerate_reports_for_both_outcomes() -> TestOutcome {
+        let scratch = ScratchDir::new("regenerate-display")?;
+        let root = a_project_with_a_stale_generated_file(&scratch)?;
+        let command_line = the_demo_command_line();
+        let regenerate_once = || {
+            rollback::attempt("running `remove hello` again", |changes| {
+                regenerate_recording(changes, &command_line, &root)
+            })
+        };
+
+        assert_eq!(
+            regenerate_once()?.to_string(),
+            "updated src/main.rs (tasks: hello)"
+        );
+        assert_eq!(
+            regenerate_once()?.to_string(),
+            "src/main.rs is already up to date (tasks: hello)"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_workspace_root_that_is_not_the_one_cargo_found_is_refused() -> TestOutcome {
+        // Fetching from a member's directory still finds the workspace
+        // above it, so a root the caller named that is not that workspace
+        // is a mismatch, and must be a refusal rather than a panic: a panic
+        // would leave what the run recorded un-undone.
+        let scratch = ScratchDir::new("regenerate-root")?;
+        let root = a_project_with_a_stale_generated_file(&scratch)?;
+        let command_line = the_demo_command_line();
+        let member_directory: &Path = &root.join("hello");
+
+        let failure = rollback::attempt("running `remove hello` again", |changes| {
+            regenerate_recording(changes, &command_line, member_directory)
+        })
+        .err()
+        .ok_or("a mismatched root was meant to be refused")?;
+
+        assert!(
+            failure
+                .to_string()
+                .contains("cargo metadata found the workspace at"),
+            "failure was: {failure}"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("src/main.rs"))?,
+            STALE_GENERATED_FILE
+        );
         Ok(())
     }
 }
