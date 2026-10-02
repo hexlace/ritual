@@ -10,11 +10,15 @@
 //!
 //! The only way to hold a [`Changes`] is inside [`attempt`], so a run cannot
 //! forget to undo, and nothing can be recorded once the undo has started.
-//! Each way of recording takes its snapshot before it lets the change
-//! happen: [`Changes::write`] writes the file itself, [`Changes::run_changing`]
-//! runs the change it guards, and [`Changes::reserve_directory`] refuses a
-//! directory that already exists. None of them can be handed a file after it
-//! has been changed and take the changed bytes for the original.
+//! Each way of recording takes its snapshot before the change it makes:
+//! [`Changes::write`] writes the file itself, [`Changes::run_changing`] runs
+//! the change it guards, and [`Changes::reserve_directory`] creates the
+//! directory itself. A change made around [`Changes`], such as a direct
+//! `std::fs` write or a command not run through [`Changes::run_changing`], is
+//! not recorded at all.
+//!
+//! The promise covers a run that returns a failure. A run that panics is not
+//! undone.
 //!
 //! # Examples
 //!
