@@ -281,10 +281,16 @@ impl Changes {
         change()
     }
 
-    /// Claims `path` as a directory this run will create, and records it and
-    /// every directory above it that does not exist yet, so a failed run
-    /// removes them all. Creates nothing: the caller creates the directory
-    /// and fills it however it likes.
+    /// Creates `path` as an empty directory for this run to fill, along with
+    /// every directory above it that does not exist yet, and records each one
+    /// this call created, so a failed run removes them all. The caller fills
+    /// the directory however it likes.
+    ///
+    /// The directory is created in one step that fails if anything is
+    /// already there, so a directory that appears while the run is going is
+    /// refused rather than taken for the run's own. A directory above it that
+    /// appears in the meantime is used and left alone, because this call did
+    /// not create it.
     ///
     /// The reserved directory is removed with everything in it. A directory
     /// above it is removed only if it is empty by then, so if the reserved
@@ -316,14 +322,12 @@ impl Changes {
     /// # Errors
     ///
     /// Returns a [`Failure`] naming `path` if it already exists: a directory
-    /// that was there before the run is not the run's to remove.
+    /// that was there before the run is not the run's to remove. Returns a
+    /// [`Failure`] naming the directory that could not be created if
+    /// creating it fails for any other reason; the directories above it that
+    /// this call did create are already recorded, so a failed run removes
+    /// them.
     pub fn reserve_directory(&mut self, path: &Path) -> Result<(), Failure> {
-        if path.exists() {
-            return Err(Failure::new(format!(
-                "{} already exists, so ritual will not create it",
-                path.display()
-            )));
-        }
         let mut missing_parents: Vec<&Path> = path
             .ancestors()
             .skip(1)
@@ -331,14 +335,29 @@ impl Changes {
             .collect();
         missing_parents.reverse();
         for parent in missing_parents {
-            self.steps.push(Step::Parent {
-                path: parent.to_path_buf(),
-            });
+            match std::fs::create_dir(parent) {
+                Ok(()) => self.steps.push(Step::Parent {
+                    path: parent.to_path_buf(),
+                }),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(creating_failed(parent, error)),
+            }
         }
-        self.steps.push(Step::Directory {
-            path: path.to_path_buf(),
-        });
-        Ok(())
+        match std::fs::create_dir(path) {
+            Ok(()) => {
+                self.steps.push(Step::Directory {
+                    path: path.to_path_buf(),
+                });
+                Ok(())
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                Err(Failure::new(format!(
+                    "{} already exists, so ritual will not create it",
+                    path.display()
+                )))
+            }
+            Err(error) => Err(creating_failed(path, error)),
+        }
     }
 
     /// Records the bytes at `path`, or that there is no file there, unless
@@ -456,6 +475,12 @@ fn restore_file(path: &Path, original: &[u8]) -> Result<(), Failure> {
     std::fs::write(path, original).map_err(|error| {
         Failure::new(format!("writing {} failed", path.display())).caused_by(error)
     })
+}
+
+/// The failure for a directory [`Changes::reserve_directory`] could not
+/// create.
+fn creating_failed(path: &Path, error: std::io::Error) -> Failure {
+    Failure::new(format!("creating {} failed", path.display())).caused_by(error)
 }
 
 /// Removes the file the run created at `path`, if it is there.
@@ -738,6 +763,64 @@ mod tests {
     }
 
     #[test]
+    fn reserving_a_directory_creates_it_empty_with_the_parents_it_needs() -> TestOutcome {
+        let scratch = ScratchDir::new("rollback-reserve-creates")?;
+        let tasks = scratch.path().join("tasks");
+        let task = tasks.join("lint");
+
+        attempt(RETRY, |changes| changes.reserve_directory(&task))?;
+
+        assert!(task.is_dir(), "the reserved directory must exist");
+        assert_eq!(std::fs::read_dir(&task)?.count(), 0, "and be empty");
+        Ok(())
+    }
+
+    #[test]
+    fn two_directories_reserved_under_one_new_parent_are_put_back_cleanly() -> TestOutcome {
+        let scratch = ScratchDir::new("rollback-siblings")?;
+        let tasks = scratch.path().join("tasks");
+        let lint = tasks.join("lint");
+        let format = tasks.join("format");
+
+        let reported = fail_after(|changes| {
+            changes.reserve_directory(&lint)?;
+            changes.reserve_directory(&format)?;
+            std::fs::write(lint.join("Cargo.toml"), "[package]\n")
+                .and_then(|()| std::fs::write(format.join("Cargo.toml"), "[package]\n"))
+                .map_err(|error| Failure::new("setup").caused_by(error))
+        });
+
+        assert_eq!(
+            reported.to_string(),
+            "simulated failure; ritual put the project back as it found it"
+        );
+        assert!(!tasks.exists(), "tasks/ was created by the run and must go");
+        Ok(())
+    }
+
+    #[test]
+    fn a_directory_reserved_inside_another_is_put_back_cleanly() -> TestOutcome {
+        let scratch = ScratchDir::new("rollback-nested-reserve")?;
+        let outer = scratch.path().join("a");
+        let inner = outer.join("b");
+
+        let reported = fail_after(|changes| {
+            changes.reserve_directory(&outer)?;
+            changes.reserve_directory(&inner)?;
+            std::fs::write(outer.join("outer.txt"), "outer\n")
+                .and_then(|()| std::fs::write(inner.join("inner.txt"), "inner\n"))
+                .map_err(|error| Failure::new("setup").caused_by(error))
+        });
+
+        assert_eq!(
+            reported.to_string(),
+            "simulated failure; ritual put the project back as it found it"
+        );
+        assert!(!outer.exists(), "a was created by the run and must go");
+        Ok(())
+    }
+
+    #[test]
     fn a_parent_that_was_already_there_is_left_alone() -> TestOutcome {
         let scratch = ScratchDir::new("rollback-existing-parent")?;
         let tasks = scratch.path().join("tasks");
@@ -747,7 +830,8 @@ mod tests {
 
         let _ = fail_after(|changes| {
             changes.reserve_directory(&task)?;
-            std::fs::create_dir(&task).map_err(|error| Failure::new("setup").caused_by(error))
+            std::fs::write(task.join("Cargo.toml"), "[package]\n")
+                .map_err(|error| Failure::new("setup").caused_by(error))
         });
 
         assert!(tasks.join(".keep").is_file(), "tasks/ predates the run");
