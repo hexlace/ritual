@@ -177,6 +177,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rituals-core-remove"
+version = "0.1.1"
+dependencies = [
+ "rituals",
+ "rituals-compose",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"

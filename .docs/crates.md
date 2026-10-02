@@ -10,6 +10,7 @@ principles themselves are in [design.md](design.md).
 | `rituals` | what a task needs | — |
 | `rituals-compose` | the composition library | `rituals` |
 | `rituals-core-add`, `-regenerate`, `-new`, `-create` | the four management tasks | `rituals`, `rituals-compose` |
+| `rituals-core-remove` | the `remove` task | `rituals`, `rituals-compose` |
 | `rituals-core` | the bundle of those four | `rituals`, the four leaves |
 | `rituals-cli` | the `ritual` binary | `rituals`, `rituals-core` |
 | `xtask` | release tooling, never published | — |
