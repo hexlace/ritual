@@ -221,7 +221,8 @@ impl Changes {
     /// # Errors
     ///
     /// Returns a [`Failure`] naming `path` if what is there cannot be read,
-    /// in which case nothing is written, or if writing it fails.
+    /// or is a symbolic link to nothing, in which case nothing is written, or
+    /// if writing it fails.
     pub fn write(&mut self, path: &Path, contents: impl AsRef<[u8]>) -> Result<(), Failure> {
         self.record_file(path)?;
         std::fs::write(path, contents).map_err(|error| {
@@ -269,7 +270,8 @@ impl Changes {
     /// # Errors
     ///
     /// Returns a [`Failure`] naming the path if one of `paths` cannot be
-    /// read, in which case `change` does not run, or `change`'s own failure.
+    /// read, or is a symbolic link to nothing, in which case `change` does
+    /// not run, or `change`'s own failure.
     pub fn run_changing<T>(
         &mut self,
         paths: &[&Path],
@@ -363,6 +365,10 @@ impl Changes {
     /// Records the bytes at `path`, or that there is no file there, unless
     /// this run has already recorded `path`: the first record is the one
     /// that holds what the project had before the run.
+    ///
+    /// A symbolic link to nothing is refused rather than recorded as absent:
+    /// writing through it would create its target, and undoing that would
+    /// remove the link and leave the new target behind.
     fn record_file(&mut self, path: &Path) -> Result<(), Failure> {
         let already_recorded = self
             .steps
@@ -373,7 +379,10 @@ impl Changes {
         }
         let original = match std::fs::read(path) {
             Ok(bytes) => Some(bytes),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                refuse_a_link_to_nothing(path)?;
+                None
+            }
             Err(error) => {
                 return Err(
                     Failure::new(format!("reading {} failed", path.display())).caused_by(error)
@@ -475,6 +484,23 @@ fn restore_file(path: &Path, original: &[u8]) -> Result<(), Failure> {
     std::fs::write(path, original).map_err(|error| {
         Failure::new(format!("writing {} failed", path.display())).caused_by(error)
     })
+}
+
+/// Refuses `path`, which could not be read because nothing is there, if it
+/// is a symbolic link: following it finds nothing, but the link itself is
+/// there.
+fn refuse_a_link_to_nothing(path: &Path) -> Result<(), Failure> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(Failure::new(format!(
+            "{} is a symbolic link to nothing, so ritual will not write through it",
+            path.display()
+        ))),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(Failure::new(format!("reading {} failed", path.display())).caused_by(error))
+        }
+    }
 }
 
 /// The failure for a directory [`Changes::reserve_directory`] could not
@@ -737,6 +763,56 @@ mod tests {
                 .starts_with(&format!("reading {} failed", unreadable.display())),
             "expected the unreadable path to be named: {reported}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn writing_through_a_symbolic_link_to_nothing_is_refused() -> TestOutcome {
+        let scratch = ScratchDir::new("rollback-dangling-link")?;
+        let target = scratch.path().join("real.lock");
+        let link = scratch.path().join("Cargo.lock");
+        std::os::unix::fs::symlink(&target, &link)?;
+
+        let outcome = attempt(RETRY, |changes| changes.write(&link, "version = 4\n"));
+
+        let Err(reported) = outcome else {
+            unreachable!("writing through a link to nothing must be refused");
+        };
+        assert_eq!(
+            reported.to_string(),
+            format!(
+                "{} is a symbolic link to nothing, so ritual will not write through it; ritual \
+                 put the project back as it found it",
+                link.display()
+            )
+        );
+        assert!(
+            std::fs::symlink_metadata(&link)?.file_type().is_symlink(),
+            "the link must still be there"
+        );
+        assert!(
+            std::fs::symlink_metadata(&target).is_err(),
+            "its target must still be absent"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_symbolic_link_to_a_file_is_written_through_and_put_back() -> TestOutcome {
+        let scratch = ScratchDir::new("rollback-live-link")?;
+        let target = scratch.path().join("real.lock");
+        let link = scratch.path().join("Cargo.lock");
+        std::fs::write(&target, "version = 3\n")?;
+        std::os::unix::fs::symlink(&target, &link)?;
+
+        let reported = fail_after(|changes| changes.write(&link, "version = 4\n"));
+
+        assert_eq!(
+            reported.to_string(),
+            "simulated failure; ritual put the project back as it found it"
+        );
+        assert!(std::fs::symlink_metadata(&link)?.file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(&target)?, "version = 3\n");
         Ok(())
     }
 
