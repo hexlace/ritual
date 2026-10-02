@@ -306,7 +306,10 @@ fn regenerate_from(
 /// use rituals_compose::{generated_file, rollback};
 /// use std::path::Path;
 ///
-/// # fn example(command_line: &CommandLine, workspace_root: &Path) -> Result<(), rituals::Failure> {
+/// # fn example(
+/// #     command_line: &CommandLine,
+/// #     workspace_root: &Path,
+/// # ) -> Result<(), rituals::Failure> {
 /// // Needs a real project on disk, so this example is `no_run`.
 /// let regenerated = rollback::attempt("running `remove lint` again", |changes| {
 ///     generated_file::regenerate_recording(changes, command_line, workspace_root)

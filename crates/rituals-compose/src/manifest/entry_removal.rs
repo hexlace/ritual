@@ -483,7 +483,8 @@ mod tests {
             "[\n    \"a\",\n    \"b\",\n    \"c\"\n]",
             "[\n\t\"a\",\n\t\"b\", # cb\n\t\"c\"\n]",
             "[\n    # about a\n    \"a\", # ca\n    # about b\n    \"b\", # cb\n    \"c\" # cc\n]",
-            "[\n    # about a\n    \"a\", # ca\n    # about b\n    \"b\", # cb\n    \"c\", # cc\n    # end\n]",
+            "[\n    # about a\n    \"a\", # ca\n    # about b\n    \"b\", # cb\n    \
+             \"c\", # cc\n    # end\n]",
             "[\n    \"a\" # sa\n    , # ta\n    \"b\",\n    \"c\" # sc\n    , # tc\n]",
             "[ # list\n    \"a\", \"b\",\n    \"c\",\n]",
         ];

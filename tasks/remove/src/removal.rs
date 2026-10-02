@@ -160,10 +160,9 @@ impl Removal {
             )));
         }
 
-        let drops_inherited_entry = self.drops_inherited_entry;
         let workspace = self.manifests.workspace_mut();
         let mut edited = false;
-        if drops_inherited_entry {
+        if self.drops_inherited_entry {
             edited |= workspace.remove_workspace_dependency(&self.key);
         }
         if let Some(member) = &self.member {

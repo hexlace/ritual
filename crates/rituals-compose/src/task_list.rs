@@ -628,7 +628,9 @@ mod tests {
         let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
         set_demo_ritual_metadata(
             &mut metadata,
-            serde_json::json!({ "ritual": { "tasks": ["task-true", "task-null", "task-malformed"] } }),
+            serde_json::json!({
+                "ritual": { "tasks": ["task-true", "task-null", "task-malformed"] }
+            }),
         );
 
         let result = resolve_excluding(&metadata, "demo-ritual", "task-null");

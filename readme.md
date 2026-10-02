@@ -165,9 +165,9 @@ task, and bundles nest.
 ### Ritual's own commands are a bundle too
 
 `add`, `regenerate`, `new`, `create` and `remove` come from the bundle
-`rituals-core`, imported under the key `ritual`. A new project's command line is also called
-`ritual`, so those commands appear directly: `cargo ritual add`, not
-`cargo ritual ritual add`. If you name your command line something else,
+`rituals-core`, imported under the key `ritual`. A new project's command line
+is also called `ritual`, so those commands appear directly: `cargo ritual add`,
+not `cargo ritual ritual add`. If you name your command line something else,
 with `ritual new demo --cli acme`, they stay grouped: your tasks run as
 `cargo acme <task>` and ritual's as `cargo acme ritual add`.
 
@@ -242,8 +242,9 @@ It refuses before writing anything when:
 - another crate depends on the task's directory, or the directory holds other
   workspace members or lies outside the workspace.
 
-If anything fails after `remove` starts writing, the project is put back as
-it was.
+If anything fails while `remove` is writing manifests or regenerating, the
+project is put back as it was. The directory's deletion comes last, after
+that, and is not undone; git gives back anything it deleted.
 
 ### Inside a project, use `cargo ritual`
 

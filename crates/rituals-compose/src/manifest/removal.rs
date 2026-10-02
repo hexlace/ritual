@@ -195,7 +195,10 @@ impl Manifest {
     /// use rituals_compose::manifest::Manifest;
     ///
     /// # let directory = std::env::temp_dir()
-    /// #     .join(format!("rituals-compose-doctest-manifest-workspace-dependency-{}", std::process::id()));
+    /// #     .join(format!(
+    /// #         "rituals-compose-doctest-manifest-workspace-dependency-{}",
+    /// #         std::process::id()
+    /// #     ));
     /// # std::fs::create_dir_all(&directory)?;
     /// let manifest_path = directory.join("Cargo.toml");
     /// # std::fs::write(
@@ -287,7 +290,10 @@ impl Manifest {
     /// use rituals_compose::manifest::Manifest;
     ///
     /// # let directory = std::env::temp_dir()
-    /// #     .join(format!("rituals-compose-doctest-manifest-default-members-{}", std::process::id()));
+    /// #     .join(format!(
+    /// #         "rituals-compose-doctest-manifest-default-members-{}",
+    /// #         std::process::id()
+    /// #     ));
     /// # std::fs::create_dir_all(&directory)?;
     /// let manifest_path = directory.join("Cargo.toml");
     /// # std::fs::write(
@@ -529,7 +535,8 @@ mod tests {
         // after it is that entry's, and stays.
         let (_scratch, mut manifest) = read_manifest(
             "remove-dependency-comment-above",
-            "[dependencies]\n# the linter\nlint = \"1\" # pinned\n# the formatter\nformat = \"1\"\n",
+            "[dependencies]\n# the linter\nlint = \"1\" # pinned\n# the formatter\n\
+             format = \"1\"\n",
         )?;
 
         assert!(manifest.remove_dependency("lint"));
@@ -547,7 +554,7 @@ mod tests {
             "remove-dependency-targets",
             "[dependencies]\nlint = { path = \"tasks/lint\" }\n\n\
              [target.'cfg(unix)'.dependencies]\nlint = { path = \"tasks/lint\" }\nother = \"1\"\n\n\
-             [target.'cfg(windows)'.dependencies]\nlint = \"1\"\n",
+             [target.'cfg(debug_assertions)'.dependencies]\nlint = \"1\"\n",
         )?;
 
         assert!(manifest.remove_dependency("lint"));
@@ -556,7 +563,7 @@ mod tests {
             manifest.document.to_string(),
             "[dependencies]\n\n\
              [target.'cfg(unix)'.dependencies]\nother = \"1\"\n\n\
-             [target.'cfg(windows)'.dependencies]\n"
+             [target.'cfg(debug_assertions)'.dependencies]\n"
         );
         Ok(())
     }
@@ -701,7 +708,8 @@ mod tests {
     // `remove_workspace_member` and `empties_default_members`.
 
     const A_WORKSPACE: &str = "[workspace]\n# the crates\nmembers = [\n    \"crates/cli\",\n    \
-                               \"tasks/lint\", # style\n    \"tasks/format\",\n]\nresolver = \"3\"\n";
+                               \"tasks/lint\", # style\n    \"tasks/format\",\n]\n\
+                               resolver = \"3\"\n";
 
     #[test]
     fn a_member_is_removed_with_its_line_and_the_rest_of_the_file_stays() -> TestOutcome {
@@ -711,8 +719,8 @@ mod tests {
 
         assert_eq!(
             manifest.document.to_string(),
-            "[workspace]\n# the crates\nmembers = [\n    \"crates/cli\",\n    \"tasks/format\",\n]\n\
-             resolver = \"3\"\n"
+            "[workspace]\n# the crates\nmembers = [\n    \"crates/cli\",\n    \
+             \"tasks/format\",\n]\nresolver = \"3\"\n"
         );
         Ok(())
     }
@@ -822,7 +830,8 @@ mod tests {
     fn an_entry_only_in_default_members_still_counts_as_removed() -> TestOutcome {
         let (_scratch, mut manifest) = read_manifest(
             "remove-member-default-only",
-            "[workspace]\nmembers = [\"tasks/*\"]\ndefault-members = [\"crates/cli\", \"tasks/lint\"]\n",
+            "[workspace]\nmembers = [\"tasks/*\"]\n\
+             default-members = [\"crates/cli\", \"tasks/lint\"]\n",
         )?;
 
         assert!(manifest.remove_workspace_member("tasks/lint"));

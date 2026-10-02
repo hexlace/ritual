@@ -17,10 +17,13 @@
 
 mod support;
 
-use support::removal::{assert_a_refusal, exists, project_with_a_committed_task};
-use support::{TempDir, TestOutcome, assert_trees_identical, help, in_checkout, snapshot_tree};
+use support::removal::{
+    assert_a_refusal, assert_help_lists, exists, project_with_a_committed_task,
+};
+use support::{TempDir, TestOutcome, assert_trees_identical, in_checkout, snapshot_tree};
 
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 
 #[test]
 fn a_remove_that_cannot_write_the_workspace_manifest_puts_everything_back() -> TestOutcome {
@@ -33,13 +36,7 @@ fn a_remove_that_cannot_write_the_workspace_manifest_puts_everything_back() -> T
         // test, and Cargo may want to touch the lockfile.
         project.build()?;
         let workspace_manifest = project.workspace_manifest_path();
-        std::fs::set_permissions(&workspace_manifest, std::fs::Permissions::from_mode(0o444))?;
-        let enforced = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&workspace_manifest)
-            .is_err();
-        if !enforced {
-            std::fs::set_permissions(&workspace_manifest, std::fs::Permissions::from_mode(0o644))?;
+        if !made_read_only(&workspace_manifest)? {
             support::checkout::report_skip(
                 "a failed `remove` could not be demonstrated because this process does not \
                  honour the read-only permission bit",
@@ -71,22 +68,19 @@ fn a_remove_that_cannot_write_the_workspace_manifest_puts_everything_back() -> T
 
         // The project still builds and still has the task, and the same
         // command works once the cause is cleared.
-        let help_output = project.alias(&["--help"])?;
-        help_output.expect_success("`cargo ritual --help` after the failed `remove greet`");
-        assert_eq!(
-            help::command_names(&help_output.stdout),
-            [
+        assert_help_lists(
+            &project,
+            "the failed `remove greet`",
+            &[
                 "add",
                 "regenerate",
                 "new",
                 "create",
                 "remove",
                 "greet",
-                "help"
+                "help",
             ],
-            "stdout was:\n{}",
-            help_output.stdout
-        );
+        )?;
         project
             .run_cli(&["remove", "greet"])?
             .expect_success("`remove greet` again, with the manifest writable");
@@ -96,4 +90,16 @@ fn a_remove_that_cannot_write_the_workspace_manifest_puts_everything_back() -> T
         );
         Ok(())
     })
+}
+
+/// Makes `path` read-only and reports whether that is enforced, by trying to
+/// open it for writing. When it is not (the process is root, say), the file
+/// is made writable again before returning `false`.
+fn made_read_only(path: &Path) -> Result<bool, std::io::Error> {
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o444))?;
+    let enforced = std::fs::OpenOptions::new().write(true).open(path).is_err();
+    if !enforced {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))?;
+    }
+    Ok(enforced)
 }

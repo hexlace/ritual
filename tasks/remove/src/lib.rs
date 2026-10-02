@@ -12,6 +12,7 @@ use git::Obstacle;
 use removal::{Manifests, Member, Removal};
 use rituals::{CommandLine, Failure, Outcome, Task, clap};
 use rituals_compose::metadata::{self, TaskImport};
+use rituals_compose::sentence::join_with_and;
 use rituals_compose::top_level;
 
 /// The package every composed command line's own commands come from: the
@@ -224,15 +225,10 @@ fn shown(directory: &Path, workspace_root: &Path) -> String {
         .to_string()
 }
 
-/// Joins names as a list a sentence can hold, each quoted: `` `a` ``,
-/// `` `a` and `b` ``, `` `a`, `b` and `c` ``.
-fn quoted_list(names: &[&str]) -> String {
-    let quoted: Vec<String> = names.iter().map(|name| format!("`{name}`")).collect();
-    match quoted.as_slice() {
-        [] => String::new(),
-        [only] => only.clone(),
-        [first @ .., last] => format!("{} and {last}", first.join(", ")),
-    }
+/// Wraps each name in backticks, ready for
+/// [`join_with_and`](rituals_compose::sentence::join_with_and).
+fn backticked(names: &[&str]) -> Vec<String> {
+    names.iter().map(|name| format!("`{name}`")).collect()
 }
 
 /// The refusal for an argument that is neither a key nor a crate any key
@@ -241,8 +237,7 @@ fn neither_refusal(argument: &str, package: &str, keys: &[&str]) -> Failure {
     let tasks = if keys.is_empty() {
         "it has no tasks".to_string()
     } else {
-        let quoted: Vec<String> = keys.iter().map(|key| format!("`{key}`")).collect();
-        format!("its tasks are {}", quoted.join(", "))
+        format!("its tasks are {}", join_with_and(&backticked(keys)))
     };
     Failure::new(format!(
         "refusing to remove `{argument}`: it is neither a key in `{package}`'s \
@@ -261,7 +256,7 @@ fn several_keys_refusal(
     Failure::new(format!(
         "refusing to remove `{argument}`: it is imported by more than one task, {}; remove one \
          by its key, such as `{remove_command} {example_key}`",
-        quoted_list(keys)
+        join_with_and(&backticked(keys))
     ))
 }
 
@@ -278,7 +273,7 @@ fn other_dependents_refusal(key: &str, directory: &str, dependents: &[&str]) -> 
     Failure::new(format!(
         "refusing to remove `{key}`: {directory} is also a dependency of {}, and deleting it \
          would break {}; remove that dependency first",
-        quoted_list(dependents),
+        join_with_and(&backticked(dependents)),
         if dependents.len() == 1 {
             "that crate"
         } else {
@@ -292,7 +287,7 @@ fn members_inside_refusal(directory: &str, members: &[&str]) -> Failure {
     Failure::new(format!(
         "refusing to delete {directory}: it also holds the workspace members {}, which \
          deleting it would take too; remove or move them first",
-        quoted_list(members)
+        join_with_and(&backticked(members))
     ))
 }
 
@@ -368,7 +363,7 @@ mod tests {
     use super::{
         Obstacle, bundle_refusal, git_refusal, last_default_member_refusal, members_inside_refusal,
         neither_refusal, other_dependents_refusal, outside_the_workspace_refusal, pick,
-        quoted_list, several_keys_refusal, shown,
+        several_keys_refusal, shown,
     };
 
     const REMOVE: &str = "cargo ritual remove";
@@ -421,7 +416,7 @@ mod tests {
             Err(
                 "refusing to remove `nosuch`: it is neither a key in `demo-ritual`'s \
                  [package.metadata.ritual] tasks nor a crate one of them imports; its tasks \
-                 are `ritual`, `greet`"
+                 are `ritual` and `greet`"
                     .to_string()
             )
         );
@@ -529,13 +524,6 @@ mod tests {
             ),
             "/elsewhere/greet"
         );
-    }
-
-    #[test]
-    fn a_list_reads_as_a_sentence() {
-        assert_eq!(quoted_list(&["a"]), "`a`");
-        assert_eq!(quoted_list(&["a", "b"]), "`a` and `b`");
-        assert_eq!(quoted_list(&["a", "b", "c"]), "`a`, `b` and `c`");
     }
 
     fn refusal(obstacle: Obstacle) -> String {

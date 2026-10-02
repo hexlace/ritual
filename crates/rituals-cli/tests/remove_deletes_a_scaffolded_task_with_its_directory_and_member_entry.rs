@@ -16,8 +16,8 @@
 
 mod support;
 
-use support::removal::{exists, members_of, project_with_a_committed_task};
-use support::{TempDir, TestOutcome, generated, help, in_checkout, manifest, write_text};
+use support::removal::{assert_help_lists, exists, members_of, project_with_a_committed_task};
+use support::{Project, TempDir, TestOutcome, generated, help, in_checkout, manifest, write_text};
 
 #[test]
 fn removing_a_scaffolded_task_by_key_deletes_it_and_leaves_a_project_that_builds() -> TestOutcome {
@@ -43,34 +43,7 @@ fn removing_a_scaffolded_task_by_key_deletes_it_and_leaves_a_project_that_builds
         let removed = project.run_cli(&["remove", "greet"])?;
         removed.expect_success("`cargo ritual remove greet`");
 
-        // The key and the dependency line are gone from the command line's
-        // manifest.
-        let cli_manifest = project.cli_manifest()?;
-        assert_eq!(
-            manifest::tasks(&cli_manifest)?,
-            ["ritual"],
-            "expected `greet` to leave `tasks`; manifest was:\n{cli_manifest}"
-        );
-        assert!(
-            manifest::lookup(&cli_manifest, &["dependencies", "greet"]).is_none(),
-            "expected the `greet` dependency line to be gone; manifest was:\n{cli_manifest}"
-        );
-
-        // The directory and the member entry are gone with it.
-        let expected_members: Vec<String> = members_before
-            .iter()
-            .filter(|member| member.as_str() != "tasks/greet")
-            .cloned()
-            .collect();
-        assert_eq!(
-            members_of(&project)?,
-            expected_members,
-            "expected only `tasks/greet` to leave `[workspace] members`"
-        );
-        assert!(
-            !exists(&project.root().join("tasks/greet")),
-            "expected tasks/greet to be deleted"
-        );
+        assert_the_task_left_the_manifests_and_the_disk(&project, &members_before)?;
 
         // The generated file no longer mounts it, and what the person had
         // lying around is untouched.
@@ -87,16 +60,51 @@ fn removing_a_scaffolded_task_by_key_deletes_it_and_leaves_a_project_that_builds
 
         // The order that used to break the build now works: the project's
         // command line builds, and the removed command is gone from it.
-        let help_output = project.alias(&["--help"])?;
-        help_output.expect_success("`cargo ritual --help` after `remove greet`");
-        assert_eq!(
-            help::command_names(&help_output.stdout),
-            ["add", "regenerate", "new", "create", "remove", "help"],
-            "stdout was:\n{}",
-            help_output.stdout
-        );
+        assert_help_lists(
+            &project,
+            "`remove greet`",
+            &["add", "regenerate", "new", "create", "remove", "help"],
+        )?;
         help::assert_refuses_unrecognized_subcommand(&project.run_cli(&["greet"])?, "greet");
 
         Ok(())
     })
+}
+
+/// The key, the dependency line, the member entry and the directory of
+/// `greet` are gone; every other member stays.
+#[track_caller]
+fn assert_the_task_left_the_manifests_and_the_disk(
+    project: &Project,
+    members_before: &[String],
+) -> TestOutcome {
+    // The key and the dependency line are gone from the command line's
+    // manifest.
+    let cli_manifest = project.cli_manifest()?;
+    assert_eq!(
+        manifest::tasks(&cli_manifest)?,
+        ["ritual"],
+        "expected `greet` to leave `tasks`; manifest was:\n{cli_manifest}"
+    );
+    assert!(
+        manifest::lookup(&cli_manifest, &["dependencies", "greet"]).is_none(),
+        "expected the `greet` dependency line to be gone; manifest was:\n{cli_manifest}"
+    );
+
+    // The directory and the member entry are gone with it.
+    let expected_members: Vec<String> = members_before
+        .iter()
+        .filter(|member| member.as_str() != "tasks/greet")
+        .cloned()
+        .collect();
+    assert_eq!(
+        members_of(project)?,
+        expected_members,
+        "expected only `tasks/greet` to leave `[workspace] members`"
+    );
+    assert!(
+        !exists(&project.root().join("tasks/greet")),
+        "expected tasks/greet to be deleted"
+    );
+    Ok(())
 }

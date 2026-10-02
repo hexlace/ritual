@@ -256,7 +256,10 @@ mod tests {
     /// path is named exactly once and in the order git printed it.
     #[test]
     fn porcelain_names_every_untracked_ignored_and_changed_path() -> TestOutcome {
-        let output = b"?? untracked.txt\0!! target/\0 M worktree.rs\0M  staged.rs\0A  added.rs\0 D gone.rs\0";
+        // The continuation strips the next line's leading whitespace, so the
+        // space that starts ` D` is written as an escape.
+        let output = b"?? untracked.txt\0!! target/\0 M worktree.rs\0M  staged.rs\0A  added.rs\0\
+            \x20D gone.rs\0";
         assert_eq!(
             parse_porcelain(output).map_err(|obstacle| format!("{obstacle:?}"))?,
             [
@@ -376,7 +379,10 @@ mod tests {
             &scratch.path().join("no-such-directory"),
         );
         assert!(
-            matches!(&result, Err(Obstacle::Failed(message)) if message.contains("no-such-directory")),
+            matches!(
+                &result,
+                Err(Obstacle::Failed(message)) if message.contains("no-such-directory")
+            ),
             "expected git's own message naming the directory, got {result:?}"
         );
         Ok(())

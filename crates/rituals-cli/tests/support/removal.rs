@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use super::{
-    Checkout, Outcome, Project, RunOutput, TempDir, TestOutcome, assert_trees_identical, git,
+    Checkout, Outcome, Project, RunOutput, TempDir, TestOutcome, assert_trees_identical, git, help,
     manifest, snapshot_tree,
 };
 
@@ -118,4 +118,20 @@ pub(crate) fn members_of(project: &Project) -> Outcome<Vec<String>> {
 /// Whether `path` exists as anything at all.
 pub(crate) fn exists(path: &Path) -> bool {
     path.symlink_metadata().is_ok()
+}
+
+/// Asserts the project's own `--help` succeeds and lists exactly
+/// `expected`, in order. `after` says what just happened, for the failure
+/// message: "`remove greet`" reads as "after `remove greet`".
+#[track_caller]
+pub(crate) fn assert_help_lists(project: &Project, after: &str, expected: &[&str]) -> TestOutcome {
+    let help_output = project.alias(&["--help"])?;
+    help_output.expect_success(&format!("`cargo ritual --help` after {after}"));
+    assert_eq!(
+        help::command_names(&help_output.stdout),
+        expected,
+        "stdout was:\n{}",
+        help_output.stdout
+    );
+    Ok(())
 }
