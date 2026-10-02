@@ -214,7 +214,8 @@ impl CrateSource<'_> {
                 flags
             }
             CrateSource::Path(path) => {
-                let path = current_dir.map_or_else(|| path.to_path_buf(), |dir| dir.join(path));
+                let path = current_dir
+                    .map_or_else(|| path.to_path_buf(), |directory| directory.join(path));
                 vec!["--path".to_string(), path.to_string_lossy().into_owned()]
             }
         }
