@@ -9,12 +9,13 @@
 
 use std::path::{Path, PathBuf};
 
-use toml_edit::{Array, Item, TableLike, Value};
+use toml_edit::{Array, DocumentMut, Item, Table, TableLike, Value};
 
 use rituals::Failure;
 
 use super::Manifest;
 use super::entry_removal::remove_matching_style;
+use super::raw_text;
 use crate::paths::{lies_under, normalize};
 
 /// The characters that make a `members` entry a glob rather than a path.
@@ -91,10 +92,12 @@ impl Manifest {
     /// written in: an inline table, a dotted `key.workspace = true`, a
     /// `[dependencies.key]` table of its own, or a bare version string.
     ///
-    /// The dependency's own line goes, with a comment written on it and one
-    /// written directly above it, which `toml_edit` holds as part of the
-    /// line; the comments around its neighbours stay. Reports whether it
-    /// removed anything. `[dev-dependencies]` and
+    /// The dependency's own lines go, with a comment written on them; the
+    /// comment lines on their own above it stay, as they do when an entry is
+    /// taken out of an array, because such a line is as often a heading for
+    /// a group as a note about the one key. They move onto the next key in
+    /// the table, or, when it was the last, in front of whatever follows the
+    /// table. Reports whether it removed anything. `[dev-dependencies]` and
     /// `[build-dependencies]` are not touched: a dependency under the same
     /// key there is a different declaration that nothing here owns.
     ///
@@ -102,6 +105,7 @@ impl Manifest {
     ///
     /// ```
     /// use rituals_compose::manifest::Manifest;
+    /// use rituals_compose::rollback;
     ///
     /// # let directory = std::env::temp_dir()
     /// #     .join(format!("rituals-compose-doctest-manifest-dependency-{}", std::process::id()));
@@ -109,36 +113,41 @@ impl Manifest {
     /// let manifest_path = directory.join("Cargo.toml");
     /// # std::fs::write(
     /// #     &manifest_path,
-    /// #     "[dependencies]\nlint = { path = \"tasks/lint\" }\nritual.workspace = true\n",
+    /// #     "[dependencies]\n# tasks\nlint = { path = \"tasks/lint\" }\n\
+    /// #      ritual.workspace = true\n",
     /// # )?;
     /// let mut manifest = Manifest::read(&manifest_path)?;
     ///
     /// assert!(manifest.remove_dependency("lint"));
     /// assert!(!manifest.remove_dependency("lint"));
+    /// rollback::attempt("running `remove lint` again", |changes| manifest.write(changes))?;
+    ///
+    /// let on_disk = std::fs::read_to_string(&manifest_path)?;
+    /// assert_eq!(on_disk, "[dependencies]\n# tasks\nritual.workspace = true\n");
     /// # std::fs::remove_dir_all(&directory)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn remove_dependency(&mut self, key: &str) -> bool {
-        let root = self.document.as_table_mut();
-        let mut removed = root
-            .get_mut("dependencies")
-            .and_then(Item::as_table_like_mut)
-            .is_some_and(|dependencies| dependencies.remove(key).is_some());
+        let mut removed =
+            remove_keeping_the_lines_above(&mut self.document, &["dependencies"], key);
 
-        let Some(targets) = root.get_mut("target").and_then(Item::as_table_like_mut) else {
-            return removed;
-        };
-        for (_target, declarations) in targets.iter_mut() {
-            let Some(dependencies) = declarations
-                .as_table_like_mut()
-                .and_then(|declarations| declarations.get_mut("dependencies"))
-                .and_then(Item::as_table_like_mut)
-            else {
-                continue;
-            };
-            if dependencies.remove(key).is_some() {
-                removed = true;
-            }
+        let targets: Vec<String> = self
+            .document
+            .get("target")
+            .and_then(Item::as_table_like)
+            .map(|targets| {
+                targets
+                    .iter()
+                    .map(|(target, _)| target.to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for target in &targets {
+            removed |= remove_keeping_the_lines_above(
+                &mut self.document,
+                &["target", target, "dependencies"],
+                key,
+            );
         }
         removed
     }
@@ -495,6 +504,191 @@ impl Manifest {
 /// The two `[workspace]` lists whose entries name member directories.
 const MEMBER_LISTS: [&str; 2] = ["members", "default-members"];
 
+/// Removes `key` from the table at `path` in `document`, and reports whether
+/// it was there.
+///
+/// The own-line comments above the removed entry stay, moved onto the next
+/// entry written in the table's body, or, when there is none, in front of
+/// the next table header in the document, or at its end. A table written
+/// inline, or one with no header of its own, has no lines to keep, and its
+/// entry simply goes.
+fn remove_keeping_the_lines_above(document: &mut DocumentMut, path: &[&str], key: &str) -> bool {
+    let mut item = Some(document.as_item_mut());
+    for segment in path {
+        item = item
+            .and_then(Item::as_table_like_mut)
+            .and_then(|table| table.get_mut(segment));
+    }
+    let Some(item) = item else {
+        return false;
+    };
+    let Some(table) = item.as_table_mut() else {
+        return item
+            .as_table_like_mut()
+            .is_some_and(|table| table.remove(key).is_some());
+    };
+
+    let (above, after) = match take_out(table, key) {
+        None => return false,
+        Some(Leftover::Nothing) => return true,
+        Some(Leftover::After(above, after)) => (above, after),
+    };
+    let mut next = None;
+    next_header(document.as_table(), after, &mut next);
+    let moved =
+        next.is_some_and(|position| prepend_to_header(document.as_table_mut(), position, &above));
+    if !moved {
+        let trailing = raw_text(Some(document.trailing()));
+        document.set_trailing(format!("{above}{trailing}"));
+    }
+    true
+}
+
+/// What is left to place of the own-line text above an entry once
+/// [`take_out`] has removed it.
+enum Leftover {
+    /// Nothing: there was no such text, it went onto the next entry, or the
+    /// table has no header for anything to follow.
+    Nothing,
+    /// The text, to go in front of whatever follows this document position.
+    After(String, usize),
+}
+
+/// Removes `key` from `table`, moving the own-line text above it onto the
+/// next entry in the table's body when there is one, and returns what is
+/// left to place, or `None` when there was no such key.
+///
+/// What is left belongs after the removed table's own position, for a
+/// `[table.key]` written under its own header, and after `table`'s
+/// otherwise.
+fn take_out(table: &mut Table, key: &str) -> Option<Leftover> {
+    let removed_header = table
+        .get(key)
+        .and_then(Item::as_table)
+        .filter(|written| !written.is_dotted())
+        .and_then(Table::position);
+    let above = lines_of(&own_prefix(table, key)?);
+    let in_the_body = |item: &Item| match item {
+        Item::Value(_) => true,
+        Item::Table(written) => written.is_dotted(),
+        Item::None | Item::ArrayOfTables(_) => false,
+    };
+    let next_key = match removed_header {
+        Some(_) => None,
+        None => table
+            .iter()
+            .skip_while(|(candidate, _)| *candidate != key)
+            .skip(1)
+            .find(|(_, item)| in_the_body(item))
+            .map(|(candidate, _)| candidate.to_string()),
+    };
+    let after = removed_header.or_else(|| table.position());
+    table.remove(key);
+
+    if above.is_empty() {
+        return Some(Leftover::Nothing);
+    }
+    if let Some(next_key) = next_key {
+        with_first_line_decor(table, &next_key, |decor| {
+            let prefix = raw_text(decor.prefix());
+            decor.set_prefix(format!("{above}{prefix}"));
+        });
+        return Some(Leftover::Nothing);
+    }
+    Some(after.map_or(Leftover::Nothing, |after| Leftover::After(above, after)))
+}
+
+/// The text in front of the first line `key` owns in `table`: the header's,
+/// for a table written under its own header, and otherwise the key's, or for
+/// a dotted key, the first line's.
+fn own_prefix(table: &mut Table, key: &str) -> Option<String> {
+    if let Some(written) = table.get(key).and_then(Item::as_table) {
+        if !written.is_dotted() {
+            return Some(raw_text(written.decor().prefix()));
+        }
+    }
+    with_first_line_decor(table, key, |decor| raw_text(decor.prefix()))
+}
+
+/// Runs `edit` on the decor holding the text in front of the first line
+/// `key` owns in the body of `table`: the key's own, or for a dotted key,
+/// that of the first key written under it, which is where `toml_edit` keeps
+/// a dotted line's. `None` when there is no such key.
+fn with_first_line_decor<R>(
+    table: &mut Table,
+    key: &str,
+    edit: impl FnOnce(&mut toml_edit::Decor) -> R,
+) -> Option<R> {
+    let dotted_first = table
+        .get(key)
+        .and_then(Item::as_table)
+        .filter(|written| written.is_dotted())
+        .and_then(|written| written.iter().next().map(|(inner, _)| inner.to_string()));
+    match dotted_first {
+        Some(inner) => {
+            let written = table.get_mut(key).and_then(Item::as_table_mut)?;
+            with_first_line_decor(written, &inner, edit)
+        }
+        None => table.key_mut(key).map(|mut key| edit(key.leaf_decor_mut())),
+    }
+}
+
+/// The whole lines at the start of `prefix` — everything through its last
+/// newline, which leaves out the indent in front of the key itself — when
+/// one of them is a comment, and nothing otherwise: blank lines alone are
+/// spacing that belonged to the removed entry.
+fn lines_of(prefix: &str) -> String {
+    let lines = prefix.rfind('\n').map_or("", |last| &prefix[..=last]);
+    if lines.lines().any(|line| line.trim_start().starts_with('#')) {
+        lines.to_string()
+    } else {
+        String::new()
+    }
+}
+
+/// Sets `next` to the smallest position of a table written under its own
+/// header, at any depth of `table`, that comes after `after`.
+fn next_header(table: &Table, after: usize, next: &mut Option<usize>) {
+    for (_, item) in table {
+        let tables: Vec<&Table> = match item {
+            Item::Table(written) => vec![written],
+            Item::ArrayOfTables(array) => array.iter().collect(),
+            Item::None | Item::Value(_) => Vec::new(),
+        };
+        for written in tables {
+            if let Some(position) = written.position() {
+                if position > after && next.is_none_or(|best| position < best) {
+                    *next = Some(position);
+                }
+            }
+            next_header(written, after, next);
+        }
+    }
+}
+
+/// Puts `text` in front of the header of the table at `position`, at any
+/// depth of `table`, and reports whether it found one.
+fn prepend_to_header(table: &mut Table, position: usize, text: &str) -> bool {
+    for (_, item) in table.iter_mut() {
+        let tables: Vec<&mut Table> = match item {
+            Item::Table(written) => vec![written],
+            Item::ArrayOfTables(array) => array.iter_mut().collect(),
+            Item::None | Item::Value(_) => Vec::new(),
+        };
+        for written in tables {
+            if written.position() == Some(position) {
+                let prefix = raw_text(written.decor().prefix());
+                written.decor_mut().set_prefix(format!("{text}{prefix}"));
+                return true;
+            }
+            if prepend_to_header(written, position, text) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Whether `dependencies` declares `key` as taking its definition from the
 /// workspace: `key.workspace = true`, `key = { workspace = true }` and a
 /// `[dependencies.key]` table with `workspace = true` all read the same.
@@ -714,14 +908,14 @@ mod tests {
         Ok(())
     }
 
+    /// A comment on a line of its own above the removed key stays, onto the
+    /// next key, as it does for an entry taken out of an array; the comment
+    /// on the key's own line goes with it.
     #[test]
-    fn a_comment_on_the_line_above_a_removed_dependency_goes_with_it() -> TestOutcome {
-        // `toml_edit` keeps a comment written directly above a key as part of
-        // that key, so it is removed with it. The comment above the entry
-        // after it is that entry's, and stays.
+    fn a_comment_on_the_line_above_a_removed_dependency_stays() -> TestOutcome {
         let (_scratch, mut manifest) = read_manifest(
             "remove-dependency-comment-above",
-            "[dependencies]\n# the linter\nlint = \"1\" # pinned\n# the formatter\n\
+            "[dependencies]\n# tasks\nlint = \"1\" # pinned\n# the formatter\n\
              format = \"1\"\n",
         )?;
 
@@ -729,7 +923,63 @@ mod tests {
 
         assert_eq!(
             manifest.document.to_string(),
-            "[dependencies]\n# the formatter\nformat = \"1\"\n"
+            "[dependencies]\n# tasks\n# the formatter\nformat = \"1\"\n"
+        );
+        Ok(())
+    }
+
+    /// With no key after it, the comment goes in front of the next table's
+    /// header, or to the end of the file when there is none.
+    #[test]
+    fn a_comment_above_the_last_dependency_moves_past_the_table() -> TestOutcome {
+        let (_scratch, mut manifest) = read_manifest(
+            "remove-dependency-comment-last",
+            "[dependencies]\nformat = \"1\"\n\n# tasks\nlint = \"1\"\n\n\
+             [package]\nname = \"cli\"\n",
+        )?;
+        assert!(manifest.remove_dependency("lint"));
+        assert_eq!(
+            manifest.document.to_string(),
+            "[dependencies]\nformat = \"1\"\n\n# tasks\n\n[package]\nname = \"cli\"\n"
+        );
+
+        let (_scratch, mut at_the_end) = read_manifest(
+            "remove-dependency-comment-end",
+            "[dependencies]\nformat = \"1\"\n# tasks\nlint = \"1\"\n",
+        )?;
+        assert!(at_the_end.remove_dependency("lint"));
+        assert_eq!(
+            at_the_end.document.to_string(),
+            "[dependencies]\nformat = \"1\"\n# tasks\n"
+        );
+        Ok(())
+    }
+
+    /// The shapes `add` and a person write keep it the same way: a dotted
+    /// key, whose line's text `toml_edit` holds on the key under it, and a
+    /// table under its own header, whose text is in front of the header.
+    #[test]
+    fn a_comment_above_a_dotted_key_or_a_header_stays() -> TestOutcome {
+        let (_scratch, mut dotted) = read_manifest(
+            "remove-dependency-comment-dotted",
+            "[dependencies]\n# tasks\nlint.workspace = true\nlint.optional = true\n\
+             ritual.workspace = true\n",
+        )?;
+        assert!(dotted.remove_dependency("lint"));
+        assert_eq!(
+            dotted.document.to_string(),
+            "[dependencies]\n# tasks\nritual.workspace = true\n"
+        );
+
+        let (_scratch, mut header) = read_manifest(
+            "remove-dependency-comment-header",
+            "[dependencies]\nformat = \"1\"\n\n# the linter\n[dependencies.lint]\npath = \"x\"\n\n\
+             [package]\nname = \"cli\"\n",
+        )?;
+        assert!(header.remove_dependency("lint"));
+        assert_eq!(
+            header.document.to_string(),
+            "[dependencies]\nformat = \"1\"\n\n# the linter\n\n[package]\nname = \"cli\"\n"
         );
         Ok(())
     }
