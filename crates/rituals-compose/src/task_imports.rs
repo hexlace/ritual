@@ -16,21 +16,23 @@
               module is private; see the note above"
 )]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rituals::Failure;
 
-use crate::metadata::{Dependency, Metadata, Package};
+use crate::metadata::{self, Dependency, Metadata, Package};
+use crate::paths::lies_under;
 use crate::{project, task_list};
 
 /// One key in a composed CLI's `[package.metadata.ritual] tasks` list, and
 /// what it imports.
 ///
-/// Every question about the dependency behind the key is answered from the
-/// resolved graph `cargo metadata` reports: which package the key reaches,
-/// where that package lives, whether it is a member of the workspace, and
-/// what else in the workspace relies on it. A key with no normal dependency
-/// behind it answers every one of them with nothing.
+/// Every question about the dependency behind the key is answered from what
+/// `cargo metadata` reports: which package the key reaches and where that
+/// package lives from the resolved graph, whether it is a member of the
+/// workspace from Cargo's own list, and what else relies on it from what
+/// each package declares. A key with no normal dependency behind it answers
+/// every one of them with nothing.
 ///
 /// Got from [`crate::metadata::Metadata::task_imports`].
 ///
@@ -113,13 +115,23 @@ impl<'a> TaskImport<'a> {
         self.is_workspace_member
     }
 
-    /// The workspace packages, by name, that depend on the imported package
-    /// in some way this key's dependency line is not.
+    /// The packages, by name, that rely on the imported package in some way
+    /// this key's dependency line is not.
     ///
-    /// That is every other workspace package with an edge to it, and the
-    /// composed CLI itself when it also depends on the package as a dev- or
+    /// Read from what each package declares, never from the resolved graph,
+    /// which holds only the edges the active features reach: a dependency of
+    /// any kind, on any target, optional or not, from a workspace member or
+    /// from a crate outside the workspace, counts. With a
+    /// [`TaskImport::directory`], that is every declared `path` under it and
+    /// every build target whose source file lies under it; without one, every
+    /// declared dependency on a package of the same name. The composed CLI
+    /// counts too when it declares the package again, as a dev- or
     /// build-dependency, which taking this key's dependency out does not
-    /// remove. Empty when nothing else relies on it.
+    /// remove. A package that lies under the directory itself is not
+    /// counted, since it goes with it. Empty when nothing else relies on it.
+    ///
+    /// Only the packages `cargo metadata` loaded are read here; see
+    /// [`Metadata::dependents_outside_the_graph`] for the rest.
     #[must_use]
     pub fn other_dependents(&self) -> &[&'a str] {
         &self.other_dependents
@@ -190,7 +202,7 @@ fn import_under<'a>(
         package_name,
         directory,
         is_workspace_member: metadata.workspace_members.contains(&resolved.id),
-        other_dependents: other_dependents(metadata, cli_package, key, resolved),
+        other_dependents: other_dependents(metadata, cli_package, key, resolved, directory),
         members_inside: directory
             .map(|directory| members_inside(metadata, resolved, directory))
             .unwrap_or_default(),
@@ -252,51 +264,104 @@ fn ensure_manifest_is_in(key: &str, resolved: &Package, directory: &Path) -> Res
     )))
 }
 
-/// Every workspace package, by name, that depends on `resolved` in a way
-/// that is not `key`'s normal dependency line in the composed CLI, each
-/// named once.
+/// Every package, by name, that relies on `resolved` in a way that is not
+/// `key`'s normal dependency line in the composed CLI, each named once.
+///
+/// With a `directory`, relying on it is declaring a `path` under it or
+/// building a target from a file under it, and a package that lies under it
+/// is skipped. Without one, it is declaring a dependency on a package named
+/// as `resolved` is.
 fn other_dependents<'a>(
     metadata: &'a Metadata,
     cli_package: &Package,
     key: &str,
     resolved: &Package,
+    directory: Option<&Path>,
 ) -> Vec<&'a str> {
-    let extern_name = key.replace('-', "_");
     let mut dependents: Vec<&str> = Vec::new();
-    for node in &metadata.resolve.nodes {
-        if !metadata.workspace_members.contains(&node.id) {
+    for package in &metadata.packages {
+        if directory.is_some_and(|directory| lies_under(&package.manifest_path, directory)) {
             continue;
         }
-        let depends_otherwise =
-            node.deps
+        let declares_it = package.dependencies.iter().any(|dependency| {
+            let is_keys_line = package.id == cli_package.id
+                && dependency.kind.is_none()
+                && dependency.rename.as_deref().unwrap_or(&dependency.name) == key;
+            !is_keys_line
+                && directory.map_or_else(
+                    || dependency.name == resolved.name,
+                    |directory| {
+                        dependency
+                            .path
+                            .as_deref()
+                            .is_some_and(|path| lies_under(path, directory))
+                    },
+                )
+        });
+        let builds_from_it = directory.is_some_and(|directory| {
+            package
+                .targets
                 .iter()
-                .filter(|edge| edge.pkg == resolved.id)
-                .any(|edge| {
-                    let is_keys_edge = node.id == cli_package.id && edge.name == extern_name;
-                    if is_keys_edge {
-                        // The same edge also carries a dev- or build-dependency
-                        // when one is declared under the same name; that is not
-                        // removed with the normal one.
-                        edge.dep_kinds.iter().any(|kind| kind.kind.is_some())
-                    } else {
-                        true
-                    }
-                });
-        if !depends_otherwise {
-            continue;
-        }
-        let Some(dependent) = metadata
-            .packages
-            .iter()
-            .find(|package| package.id == node.id)
-        else {
-            continue;
-        };
-        if !dependents.contains(&dependent.name.as_str()) {
-            dependents.push(dependent.name.as_str());
+                .any(|target| lies_under(&target.src_path, directory))
+        });
+        if (declares_it || builds_from_it) && !dependents.contains(&package.name.as_str()) {
+            dependents.push(package.name.as_str());
         }
     }
     dependents
+}
+
+/// Every package `metadata` did not load that declares a path dependency
+/// under `directory`, by name: what [`Metadata::dependents_outside_the_graph`]
+/// answers.
+pub(crate) fn dependents_outside_the_graph(
+    metadata: &Metadata,
+    directory: &Path,
+) -> Result<Vec<String>, Failure> {
+    let mut asked: Vec<PathBuf> = metadata
+        .packages
+        .iter()
+        .map(|package| crate::paths::normalize(&package.manifest_path))
+        .collect();
+    let mut pending: Vec<PathBuf> = Vec::new();
+    for package in &metadata.packages {
+        if !lies_under(&package.manifest_path, directory) {
+            pending.extend(unasked_path_crates(package, directory, &asked));
+        }
+    }
+
+    let mut dependents: Vec<String> = Vec::new();
+    while let Some(manifest_path) = pending.pop() {
+        if asked.contains(&manifest_path) {
+            continue;
+        }
+        asked.push(manifest_path.clone());
+        let package = metadata::fetch_declared(&manifest_path)?;
+        let declares_it = package.dependencies.iter().any(|dependency| {
+            dependency
+                .path
+                .as_deref()
+                .is_some_and(|path| lies_under(path, directory))
+        });
+        if declares_it && !dependents.contains(&package.name) {
+            dependents.push(package.name.clone());
+        }
+        pending.extend(unasked_path_crates(&package, directory, &asked));
+    }
+    Ok(dependents)
+}
+
+/// The manifests of `package`'s declared path dependencies that are neither
+/// under `directory` nor among `asked`, normalised.
+fn unasked_path_crates(package: &Package, directory: &Path, asked: &[PathBuf]) -> Vec<PathBuf> {
+    package
+        .dependencies
+        .iter()
+        .filter_map(|dependency| dependency.path.as_deref())
+        .filter(|path| !lies_under(path, directory))
+        .map(|path| crate::paths::normalize(&path.join("Cargo.toml")))
+        .filter(|manifest_path| !asked.contains(manifest_path))
+        .collect()
 }
 
 /// The workspace members other than `resolved`, by name, whose manifests lie
@@ -323,7 +388,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{TaskImport, read};
-    use crate::metadata::{DepKind, Metadata, NodeDependency, parse};
+    use crate::metadata::{Dependency, Metadata, parse};
     use crate::test_support::TestOutcome;
 
     const DEMO_WORKSPACE: &str = include_str!("metadata/fixtures/demo-workspace.json");
@@ -348,20 +413,6 @@ mod tests {
             .find(|package| package.name == "demo-ritual")
             .expect("the fixture has a demo-ritual package");
         cli.metadata = serde_json::json!({ "ritual": { "tasks": keys } });
-    }
-
-    /// The fixture's own resolve edge from `demo-ritual` to `task-true`.
-    fn the_cli_edge_to_task_true(metadata: &mut Metadata) -> &mut NodeDependency {
-        metadata
-            .resolve
-            .nodes
-            .iter_mut()
-            .find(|node| node.id.contains("cli#demo-ritual"))
-            .expect("the fixture has a demo-ritual resolve node")
-            .deps
-            .iter_mut()
-            .find(|edge| edge.name == "task_true")
-            .expect("the fixture has a task_true edge")
     }
 
     #[test]
@@ -464,54 +515,138 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn another_packages_edge_to_the_same_crate_is_an_other_dependent() -> TestOutcome {
-        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
-        let node = metadata
-            .resolve
-            .nodes
+    /// Adds `dependency` to what the package called `package_name` declares.
+    fn declare(metadata: &mut Metadata, package_name: &str, dependency: Dependency) {
+        metadata
+            .packages
             .iter_mut()
-            .find(|node| node.id == TASK_NULL_ID)
-            .expect("the fixture has a task-null resolve node");
-        node.deps.push(NodeDependency {
-            name: "task_true".to_string(),
-            pkg: TASK_TRUE_ID.to_string(),
-            dep_kinds: vec![DepKind {
-                kind: None,
-                target: None,
-            }],
-        });
+            .find(|package| package.name == package_name)
+            .expect("the fixture has the package")
+            .dependencies
+            .push(dependency);
+    }
+
+    /// A normal path dependency on `task-true`'s directory, under `name`.
+    fn on_task_true(name: &str) -> Dependency {
+        Dependency {
+            name: name.to_string(),
+            kind: None,
+            rename: None,
+            path: Some(PathBuf::from("/scrubbed/checkout/task-true")),
+            target: None,
+        }
+    }
+
+    #[test]
+    fn another_package_declaring_the_directory_is_an_other_dependent() -> TestOutcome {
+        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        declare(&mut metadata, "task-null", on_task_true("task-true"));
 
         let imports = read(&metadata, "demo-ritual")?;
 
         assert_eq!(imports[0].other_dependents(), ["task-null"]);
         assert!(
             imports[1].other_dependents().is_empty(),
-            "an edge to task-true says nothing about the other keys"
+            "a dependency on task-true says nothing about the other keys"
         );
         Ok(())
     }
 
+    /// An optional dependency that no feature turns on has no edge in the
+    /// resolved graph, so only what the package declares shows it. The
+    /// fixture's graph has no edge from `task-null` to `task-true` at all.
     #[test]
-    fn an_edge_from_a_package_outside_the_workspace_is_not_an_other_dependent() -> TestOutcome {
-        // A dependency pulled in from outside has no say in what a
-        // workspace member's directory may lose.
+    fn a_declared_dependency_with_no_resolved_edge_is_an_other_dependent() -> TestOutcome {
+        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        assert!(
+            metadata
+                .resolve
+                .nodes
+                .iter()
+                .filter(|node| node.id == TASK_NULL_ID)
+                .all(|node| node.deps.iter().all(|edge| edge.pkg != TASK_TRUE_ID)),
+            "fixture precondition: no resolved edge from task-null to task-true"
+        );
+        declare(
+            &mut metadata,
+            "task-null",
+            Dependency {
+                kind: Some("build".to_string()),
+                target: Some("cfg(unix)".to_string()),
+                ..on_task_true("task-true")
+            },
+        );
+
+        let imports = read(&metadata, "demo-ritual")?;
+
+        assert_eq!(imports[0].other_dependents(), ["task-null"]);
+        Ok(())
+    }
+
+    /// Cargo reads a path dependency's manifest whoever declares it, so a
+    /// package outside the workspace counts as much as a member.
+    #[test]
+    fn a_package_outside_the_workspace_declaring_it_is_an_other_dependent() -> TestOutcome {
         let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
         metadata.workspace_members.retain(|id| id != TASK_NULL_ID);
-        let node = metadata
-            .resolve
-            .nodes
+        declare(&mut metadata, "task-null", on_task_true("anything"));
+
+        let imports = read(&metadata, "demo-ritual")?;
+
+        assert_eq!(imports[0].other_dependents(), ["task-null"]);
+        Ok(())
+    }
+
+    /// A dependency on a crate nested inside the directory is a dependency on
+    /// the directory: deleting it takes the nested crate too.
+    #[test]
+    fn a_dependency_on_a_crate_inside_the_directory_is_an_other_dependent() -> TestOutcome {
+        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        declare(
+            &mut metadata,
+            "task-null",
+            Dependency {
+                path: Some(PathBuf::from("/scrubbed/checkout/task-true/./inner")),
+                ..on_task_true("inner")
+            },
+        );
+
+        let imports = read(&metadata, "demo-ritual")?;
+
+        assert_eq!(imports[0].other_dependents(), ["task-null"]);
+        Ok(())
+    }
+
+    #[test]
+    fn a_package_building_a_target_from_a_file_in_the_directory_is_an_other_dependent()
+    -> TestOutcome {
+        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        metadata
+            .packages
             .iter_mut()
-            .find(|node| node.id == TASK_NULL_ID)
-            .expect("the fixture has a task-null resolve node");
-        node.deps.push(NodeDependency {
-            name: "task_true".to_string(),
-            pkg: TASK_TRUE_ID.to_string(),
-            dep_kinds: vec![DepKind {
-                kind: None,
-                target: None,
-            }],
-        });
+            .find(|package| package.id == TASK_NULL_ID)
+            .expect("the fixture has a task-null package")
+            .targets[0]
+            .src_path = PathBuf::from("/scrubbed/checkout/task-true/src/lib.rs");
+
+        let imports = read(&metadata, "demo-ritual")?;
+
+        assert_eq!(imports[0].other_dependents(), ["task-null"]);
+        Ok(())
+    }
+
+    /// A package inside the directory goes with it, so its dependency on the
+    /// directory breaks nothing.
+    #[test]
+    fn a_package_inside_the_directory_is_not_an_other_dependent() -> TestOutcome {
+        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        let inner = metadata
+            .packages
+            .iter_mut()
+            .find(|package| package.id == TASK_NULL_ID)
+            .expect("the fixture has a task-null package");
+        inner.manifest_path = PathBuf::from("/scrubbed/checkout/task-true/inner/Cargo.toml");
+        inner.dependencies.push(on_task_true("task-true"));
 
         let imports = read(&metadata, "demo-ritual")?;
 
@@ -524,16 +659,38 @@ mod tests {
         // Taking out the normal dependency line leaves a dev-dependency
         // under the same key, which deleting the directory would break.
         let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
-        the_cli_edge_to_task_true(&mut metadata)
-            .dep_kinds
-            .push(DepKind {
+        declare(
+            &mut metadata,
+            "demo-ritual",
+            Dependency {
                 kind: Some("dev".to_string()),
-                target: None,
-            });
+                ..on_task_true("task-true")
+            },
+        );
 
         let imports = read(&metadata, "demo-ritual")?;
 
         assert_eq!(imports[0].other_dependents(), ["demo-ritual"]);
+        Ok(())
+    }
+
+    /// The composed CLI's own normal line under the key, on every target it
+    /// is declared on, is what `remove` takes out, so it is not counted.
+    #[test]
+    fn the_keys_own_lines_on_every_target_are_not_other_dependents() -> TestOutcome {
+        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        declare(
+            &mut metadata,
+            "demo-ritual",
+            Dependency {
+                target: Some("cfg(unix)".to_string()),
+                ..on_task_true("task-true")
+            },
+        );
+
+        let imports = read(&metadata, "demo-ritual")?;
+
+        assert!(imports[0].other_dependents().is_empty());
         Ok(())
     }
 

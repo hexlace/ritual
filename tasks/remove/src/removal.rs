@@ -73,9 +73,12 @@ impl Manifests {
 pub(crate) struct Member {
     /// The directory, as `cargo metadata` gives it.
     pub(crate) directory: PathBuf,
-    /// The directory from the workspace root, spelled the way a `members`
-    /// entry would be.
+    /// The directory from the workspace root, as the report names it.
     pub(crate) relative: String,
+    /// The directory from git's top level, which the advice for getting it
+    /// back spells with the `:/` pathspec magic so it works from anywhere in
+    /// the project.
+    pub(crate) from_top_level: PathBuf,
 }
 
 /// Everything `remove` is about to write, captured before the first write.
@@ -169,7 +172,7 @@ impl Removal {
             edited |= workspace.remove_workspace_dependency(&self.key);
         }
         if let Some(member) = &self.member {
-            edited |= workspace.remove_workspace_member(&member.relative);
+            edited |= workspace.remove_workspace_member(&member.directory);
         }
 
         self.manifests.cli().write(changes)?;
@@ -221,7 +224,7 @@ impl Removal {
             return Ok(());
         };
         std::fs::remove_dir_all(&member.directory)
-            .map_err(|error| deletion_failure(&member.relative, error))?;
+            .map_err(|error| deletion_failure(&member.relative, &member.from_top_level, error))?;
         report(format!("deleted {}", member.relative));
         Ok(())
     }
@@ -309,12 +312,15 @@ fn ensure_it_is_gone(key: &str, still_listed: bool, still_a_dependency: bool) ->
 /// already updated.
 ///
 /// It says what is done and what is not, in that order, because the rollback
-/// has nothing to put back here and must not be taken to have.
-fn deletion_failure(directory: &str, error: std::io::Error) -> Failure {
+/// has nothing to put back here and must not be taken to have. The advice
+/// names the directory from git's top level with the `:/` pathspec magic,
+/// since a person may run it from any directory of the project.
+fn deletion_failure(directory: &str, from_top_level: &Path, error: std::io::Error) -> Failure {
     Failure::new(format!(
         "deleting {directory} failed partway, and the manifests are already updated; git can \
-         give back anything that was deleted (`git checkout -- {directory}`), or delete what \
-         is left by hand"
+         give back anything that was deleted (`git checkout -- :/{}`), or delete what is left \
+         by hand",
+        from_top_level.display()
     ))
     .caused_by(error)
 }
@@ -413,6 +419,7 @@ mod tests {
                 member: Some(Member {
                     directory: self.workspace_root.join("tasks/lint"),
                     relative: "tasks/lint".to_string(),
+                    from_top_level: PathBuf::from("project/tasks/lint"),
                 }),
             })
         }
@@ -754,7 +761,10 @@ mod tests {
             message.contains("the manifests are already updated"),
             "{message}"
         );
-        assert!(message.contains("git checkout -- tasks/lint"), "{message}");
+        assert!(
+            message.contains("git checkout -- :/project/tasks/lint"),
+            "{message}"
+        );
         assert!(
             !message.contains("put the project back"),
             "a failed deletion must not claim the rollback ran: {message}"
@@ -766,6 +776,7 @@ mod tests {
     fn the_deletion_failure_keeps_the_error_that_caused_it() {
         let failure = deletion_failure(
             "tasks/lint",
+            std::path::Path::new("tasks/lint"),
             std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
         );
         assert!(

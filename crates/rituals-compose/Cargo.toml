@@ -12,6 +12,11 @@ readme = "readme.md"
 
 [dependencies]
 rituals.workspace = true
+# Cargo expands a glob in [workspace] members with this crate, and whether a
+# glob would match nothing once a directory is deleted is a question about
+# Cargo's own reading of it. A second implementation of glob matching could only
+# disagree with Cargo's.
+glob = "0.3"
 # cargo metadata speaks JSON and nothing else, and it is the only thing that can
 # answer what a dependency resolved to and what that crate declares about itself.
 # The alternative is a hand-written JSON reader, which is a parser to own forever

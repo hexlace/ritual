@@ -7,12 +7,15 @@
 //! of an array removes the entry's own line, including a comment written on
 //! it, and every line the entry did not own stays.
 
+use std::path::{Path, PathBuf};
+
 use toml_edit::{Array, Item, TableLike, Value};
 
 use rituals::Failure;
 
 use super::Manifest;
 use super::entry_removal::remove_matching_style;
+use crate::paths::{lies_under, normalize};
 
 /// The characters that make a `members` entry a glob rather than a path.
 const GLOB_CHARACTERS: [char; 3] = ['*', '?', '['];
@@ -222,20 +225,24 @@ impl Manifest {
     }
 
     /// Removes every entry of `[workspace] members` and of `default-members`
-    /// that names `relative_directory`, and reports whether it removed any.
+    /// that names `directory`, and reports whether it removed any.
     ///
-    /// `relative_directory` is relative to the workspace root, such as
-    /// `tasks/lint`. An entry matches when it names the same directory once
-    /// a leading `./` and a trailing `/` are set aside, so `./tasks/lint`
-    /// and `tasks/lint/` both match it. A glob such as `tasks/*` is never
-    /// touched, because it names more than this directory and still covers
-    /// whatever else is under it; deleting the directory is what takes the
-    /// member out of it. An empty `relative_directory` names nothing, so it
-    /// matches nothing.
+    /// An entry names it when Cargo would read it as that directory: joined
+    /// to this manifest's own directory, the workspace root, with `.` and
+    /// `..` components and repeated separators removed as text, the way
+    /// Cargo reads them. So `tasks/lint`, `./tasks/lint/`, `tasks//lint`,
+    /// `x/../tasks/lint` and the absolute path all name `tasks/lint`. A
+    /// relative `directory` is taken from the workspace root too.
+    ///
+    /// A glob such as `tasks/*` is never touched, because it names more than
+    /// this directory; [`Manifest::globs_left_matching_nothing`] says when
+    /// deleting the directory would leave one matching nothing.
     ///
     /// # Examples
     ///
     /// ```
+    /// use std::path::Path;
+    ///
     /// use rituals_compose::manifest::Manifest;
     ///
     /// # let directory = std::env::temp_dir()
@@ -244,17 +251,19 @@ impl Manifest {
     /// let manifest_path = directory.join("Cargo.toml");
     /// # std::fs::write(
     /// #     &manifest_path,
-    /// #     "[workspace]\nmembers = [\"crates/cli\", \"./tasks/lint\", \"tasks/*\"]\n",
+    /// #     "[workspace]\nmembers = [\"crates/cli\", \"./tasks/x/../lint\", \"tasks/*\"]\n",
     /// # )?;
     /// let mut manifest = Manifest::read(&manifest_path)?;
     ///
-    /// assert!(manifest.remove_workspace_member("tasks/lint"));
+    /// assert!(manifest.remove_workspace_member(Path::new("tasks/lint")));
     /// // The glob stays: it is not an entry for this directory.
-    /// assert!(!manifest.remove_workspace_member("tasks/*"));
+    /// assert!(!manifest.remove_workspace_member(Path::new("tasks/*")));
     /// # std::fs::remove_dir_all(&directory)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn remove_workspace_member(&mut self, relative_directory: &str) -> bool {
+    pub fn remove_workspace_member(&mut self, directory: &Path) -> bool {
+        let target = self.joined_to_the_workspace_root(directory);
+        let root = self.workspace_root();
         let Some(workspace) = self
             .document
             .get_mut("workspace")
@@ -264,11 +273,11 @@ impl Manifest {
         };
 
         let mut removed = false;
-        for list in ["members", "default-members"] {
+        for list in MEMBER_LISTS {
             let Some(entries) = workspace.get_mut(list).and_then(Item::as_array_mut) else {
                 continue;
             };
-            let positions = positions_of(entries, |entry| names(entry, relative_directory));
+            let positions = positions_of(entries, |entry| names(&root, entry, &target));
             remove_all(entries, &positions);
             if !positions.is_empty() {
                 removed = true;
@@ -277,8 +286,11 @@ impl Manifest {
         removed
     }
 
-    /// Reports whether removing `relative_directory`'s entries would leave
+    /// Reports whether removing `directory`'s entries would leave
     /// `[workspace] default-members` empty, when it is not empty now.
+    ///
+    /// Entries name `directory` the way
+    /// [`Manifest::remove_workspace_member`] reads them.
     ///
     /// Cargo refuses a workspace whose `default-members` names nothing, so
     /// a caller checks this before it writes anything, rather than learning
@@ -287,6 +299,8 @@ impl Manifest {
     /// # Examples
     ///
     /// ```
+    /// use std::path::Path;
+    ///
     /// use rituals_compose::manifest::Manifest;
     ///
     /// # let directory = std::env::temp_dir()
@@ -302,13 +316,15 @@ impl Manifest {
     /// # )?;
     /// let manifest = Manifest::read(&manifest_path)?;
     ///
-    /// assert!(manifest.empties_default_members("tasks/lint"));
-    /// assert!(!manifest.empties_default_members("tasks/format"));
+    /// assert!(manifest.empties_default_members(Path::new("tasks/lint")));
+    /// assert!(!manifest.empties_default_members(Path::new("tasks/format")));
     /// # std::fs::remove_dir_all(&directory)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[must_use]
-    pub fn empties_default_members(&self, relative_directory: &str) -> bool {
+    pub fn empties_default_members(&self, directory: &Path) -> bool {
+        let target = self.joined_to_the_workspace_root(directory);
+        let root = self.workspace_root();
         let Some(entries) = self
             .document
             .get("workspace")
@@ -319,10 +335,165 @@ impl Manifest {
             return false;
         };
 
-        let positions = positions_of(entries, |entry| names(entry, relative_directory));
+        let positions = positions_of(entries, |entry| names(&root, entry, &target));
         !entries.is_empty() && positions.len() == entries.len()
     }
+
+    /// Returns every glob in `[workspace] members` and `default-members` that
+    /// matches something now and would match nothing once `directory` is
+    /// deleted, as written.
+    ///
+    /// Cargo expands a glob against the filesystem, and reads one that
+    /// matches nothing as a literal path, so deleting the last directory a
+    /// glob matched leaves a workspace Cargo cannot load. Expanded here the
+    /// way Cargo expands it, joined to the workspace root with the `glob`
+    /// crate Cargo uses, and every match under `directory` set aside. A
+    /// relative `directory` is taken from the workspace root.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`Failure`] naming the glob when it is not a valid pattern
+    /// or a path it reaches cannot be read, the cases in which Cargo fails to
+    /// expand it too.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::path::Path;
+    ///
+    /// use rituals_compose::manifest::Manifest;
+    ///
+    /// # let directory = std::env::temp_dir()
+    /// #     .join(format!("rituals-compose-doctest-manifest-globs-{}", std::process::id()));
+    /// # std::fs::create_dir_all(directory.join("tasks/lint"))?;
+    /// # std::fs::create_dir_all(directory.join("crates/cli"))?;
+    /// let manifest_path = directory.join("Cargo.toml");
+    /// # std::fs::write(&manifest_path, "[workspace]\nmembers = [\"crates/*\", \"tasks/*\"]\n")?;
+    /// let manifest = Manifest::read(&manifest_path)?;
+    ///
+    /// // `tasks/lint` is the only match `tasks/*` has.
+    /// let left_empty = manifest.globs_left_matching_nothing(Path::new("tasks/lint"))?;
+    /// assert_eq!(left_empty, ["tasks/*"]);
+    /// # std::fs::remove_dir_all(&directory)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn globs_left_matching_nothing(&self, directory: &Path) -> Result<Vec<String>, Failure> {
+        let target = self.joined_to_the_workspace_root(directory);
+        let root = self.workspace_root();
+        let Some(workspace) = self.document.get("workspace").and_then(Item::as_table_like) else {
+            return Ok(Vec::new());
+        };
+
+        let mut left_empty = Vec::new();
+        for list in MEMBER_LISTS {
+            let Some(entries) = workspace.get(list).and_then(Item::as_array) else {
+                continue;
+            };
+            for entry in entries.iter().filter_map(Value::as_str) {
+                if !entry.contains(GLOB_CHARACTERS) || left_empty.iter().any(|seen| seen == entry) {
+                    continue;
+                }
+                let matches = expand(&root, entry)?;
+                let survivors = matches.iter().filter(|path| !lies_under(path, &target));
+                if !matches.is_empty() && survivors.count() == 0 {
+                    left_empty.push(entry.to_string());
+                }
+            }
+        }
+        Ok(left_empty)
+    }
+
+    /// Returns every `[patch.<source>]`, `[replace]` and
+    /// `[workspace.dependencies]` entry whose `path` is `directory` or lies
+    /// under it, named as a person would find it, such as
+    /// `[patch.crates-io] lint`.
+    ///
+    /// Cargo reads each of them whether or not anything uses it, so deleting
+    /// the directory leaves a workspace that refers to nothing. The
+    /// `[workspace.dependencies]` entry under `dropped` is left out, because
+    /// the caller is taking it out. Paths are joined to this manifest's
+    /// directory, the workspace root, as Cargo joins them; so is a relative
+    /// `directory`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::path::Path;
+    ///
+    /// use rituals_compose::manifest::Manifest;
+    ///
+    /// # let directory = std::env::temp_dir()
+    /// #     .join(format!("rituals-compose-doctest-manifest-references-{}", std::process::id()));
+    /// # std::fs::create_dir_all(&directory)?;
+    /// let manifest_path = directory.join("Cargo.toml");
+    /// # std::fs::write(
+    /// #     &manifest_path,
+    /// #     "[workspace.dependencies]\nlint = { path = \"tasks/lint\" }\n\n\
+    /// #      [patch.crates-io]\nhelper = { path = \"tasks/lint/helper\" }\n",
+    /// # )?;
+    /// let manifest = Manifest::read(&manifest_path)?;
+    ///
+    /// let entries = manifest.entries_pointing_under(Path::new("tasks/lint"), Some("lint"));
+    /// assert_eq!(entries, ["[patch.crates-io] helper"]);
+    /// # std::fs::remove_dir_all(&directory)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn entries_pointing_under(&self, directory: &Path, dropped: Option<&str>) -> Vec<String> {
+        let target = self.joined_to_the_workspace_root(directory);
+        let root = self.workspace_root();
+        let points_under = |declaration: &Item| {
+            declaration
+                .as_table_like()
+                .and_then(|declaration| declaration.get("path"))
+                .and_then(Item::as_str)
+                .is_some_and(|path| lies_under(&root.join(path), &target))
+        };
+
+        let mut entries = Vec::new();
+        let workspace_dependencies = self
+            .document
+            .get("workspace")
+            .and_then(Item::as_table_like)
+            .and_then(|workspace| workspace.get("dependencies"));
+        for (name, declaration) in entries_of(workspace_dependencies) {
+            if Some(name) != dropped && points_under(declaration) {
+                entries.push(format!("[workspace.dependencies] {name}"));
+            }
+        }
+        for (source, patches) in entries_of(self.document.get("patch")) {
+            for (name, declaration) in entries_of(Some(patches)) {
+                if points_under(declaration) {
+                    entries.push(format!("[patch.{source}] {name}"));
+                }
+            }
+        }
+        for (specification, declaration) in entries_of(self.document.get("replace")) {
+            if points_under(declaration) {
+                entries.push(format!("[replace] \"{specification}\""));
+            }
+        }
+        entries
+    }
+
+    /// The directory this manifest is in, which for a workspace's manifest
+    /// is the root every path in it is read from.
+    fn workspace_root(&self) -> PathBuf {
+        self.path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default()
+    }
+
+    /// `directory` joined to [`Manifest::workspace_root`], which leaves an
+    /// absolute one as it is.
+    fn joined_to_the_workspace_root(&self, directory: &Path) -> PathBuf {
+        self.workspace_root().join(directory)
+    }
 }
+
+/// The two `[workspace]` lists whose entries name member directories.
+const MEMBER_LISTS: [&str; 2] = ["members", "default-members"];
 
 /// Whether `dependencies` declares `key` as taking its definition from the
 /// workspace: `key.workspace = true`, `key = { workspace = true }` and a
@@ -337,23 +508,37 @@ fn inherits(dependencies: &dyn TableLike, key: &str) -> bool {
         == Some(true)
 }
 
-/// Whether the `members` entry `entry` names `directory`: the same path
-/// once a leading `./` and a trailing `/` are set aside, and not a glob.
-fn names(entry: &str, directory: &str) -> bool {
-    if entry.contains(GLOB_CHARACTERS) {
-        return false;
-    }
-    let directory = set_aside_dot_and_slash(directory);
-    !directory.is_empty() && set_aside_dot_and_slash(entry) == directory
+/// Whether the `members` entry `entry`, read from `root`, names `directory`:
+/// not a glob, and the same path once both are normalised the way Cargo
+/// normalises a member entry.
+fn names(root: &Path, entry: &str, directory: &Path) -> bool {
+    !entry.contains(GLOB_CHARACTERS) && normalize(&root.join(entry)) == normalize(directory)
 }
 
-/// `path` without any leading `./` and any trailing `/`.
-fn set_aside_dot_and_slash(path: &str) -> &str {
-    let mut path = path;
-    while let Some(rest) = path.strip_prefix("./") {
-        path = rest;
-    }
-    path.trim_end_matches('/')
+/// Every key and value of `item`, when it is a table of any kind, and
+/// nothing otherwise.
+fn entries_of(item: Option<&Item>) -> impl Iterator<Item = (&str, &Item)> {
+    item.and_then(Item::as_table_like)
+        .into_iter()
+        .flat_map(TableLike::iter)
+}
+
+/// Every path the glob `entry`, joined to `root`, matches on disk, the way
+/// Cargo expands a `members` glob.
+fn expand(root: &Path, entry: &str) -> Result<Vec<PathBuf>, Failure> {
+    let pattern = root.join(entry);
+    let unreadable = |error: &dyn std::fmt::Display| {
+        Failure::new(format!(
+            "the [workspace] members glob `{entry}` could not be expanded: {error}"
+        ))
+    };
+    let pattern = pattern
+        .to_str()
+        .ok_or_else(|| unreadable(&"its path is not UTF-8"))?;
+    glob::glob(pattern)
+        .map_err(|error| unreadable(&error))?
+        .map(|matched| matched.map_err(|error| unreadable(&error)))
+        .collect()
 }
 
 /// The positions in `array`, in order, of the string entries `matches`
@@ -379,6 +564,7 @@ fn remove_all(array: &mut Array, positions: &[usize]) {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+    use std::path::Path;
 
     use super::Manifest;
     use crate::test_support::{ScratchDir, TestOutcome};
@@ -715,7 +901,7 @@ mod tests {
     fn a_member_is_removed_with_its_line_and_the_rest_of_the_file_stays() -> TestOutcome {
         let (_scratch, mut manifest) = read_manifest("remove-member", A_WORKSPACE)?;
 
-        assert!(manifest.remove_workspace_member("tasks/lint"));
+        assert!(manifest.remove_workspace_member(Path::new("tasks/lint")));
 
         assert_eq!(
             manifest.document.to_string(),
@@ -733,9 +919,12 @@ mod tests {
                 &format!("[workspace]\nmembers = [\"crates/cli\", \"{spelling}\"]\n"),
             )?;
 
-            assert!(manifest.remove_workspace_member("tasks/lint"), "{spelling}");
             assert!(
-                !manifest.remove_workspace_member("tasks/lint"),
+                manifest.remove_workspace_member(Path::new("tasks/lint")),
+                "{spelling}"
+            );
+            assert!(
+                !manifest.remove_workspace_member(Path::new("tasks/lint")),
                 "{spelling}: already removed"
             );
 
@@ -755,7 +944,7 @@ mod tests {
             "[workspace]\nmembers = [\"crates/cli\", \"tasks/lint\"]\n",
         )?;
 
-        assert!(manifest.remove_workspace_member("./tasks/lint/"));
+        assert!(manifest.remove_workspace_member(Path::new("./tasks/lint/")));
         Ok(())
     }
 
@@ -768,7 +957,10 @@ mod tests {
         let before = manifest.document.to_string();
 
         for directory in ["tasks/lint", "tasks/*", "tools/[a-z]*", "x/?", "x/a"] {
-            assert!(!manifest.remove_workspace_member(directory), "{directory}");
+            assert!(
+                !manifest.remove_workspace_member(Path::new(directory)),
+                "{directory}"
+            );
         }
         assert_eq!(manifest.document.to_string(), before);
         Ok(())
@@ -782,30 +974,59 @@ mod tests {
         )?;
         let before = manifest.document.to_string();
 
-        assert!(!manifest.remove_workspace_member("tasks/lint"));
+        assert!(!manifest.remove_workspace_member(Path::new("tasks/lint")));
         assert_eq!(manifest.document.to_string(), before);
         Ok(())
     }
 
+    /// Cargo reads a member entry as a path joined to the workspace root,
+    /// so every spelling it reads as the directory is taken out: repeated
+    /// separators, `.` and `..` components, and the absolute path.
     #[test]
-    fn an_empty_directory_matches_nothing() -> TestOutcome {
-        let (_scratch, mut manifest) = read_manifest(
-            "remove-member-empty",
-            "[workspace]\nmembers = [\"\", \"./\", \"crates/cli\"]\ndefault-members = [\"\"]\n",
-        )?;
-        let before = manifest.document.to_string();
+    fn a_member_is_found_however_cargo_would_read_it() -> TestOutcome {
+        for spelling in ["tasks/./lint", "tasks//lint", "x/../tasks/lint", "ABSOLUTE"] {
+            let scratch = ScratchDir::new("remove-member-as-a-path")?;
+            let absolute = scratch.path().join("tasks/lint");
+            let spelling = spelling.replace("ABSOLUTE", &absolute.display().to_string());
+            let path = scratch.path().join("Cargo.toml");
+            std::fs::write(
+                &path,
+                format!("[workspace]\nmembers = [\"crates/cli\", \"{spelling}\"]\n"),
+            )?;
+            let mut manifest = Manifest::read(&path)?;
 
-        for directory in ["", "./", "/"] {
             assert!(
-                !manifest.remove_workspace_member(directory),
-                "{directory:?}"
+                manifest.remove_workspace_member(Path::new("tasks/lint")),
+                "{spelling}"
             );
-            assert!(
-                !manifest.empties_default_members(directory),
-                "{directory:?}"
+            assert_eq!(
+                manifest.document.to_string(),
+                "[workspace]\nmembers = [\"crates/cli\"]\n",
+                "{spelling}"
             );
         }
-        assert_eq!(manifest.document.to_string(), before);
+        Ok(())
+    }
+
+    /// An empty entry and `./` name the workspace root itself, as they do to
+    /// Cargo, and so does an empty directory; neither names a member below
+    /// it.
+    #[test]
+    fn the_root_is_named_only_by_entries_that_name_the_root() -> TestOutcome {
+        let (_scratch, manifest) = read_manifest(
+            "remove-member-root",
+            "[workspace]\nmembers = [\"\", \"crates/cli\"]\ndefault-members = [\"./\"]\n",
+        )?;
+
+        assert!(manifest.empties_default_members(Path::new("")));
+        assert!(!manifest.empties_default_members(Path::new("crates")));
+        let mut manifest = manifest;
+        assert!(!manifest.remove_workspace_member(Path::new("crates")));
+        assert!(manifest.remove_workspace_member(Path::new("")));
+        assert_eq!(
+            manifest.document.to_string(),
+            "[workspace]\nmembers = [\"crates/cli\"]\ndefault-members = []\n"
+        );
         Ok(())
     }
 
@@ -817,7 +1038,7 @@ mod tests {
              default-members = [\"crates/cli\", \"./tasks/lint\"]\n",
         )?;
 
-        assert!(manifest.remove_workspace_member("tasks/lint"));
+        assert!(manifest.remove_workspace_member(Path::new("tasks/lint")));
 
         assert_eq!(
             manifest.document.to_string(),
@@ -834,7 +1055,7 @@ mod tests {
              default-members = [\"crates/cli\", \"tasks/lint\"]\n",
         )?;
 
-        assert!(manifest.remove_workspace_member("tasks/lint"));
+        assert!(manifest.remove_workspace_member(Path::new("tasks/lint")));
 
         assert_eq!(
             manifest.document.to_string(),
@@ -849,12 +1070,12 @@ mod tests {
             read_manifest("remove-member-no-workspace", "[package]\nname = \"cli\"\n")?;
         let before = manifest.document.to_string();
 
-        assert!(!manifest.remove_workspace_member("tasks/lint"));
+        assert!(!manifest.remove_workspace_member(Path::new("tasks/lint")));
         assert_eq!(manifest.document.to_string(), before);
 
         let (_scratch, mut no_list) =
             read_manifest("remove-member-no-list", "[workspace]\nresolver = \"3\"\n")?;
-        assert!(!no_list.remove_workspace_member("tasks/lint"));
+        assert!(!no_list.remove_workspace_member(Path::new("tasks/lint")));
         Ok(())
     }
 
@@ -864,41 +1085,204 @@ mod tests {
             "empties-only",
             "[workspace]\ndefault-members = [\"tasks/lint\"]\n",
         )?;
-        assert!(only.empties_default_members("tasks/lint"));
-        assert!(only.empties_default_members("./tasks/lint/"));
+        assert!(only.empties_default_members(Path::new("tasks/lint")));
+        assert!(only.empties_default_members(Path::new("./tasks/lint/")));
 
         let (_scratch, twice) = read_manifest(
             "empties-twice",
             "[workspace]\ndefault-members = [\"tasks/lint\", \"./tasks/lint\"]\n",
         )?;
-        assert!(twice.empties_default_members("tasks/lint"));
+        assert!(twice.empties_default_members(Path::new("tasks/lint")));
 
         let (_scratch, others) = read_manifest(
             "empties-others",
             "[workspace]\ndefault-members = [\"crates/cli\", \"tasks/lint\"]\n",
         )?;
-        assert!(!others.empties_default_members("tasks/lint"));
+        assert!(!others.empties_default_members(Path::new("tasks/lint")));
 
         let (_scratch, elsewhere) = read_manifest(
             "empties-elsewhere",
             "[workspace]\ndefault-members = [\"crates/cli\"]\n",
         )?;
-        assert!(!elsewhere.empties_default_members("tasks/lint"));
+        assert!(!elsewhere.empties_default_members(Path::new("tasks/lint")));
         Ok(())
     }
 
     #[test]
     fn default_members_that_is_absent_or_already_empty_is_not_emptied() -> TestOutcome {
         let (_scratch, absent) = read_manifest("empties-absent", "[workspace]\nmembers = []\n")?;
-        assert!(!absent.empties_default_members("tasks/lint"));
+        assert!(!absent.empties_default_members(Path::new("tasks/lint")));
 
         let (_scratch, empty) =
             read_manifest("empties-empty", "[workspace]\ndefault-members = []\n")?;
-        assert!(!empty.empties_default_members("tasks/lint"));
+        assert!(!empty.empties_default_members(Path::new("tasks/lint")));
 
         let (_scratch, no_workspace) =
             read_manifest("empties-no-workspace", "[package]\nname = \"cli\"\n")?;
-        assert!(!no_workspace.empties_default_members("tasks/lint"));
+        assert!(!no_workspace.empties_default_members(Path::new("tasks/lint")));
+        Ok(())
+    }
+
+    // `globs_left_matching_nothing`.
+
+    /// A scratch workspace with `Cargo.toml` holding `members`, and each of
+    /// `directories` made under it.
+    fn workspace_with(
+        tag: &str,
+        members: &str,
+        directories: &[&str],
+    ) -> Result<(ScratchDir, Manifest), Box<dyn Error>> {
+        let scratch = ScratchDir::new(tag)?;
+        for directory in directories {
+            std::fs::create_dir_all(scratch.path().join(directory))?;
+        }
+        let path = scratch.path().join("Cargo.toml");
+        std::fs::write(&path, format!("[workspace]\n{members}\n"))?;
+        let manifest = Manifest::read(&path)?;
+        Ok((scratch, manifest))
+    }
+
+    #[test]
+    fn a_glob_whose_only_match_is_the_directory_is_left_matching_nothing() -> TestOutcome {
+        let (_scratch, manifest) = workspace_with(
+            "globs-last-match",
+            "members = [\"ritual\", \"tasks/*\"]\ndefault-members = [\"tasks/l*\"]",
+            &["ritual", "tasks/lint"],
+        )?;
+
+        assert_eq!(
+            manifest.globs_left_matching_nothing(Path::new("tasks/lint"))?,
+            ["tasks/*", "tasks/l*"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_glob_with_another_match_is_not_left_matching_nothing() -> TestOutcome {
+        let (_scratch, manifest) = workspace_with(
+            "globs-other-match",
+            "members = [\"ritual\", \"tasks/*\"]",
+            &["ritual", "tasks/lint", "tasks/format"],
+        )?;
+
+        assert!(
+            manifest
+                .globs_left_matching_nothing(Path::new("tasks/lint"))?
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    /// Cargo counts any match toward a glob, a file included, and reads only
+    /// a glob that matches nothing as a literal path.
+    #[test]
+    fn a_glob_that_still_matches_a_file_is_not_left_matching_nothing() -> TestOutcome {
+        let (scratch, manifest) = workspace_with(
+            "globs-file-match",
+            "members = [\"tasks/*\"]",
+            &["tasks/lint"],
+        )?;
+        std::fs::write(scratch.path().join("tasks/.DS_Store"), "")?;
+
+        assert!(
+            manifest
+                .globs_left_matching_nothing(Path::new("tasks/lint"))?
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    /// A glob that matches nothing already is how the workspace was found,
+    /// not something deleting the directory does to it.
+    #[test]
+    fn a_glob_that_matches_nothing_already_is_not_reported() -> TestOutcome {
+        let (_scratch, manifest) = workspace_with(
+            "globs-no-match",
+            "members = [\"other/*\", \"tasks/lint\"]",
+            &["tasks/lint"],
+        )?;
+
+        assert!(
+            manifest
+                .globs_left_matching_nothing(Path::new("tasks/lint"))?
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    /// A glob matching only inside the directory loses every match with it.
+    #[test]
+    fn a_glob_matching_inside_the_directory_is_left_matching_nothing() -> TestOutcome {
+        let (_scratch, manifest) = workspace_with(
+            "globs-inside",
+            "members = [\"tasks/lint/*\"]",
+            &["tasks/lint/inner"],
+        )?;
+
+        assert_eq!(
+            manifest.globs_left_matching_nothing(Path::new("tasks/lint"))?,
+            ["tasks/lint/*"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_invalid_glob_is_a_failure_naming_it() -> TestOutcome {
+        let (_scratch, manifest) =
+            workspace_with("globs-invalid", "members = [\"tasks/[\"]", &["tasks"])?;
+
+        let failure = manifest
+            .globs_left_matching_nothing(Path::new("tasks/lint"))
+            .err()
+            .ok_or("an invalid glob was meant to fail")?;
+        assert!(failure.to_string().contains("`tasks/[`"), "{failure}");
+        Ok(())
+    }
+
+    // `entries_pointing_under`.
+
+    #[test]
+    fn patches_replacements_and_workspace_dependencies_under_it_are_named() -> TestOutcome {
+        let (_scratch, manifest) = read_manifest(
+            "entries-pointing-under",
+            "[workspace.dependencies]\nlint = { path = \"tasks/lint\" }\n\
+             helper = { path = \"tasks/./lint/helper\" }\nother = { path = \"tasks/lint-extra\" }\n\
+             registry = \"1\"\n\n\
+             [patch.crates-io]\nserde = { path = \"tasks/lint/vendor/serde\" }\nok = \"1\"\n\n\
+             [patch.'https://example.invalid/x']\nx = { path = \"x/../tasks/lint\" }\n\n\
+             [replace]\n\"foo:0.1.0\" = { path = \"tasks/lint/foo\" }\n\
+             \"bar:0.1.0\" = { path = \"elsewhere\" }\n",
+        )?;
+
+        assert_eq!(
+            manifest.entries_pointing_under(Path::new("tasks/lint"), Some("lint")),
+            [
+                "[workspace.dependencies] helper",
+                "[patch.crates-io] serde",
+                "[patch.https://example.invalid/x] x",
+                "[replace] \"foo:0.1.0\"",
+            ]
+        );
+        assert_eq!(
+            manifest.entries_pointing_under(Path::new("tasks/lint"), None)[0],
+            "[workspace.dependencies] lint",
+            "the entry is named when the caller does not drop it"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_manifest_with_nothing_pointing_under_the_directory_names_nothing() -> TestOutcome {
+        let (_scratch, manifest) = read_manifest(
+            "entries-pointing-nowhere",
+            "[package]\nname = \"cli\"\n\n[patch.crates-io]\nserde = { git = \"https://x\" }\n",
+        )?;
+
+        assert!(
+            manifest
+                .entries_pointing_under(Path::new("tasks/lint"), None)
+                .is_empty()
+        );
         Ok(())
     }
 }

@@ -602,13 +602,14 @@ pub fn dependency_path(manifest_path: &Path, crate_dir: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     use rituals::Name;
 
     use super::{
         Manifest, declares_a_task_crate, declares_a_workspace, dependency_path, push_matching_style,
     };
+    use crate::paths::normalize;
     use crate::test_support::{ScratchDir, TestOutcome};
 
     fn assert_send<T: Send>() {}
@@ -958,23 +959,6 @@ mod tests {
             "the document must be unchanged when import_task is refused"
         );
         Ok(())
-    }
-
-    /// Removes `..` and `.` components lexically, the way joining a
-    /// relative path onto a base directory needs before comparing it
-    /// against a target — `Path` never does this on its own.
-    fn normalize(path: &Path) -> PathBuf {
-        let mut result = PathBuf::new();
-        for component in path.components() {
-            match component {
-                std::path::Component::ParentDir => {
-                    result.pop();
-                }
-                std::path::Component::CurDir => {}
-                other => result.push(other.as_os_str()),
-            }
-        }
-        result
     }
 
     #[test]

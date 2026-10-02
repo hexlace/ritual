@@ -379,12 +379,15 @@ longer compiles, and so no `regenerate` to fix it.
 in `tasks`, or a crate that exactly one key imports; a key wins over a crate
 of the same name. It drops the key, regenerates, removes the dependency line,
 and removes the `[workspace.dependencies]` entry the dependency inherited
-when no other package in the workspace uses it. For a crate that is a member
+when no other package uses it. For a crate that is a member
 of the workspace it also removes the `members` entry, and the same directory
-from `default-members`. A glob in `members` is left alone, because deleting
-the directory is enough. Which crate is a workspace member comes from
-`cargo metadata`, and its directory from the dependency's `path`, never from
-a fixed directory name. A path dependency outside the workspace loses only its
+from `default-members`. An entry names the directory when Cargo would read
+it as that directory, so `tasks/./lint` and the absolute path are taken out
+too. A glob in `members` is left alone, because deleting the directory is
+enough, unless it would match nothing once the directory goes, which
+refuses. Which crate is a workspace member comes from `cargo metadata`, and
+its directory from the dependency's `path`, never from a fixed directory
+name. A path dependency outside the workspace loses only its
 dependency line, and its directory stays.
 
 Everything up to the dependency line happens inside one rollback, so a run
@@ -393,7 +396,9 @@ that fails leaves the project as it found it, `Cargo.lock` included. A final
 brings the lock up to date. The directory is deleted after that, outside the
 rollback and as the last step, because git is the way back for a deletion,
 not a rename aside. A deletion that fails partway says that the manifests are
-already updated and that git can give back what was deleted.
+already updated and that git can give back what was deleted, with a `git
+checkout` that names the directory from git's top level (`:/tasks/lint`), so
+it works from any directory of the project.
 
 **Why it refuses first.** Before anything is written `remove` refuses:
 
@@ -405,17 +410,38 @@ already updated and that git can give back what was deleted.
   command line;
 - a list whose other entries would not resolve without this one, with
   `regenerate`'s own message;
-- for a member whose directory would be deleted: a directory another package
-  depends on, one that holds other members or lies outside the workspace
-  root, or one whose entry is the last in `default-members`.
+- for a member whose directory would be deleted, anything Cargo would still
+  read once it is gone: a dependency on it declared by any package, of any
+  kind, on any target, optional or not, in the workspace or outside it, and
+  a target built from a file in it; a glob in `members` or
+  `default-members` whose last match it is; and a `[patch]`, `[replace]` or
+  `[workspace.dependencies]` entry, or a `paths` or `[patch]` setting in
+  Cargo's configuration, pointing into it. Also a directory that holds
+  other members, lies outside the workspace root once symbolic links are
+  followed, or whose entry is the last in `default-members`.
+
+These are decided while the directory still exists, so each asks about the
+project without it rather than about the project as it is: a final `cargo
+metadata` runs before the deletion and cannot see what the deletion
+breaks. Dependents come from what each package declares, not from the
+resolved graph, which holds only the edges the active features reach; and
+a path crate `cargo metadata` did not load at all, such as one behind an
+optional dependency nothing turns on, is asked about with `cargo metadata
+--no-deps`, because Cargo still reads its manifest when it resolves the
+lockfile.
 
 **Git decides whether a directory can be deleted.** Before deleting, `remove`
 asks git for every file under the directory: staged and unstaged changes,
 untracked files and ignored files all count. If any exist it refuses and
 names them, so every file `remove` deletes is one git can give back. Build
-output counts too: letting it through would make that sentence false. A
-project that is not a git repository, a machine with no `git`, and a task
-directory that is a repository of its own are refused the same way. The
+output counts too: letting it through would make that sentence false. So do
+the files `git status` calls clean without being able to give back: a file
+marked `--assume-unchanged`, or `--skip-worktree` while it is on disk, whose
+edits git does not look at, and a file stored through a `filter` other than
+Git LFS's, which can store less than is on disk. A project that is not a git
+repository, a machine with no `git`, a task directory that is a repository
+of its own, and one in a repository that is not the project's, such as
+through a symbolic link, are refused the same way. The
 refusal says to take the task out by hand, because deleting could not be made
 safe, and nothing is written.
 

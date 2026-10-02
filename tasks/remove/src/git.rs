@@ -11,12 +11,21 @@
               module is private; see the note above"
 )]
 
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+/// The one `filter` driver whose files git gives back byte for byte: Git
+/// LFS stores the file itself and puts it back on checkout.
+const GIVES_BACK_ITS_BYTES: &str = "lfs";
+
 /// Why a directory cannot be deleted on git's word that it can be given
 /// back.
+///
+/// Every path a variant holds is spelled from git's top level, the form the
+/// `:/` pathspec takes, so a person can hand it to git from any directory of
+/// the project — except [`Obstacle::OwnRepository`]'s, which is the
+/// directory's own.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Obstacle {
     /// `git` could not be started because there is no such program.
@@ -32,24 +41,62 @@ pub(crate) enum Obstacle {
     /// at, so a clean one shows nothing in `git status`, and `git checkout`
     /// gives back that record, not the submodule's files.
     OwnRepository(PathBuf),
+    /// The directory is inside a git repository that is not the project's,
+    /// such as one a symbolic link leads into: the path is that repository's
+    /// top level. Whatever that repository vouches for, the project's git
+    /// cannot give it back.
+    OtherRepository(PathBuf),
     /// Git ran and failed for some other reason, or printed something this
     /// module could not read; the text is git's own, or says what was
     /// unreadable.
     Failed(String),
-    /// Files in the directory git could not give back once it is deleted,
-    /// each relative to the directory itself.
+    /// Tracked files git has been told not to look at, so `git status`
+    /// calls them clean whatever is on disk.
+    Unwatched(Vec<Unwatched>),
+    /// Tracked files a `filter` driver other than Git LFS cleans on the way
+    /// in, with the driver's name: what git stores can differ from what is
+    /// on disk, and `git checkout` gives back what it stored.
+    Filtered(Vec<(PathBuf, String)>),
+    /// Files in the directory git could not give back once it is deleted:
+    /// untracked, ignored, or changed since the last commit.
     Dirty(Vec<PathBuf>),
 }
 
+/// A tracked file git has been told not to look at, and which flag says so.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Unwatched {
+    pub(crate) path: PathBuf,
+    pub(crate) flag: Flag,
+}
+
+/// The index flags that make `git status` stop looking at a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Flag {
+    /// `git update-index --assume-unchanged`: an edit is never seen, and
+    /// `git checkout` gives back the committed file without it.
+    AssumeUnchanged,
+    /// `git update-index --skip-worktree`: an edit is never seen, and `git
+    /// checkout` does not give the file back at all.
+    SkipWorktree,
+}
+
 /// Checks, with the `git` on `PATH`, that every file in `directory` is one
-/// git can give back: nothing in it is untracked, ignored or changed since
-/// the last commit, and no part of it is a repository of its own.
+/// git can give back: the directory is in the same repository as
+/// `workspace_root`, no part of it is a repository of its own, git is
+/// watching every tracked file in it and stores each one as it is on disk,
+/// and nothing in it is untracked, ignored or changed since the last commit.
+///
+/// Returns the directory spelled from git's top level, the path a person
+/// gives `git checkout` to get it back.
 ///
 /// Ignored files count against it: a build directory inside the task is
 /// files git cannot give back, and a check that let them through would no
 /// longer be able to say that git can give back everything it deletes.
-pub(crate) fn ensure_git_can_give_back(directory: &Path) -> Result<(), Obstacle> {
-    check_with(|| Command::new("git"), directory)
+pub(crate) fn ensure_git_can_give_back(
+    directory: &Path,
+    workspace_root: &Path,
+) -> Result<PathBuf, Obstacle> {
+    check_with(|| Command::new("git"), directory, workspace_root)
 }
 
 /// [`ensure_git_can_give_back`], with `git` started from `new_git` each time
@@ -58,9 +105,12 @@ pub(crate) fn ensure_git_can_give_back(directory: &Path) -> Result<(), Obstacle>
 /// A closure rather than a program name so a test can configure the command
 /// itself — its environment, its leading `-c` options — without touching
 /// this process's own environment.
-fn check_with(new_git: impl Fn() -> Command, directory: &Path) -> Result<(), Obstacle> {
-    let top_level = run_git(&new_git, directory, &["rev-parse", "--show-toplevel"])?;
-    let top_level = canonical(Path::new(String::from_utf8_lossy(&top_level).trim_end()))?;
+fn check_with(
+    new_git: impl Fn() -> Command,
+    directory: &Path,
+    workspace_root: &Path,
+) -> Result<PathBuf, Obstacle> {
+    let top_level = top_level_of(&new_git, directory)?;
     let directory_itself = canonical(directory)?;
 
     // Git's top level is the directory or lies inside it: what it tracks is
@@ -68,18 +118,80 @@ fn check_with(new_git: impl Fn() -> Command, directory: &Path) -> Result<(), Obs
     if top_level.starts_with(&directory_itself) {
         return Err(Obstacle::OwnRepository(PathBuf::new()));
     }
+    match top_level_of(&new_git, workspace_root) {
+        Ok(projects) if projects == top_level => {}
+        Ok(_) | Err(Obstacle::NotARepository) => {
+            return Err(Obstacle::OtherRepository(top_level));
+        }
+        Err(obstacle) => return Err(obstacle),
+    }
+    let from_top_level = directory_itself
+        .strip_prefix(&top_level)
+        .map(Path::to_path_buf)
+        .map_err(|_| {
+            Obstacle::Failed(format!(
+                "git puts {} in the repository at {}, which does not hold it",
+                directory_itself.display(),
+                top_level.display()
+            ))
+        })?;
 
-    // A submodule is tracked as a gitlink, mode 160000, and is checked
-    // before the status, which says nothing about a clean one and only
-    // "modified" about a dirty one. Git names each entry from the directory
-    // it was asked in.
-    let staged = run_git(
+    // One read of the index answers three questions: whether any entry is a
+    // submodule, which is tracked as a gitlink, mode 160000, and which
+    // `git status` says nothing about while it is clean; which entries carry
+    // a flag that stops `git status` looking at them, which `-v` shows; and
+    // which files a filter attribute could apply to. Git names each entry
+    // from the directory it was asked in.
+    let index = parse_index(&run_git(
         &new_git,
         directory,
-        &["ls-files", "--stage", "-z", "--", "."],
-    )?;
-    if let Some(submodule) = parse_gitlinks(&staged)?.into_iter().next() {
-        return Err(Obstacle::OwnRepository(submodule));
+        &["ls-files", "--stage", "-v", "-z", "--", "."],
+    )?)?;
+    if let Some(submodule) = index.iter().find(|entry| entry.is_gitlink) {
+        return Err(Obstacle::OwnRepository(submodule.path.clone()));
+    }
+
+    let unwatched: Vec<Unwatched> = index
+        .iter()
+        .filter_map(|entry| {
+            let flag = entry.flag?;
+            // A sparse checkout marks every file outside it skip-worktree
+            // and leaves it off disk; with nothing on disk there is nothing
+            // to lose.
+            let on_disk = directory.join(&entry.path).symlink_metadata().is_ok();
+            (flag == Flag::AssumeUnchanged || on_disk).then(|| Unwatched {
+                path: from_top_level.join(&entry.path),
+                flag,
+            })
+        })
+        .collect();
+    if !unwatched.is_empty() {
+        return Err(Obstacle::Unwatched(unwatched));
+    }
+
+    let mut paths = Vec::new();
+    for entry in &index {
+        paths.extend_from_slice(entry.path.as_os_str().as_encoded_bytes());
+        paths.push(0);
+    }
+    let filters = parse_attributes(&run_git_with_input(
+        &new_git,
+        directory,
+        &["check-attr", "-z", "--stdin", "filter"],
+        &paths,
+    )?)?;
+    let filtered: Vec<(PathBuf, String)> = filters
+        .into_iter()
+        .filter(|(_path, value)| {
+            !matches!(
+                value.as_str(),
+                "unspecified" | "unset" | GIVES_BACK_ITS_BYTES
+            )
+        })
+        .map(|(path, value)| (from_top_level.join(path), value))
+        .collect();
+    if !filtered.is_empty() {
+        return Err(Obstacle::Filtered(filtered));
     }
 
     let status = run_git(
@@ -96,49 +208,76 @@ fn check_with(new_git: impl Fn() -> Command, directory: &Path) -> Result<(), Obs
             ".",
         ],
     )?;
-
-    // Git names each path from the top level, whichever directory it was
-    // asked from, so each is rejoined to it and then shown from the
-    // directory being deleted.
+    // Git names each path in the status from the top level, whichever
+    // directory it was asked from.
     let dirty: Vec<PathBuf> = parse_porcelain(&status)?
         .into_iter()
-        .map(|path| {
-            let from_top_level = top_level.join(path);
-            from_top_level
-                .strip_prefix(&directory_itself)
-                .map_or_else(|_| from_top_level.clone(), Path::to_path_buf)
-        })
+        .map(PathBuf::from)
         .collect();
 
     if dirty.is_empty() {
-        Ok(())
+        Ok(from_top_level)
     } else {
         Err(Obstacle::Dirty(dirty))
     }
 }
 
+/// The top level of the repository `directory` is in, resolved through
+/// symbolic links.
+fn top_level_of(new_git: &impl Fn() -> Command, directory: &Path) -> Result<PathBuf, Obstacle> {
+    let top_level = run_git(new_git, directory, &["rev-parse", "--show-toplevel"])?;
+    canonical(Path::new(String::from_utf8_lossy(&top_level).trim_end()))
+}
+
 /// Runs `git -C <directory> <arguments>` and returns what it printed to
 /// standard output.
-///
-/// Run with `LC_ALL=C`, because the one failure told apart from the rest —
-/// "not a git repository" — is told apart by git's own words, and those are
-/// translated otherwise.
 fn run_git(
     new_git: &impl Fn() -> Command,
     directory: &Path,
     arguments: &[&str],
 ) -> Result<Vec<u8>, Obstacle> {
-    let output = new_git()
+    run_git_with_input(new_git, directory, arguments, &[])
+}
+
+/// Runs `git -C <directory> <arguments>` with `input` on its standard input,
+/// and returns what it printed to standard output.
+///
+/// Run with `LC_ALL=C`, because the one failure told apart from the rest —
+/// "not a git repository" — is told apart by git's own words, and those are
+/// translated otherwise. The input is written from a thread of its own, so a
+/// command that answers each line as it reads it cannot fill its output pipe
+/// while this process is still writing.
+fn run_git_with_input(
+    new_git: &impl Fn() -> Command,
+    directory: &Path,
+    arguments: &[&str],
+    input: &[u8],
+) -> Result<Vec<u8>, Obstacle> {
+    let spawn_failure = |error: std::io::Error| match error.kind() {
+        ErrorKind::NotFound => Obstacle::GitMissing,
+        _ => Obstacle::Failed(format!("running `git` failed: {error}")),
+    };
+    let mut child = new_git()
         .arg("-C")
         .arg(directory)
         .args(arguments)
         .env("LC_ALL", "C")
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|error| match error.kind() {
-            ErrorKind::NotFound => Obstacle::GitMissing,
-            _ => Obstacle::Failed(format!("running `git` failed: {error}")),
-        })?;
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(spawn_failure)?;
+
+    let stdin = child.stdin.take();
+    let output = std::thread::scope(|scope| {
+        let writer = scope.spawn(move || stdin.map_or(Ok(()), |mut stdin| stdin.write_all(input)));
+        let output = child.wait_with_output();
+        // A git that exits without reading all of its input closes the pipe,
+        // and its own exit status says why; the write's error adds nothing.
+        drop(writer.join());
+        output
+    })
+    .map_err(|error| Obstacle::Failed(format!("running `git` failed: {error}")))?;
 
     if output.status.success() {
         return Ok(output.stdout);
@@ -157,27 +296,72 @@ fn canonical(path: &Path) -> Result<PathBuf, Obstacle> {
         .map_err(|error| Obstacle::Failed(format!("reading {} failed: {error}", path.display())))
 }
 
-/// The path of every gitlink — a submodule — in `git ls-files --stage -z`
-/// output.
+/// One entry of `git ls-files --stage -v -z`, as far as this check reads
+/// it.
+#[derive(Debug, PartialEq, Eq)]
+struct IndexEntry {
+    path: PathBuf,
+    is_gitlink: bool,
+    flag: Option<Flag>,
+}
+
+/// Every entry in `git ls-files --stage -v -z` output.
 ///
-/// An entry is the mode, the object name and the stage, separated by
-/// spaces, then a tab and the path, ended by a NUL. An entry with no tab is
-/// a failure rather than something to skip, since skipping it could hide a
-/// submodule.
-fn parse_gitlinks(output: &[u8]) -> Result<Vec<PathBuf>, Obstacle> {
+/// An entry is a one-letter tag and a space, then the mode, the object name
+/// and the stage, separated by spaces, then a tab and the path, ended by a
+/// NUL. The tag is lowercase for an entry marked assume-unchanged and `S`
+/// for one marked skip-worktree. An entry this cannot read is a failure
+/// rather than something to skip, since skipping it could hide a submodule
+/// or a flag.
+fn parse_index(output: &[u8]) -> Result<Vec<IndexEntry>, Obstacle> {
     let text = String::from_utf8_lossy(output);
-    let mut gitlinks = Vec::new();
+    let mut entries = Vec::new();
     for entry in text.split('\0').filter(|entry| !entry.is_empty()) {
-        let Some((fields, path)) = entry.split_once('\t') else {
-            return Err(Obstacle::Failed(format!(
+        let unreadable = || {
+            Obstacle::Failed(format!(
                 "git ls-files printed an entry this check cannot read: {entry:?}"
-            )));
+            ))
         };
-        if fields.starts_with("160000 ") {
-            gitlinks.push(PathBuf::from(path));
-        }
+        let (fields, path) = entry.split_once('\t').ok_or_else(unreadable)?;
+        let (tag, rest) = fields.split_once(' ').ok_or_else(unreadable)?;
+        let mut tag_letters = tag.chars();
+        let (Some(letter), None) = (tag_letters.next(), tag_letters.next()) else {
+            return Err(unreadable());
+        };
+        let flag = if letter.is_ascii_lowercase() {
+            Some(Flag::AssumeUnchanged)
+        } else if letter == 'S' {
+            Some(Flag::SkipWorktree)
+        } else {
+            None
+        };
+        entries.push(IndexEntry {
+            path: PathBuf::from(path),
+            is_gitlink: rest.starts_with("160000 "),
+            flag,
+        });
     }
-    Ok(gitlinks)
+    Ok(entries)
+}
+
+/// Every path and its `filter` value in `git check-attr -z filter` output.
+///
+/// Each answer is three NUL-ended fields: the path, the attribute's name,
+/// and its value — `unspecified`, `unset`, `set`, or the value it was given.
+/// Output that does not come in threes is a failure, since misreading it
+/// could pair a file with the wrong filter.
+fn parse_attributes(output: &[u8]) -> Result<Vec<(PathBuf, String)>, Obstacle> {
+    let text = String::from_utf8_lossy(output);
+    let fields: Vec<&str> = text.split_terminator('\0').collect();
+    let answers = fields.chunks_exact(3);
+    if !answers.remainder().is_empty() {
+        return Err(Obstacle::Failed(format!(
+            "git check-attr printed output this check cannot read: {text:?}"
+        )));
+    }
+    Ok(answers
+        .map(|answer| (PathBuf::from(answer[0]), answer[2].to_string()))
+        .collect())
 }
 
 /// The path of every entry in `git status --porcelain=v1 -z` output.
@@ -214,7 +398,10 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    use super::{Obstacle, check_with, parse_gitlinks, parse_porcelain};
+    use super::{
+        Flag, IndexEntry, Obstacle, Unwatched, check_with, parse_attributes, parse_index,
+        parse_porcelain,
+    };
     use crate::test_support::{ScratchDir, TestOutcome};
 
     /// `git` configured to read nothing from the machine it runs on: no
@@ -292,6 +479,12 @@ mod tests {
         }
     }
 
+    /// [`check_with`] on `task`, with the scratch directory as the project's
+    /// workspace root.
+    fn check(scratch: &Path, task: &Path) -> Result<PathBuf, Obstacle> {
+        check_with(contained_in(scratch), task, scratch)
+    }
+
     /// Exercises the parser on one entry of each kind `--porcelain=v1 -z`
     /// prints that `remove` has to refuse over: untracked, ignored, modified
     /// in the work tree, modified in the index, added, and deleted. Each
@@ -339,9 +532,9 @@ mod tests {
     }
 
     #[test]
-    fn a_clean_directory_passes() -> TestOutcome {
+    fn a_clean_directory_passes_and_is_spelled_from_the_top_level() -> TestOutcome {
         let (scratch, task) = committed_task("git-clean")?;
-        assert_eq!(check_with(contained_in(scratch.path()), &task), Ok(()));
+        assert_eq!(check(scratch.path(), &task), Ok(PathBuf::from("task")));
         Ok(())
     }
 
@@ -349,14 +542,14 @@ mod tests {
     /// changed since the commit — inside the directory, and one outside it
     /// that must not be named, since it is not deleted.
     #[test]
-    fn a_dirty_directory_names_each_file() -> TestOutcome {
+    fn a_dirty_directory_names_each_file_from_the_top_level() -> TestOutcome {
         let (scratch, task) = committed_task("git-dirty")?;
         std::fs::write(task.join("untracked.txt"), "new\n")?;
         std::fs::write(task.join("ignored.txt"), "ignored\n")?;
         std::fs::write(task.join("src/lib.rs"), "// changed\n")?;
         std::fs::write(scratch.path().join("outside.txt"), "not deleted\n")?;
 
-        let result = check_with(contained_in(scratch.path()), &task);
+        let result = check(scratch.path(), &task);
 
         let Err(Obstacle::Dirty(mut files)) = result else {
             return Err(format!("expected the directory to be dirty, got {result:?}").into());
@@ -365,9 +558,9 @@ mod tests {
         assert_eq!(
             files,
             [
-                PathBuf::from("ignored.txt"),
-                PathBuf::from("src/lib.rs"),
-                PathBuf::from("untracked.txt"),
+                PathBuf::from("task/ignored.txt"),
+                PathBuf::from("task/src/lib.rs"),
+                PathBuf::from("task/untracked.txt"),
             ]
         );
         Ok(())
@@ -379,10 +572,7 @@ mod tests {
         let task = scratch.path().join("task");
         std::fs::create_dir_all(&task)?;
 
-        assert_eq!(
-            check_with(contained_in(scratch.path()), &task),
-            Err(Obstacle::NotARepository)
-        );
+        assert_eq!(check(scratch.path(), &task), Err(Obstacle::NotARepository));
         Ok(())
     }
 
@@ -392,7 +582,11 @@ mod tests {
     fn a_missing_git_binary_is_refused() -> TestOutcome {
         let scratch = ScratchDir::new("git-missing")?;
         assert_eq!(
-            check_with(|| Command::new("ritual-test-no-such-git"), scratch.path()),
+            check_with(
+                || Command::new("ritual-test-no-such-git"),
+                scratch.path(),
+                scratch.path()
+            ),
             Err(Obstacle::GitMissing)
         );
         Ok(())
@@ -404,8 +598,31 @@ mod tests {
         git(&task, &["init"])?;
 
         assert_eq!(
-            check_with(contained_in(scratch.path()), &task),
+            check(scratch.path(), &task),
             Err(Obstacle::OwnRepository(PathBuf::new()))
+        );
+        Ok(())
+    }
+
+    /// The task sits in a repository of its own one level up, inside the
+    /// project but not the project's: that repository is clean, and the
+    /// project's git still has no record of the task.
+    #[test]
+    fn a_directory_in_a_repository_that_is_not_the_projects_is_refused() -> TestOutcome {
+        let scratch = ScratchDir::new("git-other-repository")?;
+        let tasks = scratch.path().join("tasks");
+        std::fs::create_dir_all(tasks.join("lint/src"))?;
+        std::fs::write(tasks.join("lint/src/lib.rs"), "// committed elsewhere\n")?;
+        git(&tasks, &["init"])?;
+        commit_everything(&tasks)?;
+        std::fs::write(scratch.path().join("Cargo.toml"), "[workspace]\n")?;
+        git(scratch.path(), &["init"])?;
+        git(scratch.path(), &["add", "Cargo.toml"])?;
+        git(scratch.path(), &["commit", "--message", "fixture"])?;
+
+        assert_eq!(
+            check(scratch.path(), &tasks.join("lint")),
+            Err(Obstacle::OtherRepository(std::fs::canonicalize(&tasks)?))
         );
         Ok(())
     }
@@ -439,31 +656,154 @@ mod tests {
         git(scratch.path(), &["commit", "--message", "add a submodule"])?;
 
         assert_eq!(
-            check_with(contained_in(scratch.path()), &task),
+            check(scratch.path(), &task),
             Err(Obstacle::OwnRepository(PathBuf::from("vendor/upstream")))
         );
         Ok(())
     }
 
+    /// An edit to a file marked assume-unchanged or skip-worktree is
+    /// invisible to `git status`, so the flags themselves are refused.
     #[test]
-    fn only_gitlinks_are_read_as_submodules() -> TestOutcome {
-        let output = b"100644 0123456789abcdef0123456789abcdef01234567 0\tsrc/lib.rs\0\
-            160000 89abcdef0123456789abcdef0123456789abcdef 0\tvendor/upstream\0\
-            100755 0123456789abcdef0123456789abcdef01234567 0\trun.sh\0";
+    fn files_git_has_been_told_not_to_look_at_are_refused_naming_each_flag() -> TestOutcome {
+        let (scratch, task) = committed_task("git-unwatched")?;
+        std::fs::write(task.join("assumed.txt"), "committed\n")?;
+        std::fs::write(task.join("skipped.txt"), "committed\n")?;
+        commit_everything(scratch.path())?;
+        git(
+            scratch.path(),
+            &["update-index", "--assume-unchanged", "task/assumed.txt"],
+        )?;
+        git(
+            scratch.path(),
+            &["update-index", "--skip-worktree", "task/skipped.txt"],
+        )?;
+        std::fs::write(task.join("assumed.txt"), "edited\n")?;
+        std::fs::write(task.join("skipped.txt"), "edited\n")?;
+
         assert_eq!(
-            parse_gitlinks(output).map_err(|obstacle| format!("{obstacle:?}"))?,
-            [PathBuf::from("vendor/upstream")]
+            check(scratch.path(), &task),
+            Err(Obstacle::Unwatched(vec![
+                Unwatched {
+                    path: PathBuf::from("task/assumed.txt"),
+                    flag: Flag::AssumeUnchanged,
+                },
+                Unwatched {
+                    path: PathBuf::from("task/skipped.txt"),
+                    flag: Flag::SkipWorktree,
+                },
+            ]))
+        );
+        Ok(())
+    }
+
+    /// A sparse checkout marks every file outside it skip-worktree and
+    /// leaves it off disk, so there is nothing of it to lose.
+    #[test]
+    fn a_skip_worktree_file_that_is_not_on_disk_passes() -> TestOutcome {
+        let (scratch, task) = committed_task("git-sparse")?;
+        std::fs::write(task.join("elsewhere.txt"), "committed\n")?;
+        commit_everything(scratch.path())?;
+        git(
+            scratch.path(),
+            &["update-index", "--skip-worktree", "task/elsewhere.txt"],
+        )?;
+        std::fs::remove_file(task.join("elsewhere.txt"))?;
+
+        assert_eq!(check(scratch.path(), &task), Ok(PathBuf::from("task")));
+        Ok(())
+    }
+
+    /// A clean filter that drops a line stores less than is on disk, and
+    /// `git status` still calls the file clean; only the attribute shows it.
+    /// Git LFS stores the file whole, so its filter passes.
+    #[test]
+    fn a_file_behind_a_filter_other_than_lfs_is_refused_naming_it() -> TestOutcome {
+        let (scratch, task) = committed_task("git-filter")?;
+        git(
+            scratch.path(),
+            &["config", "filter.strip.clean", "sed '/SECRET/d'"],
+        )?;
+        git(scratch.path(), &["config", "filter.lfs.clean", "cat"])?;
+        std::fs::write(
+            task.join(".gitattributes"),
+            "*.cfg filter=strip\n*.bin filter=lfs\n",
+        )?;
+        std::fs::write(task.join("local.cfg"), "kept\nSECRET=1\n")?;
+        std::fs::write(task.join("large.bin"), "stored whole\n")?;
+        commit_everything(scratch.path())?;
+
+        assert_eq!(
+            check(scratch.path(), &task),
+            Err(Obstacle::Filtered(vec![(
+                PathBuf::from("task/local.cfg"),
+                "strip".to_string()
+            )]))
+        );
+
+        std::fs::write(task.join(".gitattributes"), "*.bin filter=lfs\n")?;
+        commit_everything(scratch.path())?;
+        assert_eq!(check(scratch.path(), &task), Ok(PathBuf::from("task")));
+        Ok(())
+    }
+
+    #[test]
+    fn the_index_is_read_for_gitlinks_and_flags() -> TestOutcome {
+        let output = b"H 100644 0123456789abcdef0123456789abcdef01234567 0\tsrc/lib.rs\0\
+            H 160000 89abcdef0123456789abcdef0123456789abcdef 0\tvendor/upstream\0\
+            h 100755 0123456789abcdef0123456789abcdef01234567 0\trun.sh\0\
+            S 100644 0123456789abcdef0123456789abcdef01234567 0\tlocal.toml\0";
+        let entry = |path: &str, is_gitlink, flag| IndexEntry {
+            path: PathBuf::from(path),
+            is_gitlink,
+            flag,
+        };
+        assert_eq!(
+            parse_index(output).map_err(|obstacle| format!("{obstacle:?}"))?,
+            [
+                entry("src/lib.rs", false, None),
+                entry("vendor/upstream", true, None),
+                entry("run.sh", false, Some(Flag::AssumeUnchanged)),
+                entry("local.toml", false, Some(Flag::SkipWorktree)),
+            ]
         );
         Ok(())
     }
 
     #[test]
-    fn an_index_entry_with_no_path_is_a_failure_not_a_skip() {
-        let result = parse_gitlinks(b"160000 89abcdef 0\0");
-        assert!(
-            matches!(&result, Err(Obstacle::Failed(message)) if message.contains("160000")),
-            "expected the unreadable entry to be named, got {result:?}"
+    fn an_index_entry_this_cannot_read_is_a_failure_not_a_skip() {
+        for output in [
+            &b"H 160000 89abcdef 0\0"[..],
+            &b"160000 89abcdef 0\tno-tag\0"[..],
+            &b"HS 100644 89abcdef 0\ttwo-letter-tag\0"[..],
+        ] {
+            let result = parse_index(output);
+            assert!(
+                matches!(
+                    &result,
+                    Err(Obstacle::Failed(message)) if message.contains("cannot read")
+                ),
+                "expected {output:?} to be refused, got {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn attributes_are_read_in_threes() -> TestOutcome {
+        let output = b"a.cfg\0filter\0strip\0b.rs\0filter\0unspecified\0";
+        assert_eq!(
+            parse_attributes(output).map_err(|obstacle| format!("{obstacle:?}"))?,
+            [
+                (PathBuf::from("a.cfg"), "strip".to_string()),
+                (PathBuf::from("b.rs"), "unspecified".to_string()),
+            ]
         );
+        let result = parse_attributes(b"a.cfg\0filter\0");
+        assert!(
+            matches!(&result, Err(Obstacle::Failed(message)) if message.contains("cannot read")),
+            "expected output not in threes to be refused, got {result:?}"
+        );
+        Ok(())
     }
 
     /// A failure other than "not a repository" is passed on in git's words:
@@ -472,10 +812,7 @@ mod tests {
     #[test]
     fn any_other_git_failure_passes_gits_own_words_through() -> TestOutcome {
         let scratch = ScratchDir::new("git-other-failure")?;
-        let result = check_with(
-            contained_in(scratch.path()),
-            &scratch.path().join("no-such-directory"),
-        );
+        let result = check(scratch.path(), &scratch.path().join("no-such-directory"));
         assert!(
             matches!(
                 &result,

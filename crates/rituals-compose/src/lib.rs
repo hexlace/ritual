@@ -20,7 +20,9 @@
 //! This crate reads the resolved dependency graph via `cargo metadata` and
 //! writes manifests in place with `toml_edit`, so that a scaffolding task
 //! can append to or remove from a manifest a human wrote without disturbing
-//! its comments or formatting.
+//! its comments or formatting. It also reads Cargo's own configuration
+//! files, through [`cargo_config`], for the paths a build reads that no
+//! manifest names.
 //!
 //! # Examples
 //!
@@ -43,9 +45,11 @@
 //! # Ok::<(), rituals::InvalidName>(())
 //! ```
 
+pub mod cargo_config;
 pub mod generated_file;
 pub mod manifest;
 pub mod metadata;
+mod paths;
 mod project;
 pub mod rollback;
 pub mod sentence;

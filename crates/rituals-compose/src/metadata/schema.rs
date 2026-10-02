@@ -25,7 +25,8 @@ use serde::Deserialize;
 /// Get one from [`super::fetch`], which runs `cargo metadata` and parses
 /// what it prints. Its fields are not public: a caller asks it questions
 /// through its methods — [`Metadata::locate_project`],
-/// [`Metadata::resolve_task_list`], [`Metadata::task_imports`] and
+/// [`Metadata::resolve_task_list`], [`Metadata::task_imports`],
+/// [`Metadata::dependents_outside_the_graph`] and
 /// [`Metadata::has_workspace_member`] — so the subset of Cargo's schema it
 /// reads can change without breaking anyone.
 ///
@@ -59,6 +60,15 @@ pub struct Metadata {
     pub(crate) resolve: Resolve,
 }
 
+/// What `cargo metadata --no-deps` prints: every package of a workspace as
+/// its manifest declares it, with nothing resolved.
+#[derive(Debug, Deserialize)]
+pub(crate) struct Declared {
+    /// The schema version, checked to be `1` like [`Metadata`]'s.
+    pub(crate) version: u64,
+    pub(crate) packages: Vec<Package>,
+}
+
 /// One package in the resolved graph — a workspace member or a dependency,
 /// at any depth.
 #[derive(Debug, Deserialize)]
@@ -67,8 +77,11 @@ pub(crate) struct Package {
     pub(crate) name: String,
     pub(crate) manifest_path: PathBuf,
     pub(crate) targets: Vec<Target>,
-    /// Read by `add`, to distinguish "not a dependency at all" from "a
-    /// dependency, but not listed in `tasks`".
+    /// Every dependency the manifest declares, of every kind, on every
+    /// target, optional or not, whatever the features. Read by `add`, to
+    /// distinguish "not a dependency at all" from "a dependency, but not
+    /// listed in `tasks`", and by `remove`, to find everything that would
+    /// still point into a directory once it is deleted.
     pub(crate) dependencies: Vec<Dependency>,
     /// `[package.metadata]`, as a raw JSON value rather than a typed struct —
     /// deliberately: one malformed `[package.metadata.ritual]` anywhere in

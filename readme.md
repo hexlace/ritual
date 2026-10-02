@@ -241,13 +241,30 @@ It refuses, and leaves the project as it found it, `Cargo.lock` included, when:
   it. That means the project is not a git repository, the directory is or
   holds a git repository of its own, a submodule included, or it holds files
   that are uncommitted, untracked or ignored; the refusal names them;
-- another crate depends on the task's directory, or the directory holds other
-  workspace members, lies outside the workspace, or is the only entry in
-  `default-members`.
+- the directory holds files git has been told not to look at, with
+  `--assume-unchanged` or `--skip-worktree`, or files stored through a
+  `filter` other than Git LFS's, since `git status` can call those clean
+  while git could not give back what is on disk;
+- the directory is in a git repository other than the project's, such as
+  one a symbolic link leads into;
+- another crate depends on the task's directory in any way, optionally or
+  not, whether it is in the workspace or outside it, or builds from a file
+  in it;
+- the directory holds other workspace members, lies outside the workspace
+  (through a symbolic link included), or is the only entry in
+  `default-members`;
+- it is the last match of a glob in `members` or `default-members`, which
+  Cargo would then read as a path that does not exist (add an explicit
+  member, or remove the glob);
+- a `[patch]`, `[replace]` or `[workspace.dependencies]` entry, or a
+  `paths` or `[patch]` setting in a `.cargo/config.toml`, points into the
+  directory, since Cargo reads those whether or not anything uses them.
 
 If anything fails while `remove` is writing manifests or regenerating, the
 project is put back as it was. The directory's deletion comes last, after
-that, and is not undone; git gives back anything it deleted.
+that, and is not undone; git gives back anything it deleted, and if the
+deletion fails partway the message says how, in a command that works from
+anywhere in the project.
 
 ### Inside a project, use `cargo ritual`
 
