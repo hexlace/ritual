@@ -72,7 +72,7 @@ pub(crate) use self::{
     crates::Child,
     process::{RunOutput, cargo, run_binary, run_ritual},
     project::Project,
-    tree::{assert_trees_identical, snapshot_tree},
+    tree::{assert_trees_identical, lockfile, snapshot_tree},
 };
 
 /// What a test in this suite returns.

@@ -166,10 +166,9 @@ impl ScratchProject {
         Ok(directory)
     }
 
-    /// Has Cargo write the lockfile a built project has, which `cargo
-    /// metadata` would otherwise create the first time anything asks it a
-    /// question, so a test of what a run leaves alone starts from the state
-    /// of a project that has been built.
+    /// Has Cargo write the lockfile a built project has, so a test starts
+    /// from the state of a project that has been built, where a lockfile is
+    /// there to be restored rather than created.
     pub(crate) fn with_a_lockfile(self) -> Result<Self, Box<dyn Error>> {
         let generated = rituals_compose::cargo::command()
             .arg("generate-lockfile")

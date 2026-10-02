@@ -16,8 +16,8 @@ use std::fs;
 
 use support::task_sources::{write_path_task, write_unmarked_crate};
 use support::{
-    Child, Project, RunOutput, TempDir, TestOutcome, assert_trees_identical, in_checkout, manifest,
-    path_to_str, run_binary, run_ritual, snapshot_tree,
+    Child, Project, RunOutput, TempDir, TestOutcome, assert_trees_identical, in_checkout, lockfile,
+    manifest, path_to_str, run_binary, run_ritual, snapshot_tree,
 };
 
 const CRATE: &str = "greeter";
@@ -93,6 +93,9 @@ fn the_global_command_inside_a_project_hands_back_the_cargo_command_to_run() -> 
         let project = Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
         let directory = a_good_task(&working_dir, checkout)?;
         let before = snapshot_tree(project.root())?;
+        // A scaffolded project has no lockfile until something builds it, and
+        // the global command asks Cargo about the project before it refuses.
+        let lockfile_before = lockfile(project.root())?;
 
         let result = run_ritual(
             project.root(),
@@ -110,6 +113,11 @@ fn the_global_command_inside_a_project_hands_back_the_cargo_command_to_run() -> 
             &before,
             &snapshot_tree(project.root())?,
         );
+        assert_eq!(
+            lockfile_before,
+            lockfile(project.root())?,
+            "a refused `import` must not leave a lockfile the project did not have"
+        );
         Ok(())
     })
 }
@@ -124,6 +132,9 @@ fn a_projects_command_line_run_inside_another_project_hands_back_the_cargo_comma
         let directory = a_good_task(&working_dir, checkout)?;
         let binary = project.build()?;
         let before = snapshot_tree(other.root())?;
+        // `other` was never built, so it has no lockfile for Cargo to find
+        // missing and write.
+        let lockfile_before = lockfile(other.root())?;
 
         let result = run_binary(
             &binary,
@@ -141,6 +152,11 @@ fn a_projects_command_line_run_inside_another_project_hands_back_the_cargo_comma
             "a refused `import` must write nothing",
             &before,
             &snapshot_tree(other.root())?,
+        );
+        assert_eq!(
+            lockfile_before,
+            lockfile(other.root())?,
+            "a refused `import` must not leave a lockfile the project did not have"
         );
         Ok(())
     })
@@ -434,6 +450,93 @@ fn a_refused_task_check_leaves_the_manifest_and_lockfile_byte_for_byte() -> Test
             fs::read(&lockfile_path)?,
             "expected `cargo add` to change Cargo.lock; if it did not, this story proves \
              nothing about putting it back"
+        );
+        Ok(())
+    })
+}
+
+/// Removes the lockfile a build made, so the project is as a person finds it
+/// when nothing has built it yet.
+fn without_a_lockfile(project: &Project) -> TestOutcome {
+    fs::remove_file(project.root().join("Cargo.lock"))?;
+    assert_eq!(
+        lockfile(project.root())?,
+        None,
+        "this story starts with no lockfile"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_refused_task_check_in_a_project_with_no_lockfile_leaves_none() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("import-rollback-no-lockfile")?;
+        let project = Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
+        let directory = working_dir.path().join("plain");
+        write_unmarked_crate(&directory, "plain")?;
+        let binary = project.build()?;
+        without_a_lockfile(&project)?;
+        let tree_before = snapshot_tree(project.root())?;
+
+        let result = run_binary(
+            &binary,
+            project.root(),
+            &["import", "plain", "--path", path_to_str(&directory)?],
+        )?;
+
+        result.expect_failure("`import plain`, a crate that is not a task, with no lockfile");
+        assert_refusal_names_and_advises(refusal_line(&result, "ritual"), "plain");
+        assert_eq!(
+            lockfile(project.root())?,
+            None,
+            "the lockfile Cargo wrote on the way to the refusal must be gone"
+        );
+        assert_trees_identical(
+            "a refused `import` must write nothing else either",
+            &tree_before,
+            &snapshot_tree(project.root())?,
+        );
+        Ok(())
+    })
+}
+
+#[test]
+fn a_key_refused_before_writing_in_a_project_with_no_lockfile_leaves_none() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("import-key-refused-no-lockfile")?;
+        let project = Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
+        let directory = a_good_task(&working_dir, checkout)?;
+        let binary = project.build()?;
+        without_a_lockfile(&project)?;
+        let tree_before = snapshot_tree(project.root())?;
+
+        let result = run_binary(
+            &binary,
+            project.root(),
+            &["import", CRATE, "add", "--path", path_to_str(&directory)?],
+        )?;
+
+        result.expect_failure("`import greeter add`, with `add` a top-level command already");
+        assert_eq!(
+            lockfile(project.root())?,
+            None,
+            "the lockfile Cargo wrote on the way to the refusal must be gone"
+        );
+        let message = refusal_line(&result, "ritual");
+        assert_refusal_names_and_advises(message, "add");
+        assert!(
+            message.ends_with("; ritual put the project back as it found it"),
+            "expected the refusal to say the project was put back; message was:\n{message}"
+        );
+        assert!(
+            !message.contains(".;"),
+            "expected the refusal's own full stop to give way to the semicolon; message \
+             was:\n{message}"
+        );
+        assert_trees_identical(
+            "a refused `import` must write nothing else either",
+            &tree_before,
+            &snapshot_tree(project.root())?,
         );
         Ok(())
     })

@@ -12,7 +12,8 @@ use std::path::Path;
 
 use arguments::ImportArguments;
 use import::Import;
-use rituals::{CommandLine, Failure, Outcome, Task};
+use rituals::{CommandLine, Failure, Name, Outcome, Task};
+use rituals_compose::rollback::{self, Changes};
 use rituals_compose::{metadata, top_level};
 
 /// This task, for a command line to mount under whatever name imports it.
@@ -35,28 +36,44 @@ pub fn task() -> Task {
 fn run(command_line: &CommandLine, arguments: &ImportArguments) -> Outcome {
     let current_dir = std::env::current_dir()
         .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
-    let import = prepare(command_line, arguments, &current_dir)?;
-    import::finish(command_line, &import)
+    let import_command = top_level::management_command(command_line, "import");
+    // The key and the words that run this again come from what was typed and
+    // run no subprocess, so a refusal of the key leaves nothing to put back
+    // and is not in the attempt.
+    let key = arguments.key(&import_command, &current_dir)?;
+    let again = arguments.to_run_again(&current_dir);
+
+    let import = rollback::attempt(&import::retry(&again), |changes| {
+        let import = prepare(command_line, arguments, &current_dir, key, &again, changes)?;
+        import.run(changes)?;
+        Ok(import)
+    })?;
+    import::finish_by_regenerating(command_line, &import)
 }
 
 /// Decides everything `import` needs before anything is written, refusing at
 /// the first thing that is wrong, and returns what the writes need. Each
-/// check runs only once the one before it has passed:
+/// check runs only once the one before it has passed. `key` and `again` are
+/// resolved by the caller from what a person typed, which needs no
+/// subprocess and so no record of what a subprocess wrote.
 ///
-/// 1. The key: the one given, or the crate's name, which has to be a name a
-///    command can have. It comes from what a person typed, and needs no
-///    subprocess.
-/// 2. That this is the project the running command line belongs to. This is
+/// This runs inside the caller's [`rollback::attempt`], from the first
+/// subprocess on, because `cargo metadata` creates the lockfile of a project
+/// that has none and rewrites a stale one: [`metadata::fetch_in_its_own_project`]
+/// records it through `changes` before asking, and a refusal anywhere after
+/// puts it back.
+///
+/// 1. That this is the project the running command line belongs to. This is
 ///    deliberately before the checks on the key against the command line:
 ///    the running binary's own top level says something about the project
 ///    only once the binary is known to be the project's, and the other way
 ///    round, the global `ritual import x add` inside a `--cli acme` project
 ///    would report a collision instead of handing back `cargo acme ritual
 ///    import`.
-/// 3. That the key is not the bin's own name, which the check after it
+/// 2. That the key is not the bin's own name, which the check after it
 ///    deliberately lets through (see [`refusals`]), and then that it is not
 ///    already a top-level command.
-/// 4. That the key is not already spoken for in the project's manifest, and
+/// 3. That the key is not already spoken for in the project's manifest, and
 ///    that the task list it has resolves. The import ends by regenerating, so
 ///    a list that is already broken is refused now, while nothing has been
 ///    written.
@@ -64,13 +81,15 @@ fn prepare(
     command_line: &CommandLine,
     arguments: &ImportArguments,
     current_dir: &Path,
+    key: Name,
+    again: &str,
+    changes: &mut Changes,
 ) -> Result<Import, Failure> {
     let package = command_line.identity().package_name();
     let import_command = top_level::management_command(command_line, "import");
-    let key = arguments.key(&import_command, current_dir)?;
-    let again = arguments.to_run_again(current_dir);
 
-    let document = metadata::fetch_in_its_own_project(current_dir, package, "import", &again)?;
+    let document =
+        metadata::fetch_in_its_own_project(changes, current_dir, package, "import", again)?;
     refusals::ensure_the_key_is_not_the_bin_name(&key, command_line.identity().binary_name())?;
     top_level::ensure_command_is_free(command_line, key.as_str())?;
     let project = document.locate_project(package)?;
@@ -88,7 +107,6 @@ fn prepare(
         package: package.to_string(),
         cargo_add_arguments: cargo_add::arguments(package, &key, arguments),
         key,
-        again,
         current_dir: current_dir.to_path_buf(),
         workspace_root: project.workspace_root().to_path_buf(),
         cli_manifest_path: project.manifest_path().to_path_buf(),
@@ -102,8 +120,30 @@ mod tests {
 
     use rituals::{CommandLine, Identity};
 
-    use super::prepare;
+    use rituals::Failure;
+    use rituals_compose::rollback;
+
+    use super::{Import, prepare};
     use crate::test_support::{ScratchDir, ScratchProject, TestOutcome, typed_arguments};
+
+    /// What the rollback appends to a failure of the run `prepare` is in.
+    const PUT_BACK: &str = "; ritual put the project back as it found it";
+
+    /// `prepare` as `run` calls it: the key resolved first, outside the
+    /// attempt, and the rest inside the attempt that begins at the first
+    /// subprocess.
+    fn prepared(
+        command_line: &CommandLine,
+        words: &[&str],
+        current_dir: &Path,
+    ) -> Result<Import, Failure> {
+        let arguments = typed_arguments(words);
+        let key = arguments.key("cargo ritual import", current_dir)?;
+        let again = arguments.to_run_again(current_dir);
+        rollback::attempt("running `import` again", |changes| {
+            prepare(command_line, &arguments, current_dir, key, &again, changes)
+        })
+    }
 
     /// The command line of a default project, `ritual`, as the running
     /// binary would hand it to the task: ritual's own bundle flattened into
@@ -116,11 +156,20 @@ mod tests {
     }
 
     /// The refusal `prepare` gives for `words` typed in `current_dir`, or
-    /// `None` when it prepares an import.
+    /// `None` when it prepares an import. What the rollback adds after a
+    /// refusal inside the attempt is left off, so each test reads the
+    /// refusal's own words; a refusal of the key, which is made before the
+    /// attempt, has nothing to leave off.
     fn refusal(command_line: &CommandLine, words: &[&str], current_dir: &Path) -> Option<String> {
-        prepare(command_line, &typed_arguments(words), current_dir)
+        prepared(command_line, words, current_dir)
             .err()
             .map(|failure| failure.to_string())
+            .map(|message| {
+                message
+                    .strip_suffix(PUT_BACK)
+                    .unwrap_or(&message)
+                    .to_string()
+            })
     }
 
     /// A project with `crates` written beside the CLI, each marked as a task.
@@ -155,9 +204,9 @@ mod tests {
     fn a_new_key_in_the_projects_own_directory_is_prepared_for_writing() -> TestOutcome {
         let project = project_with("prepare-new-key", &["greeter"])?;
 
-        let import = prepare(
+        let import = prepared(
             &default_command_line(),
-            &typed_arguments(&["greeter", "hail", "--path", "../greeter"]),
+            &["greeter", "hail", "--path", "../greeter"],
             &project.cli_dir(),
         )?;
 
@@ -176,10 +225,6 @@ mod tests {
                 "--",
                 "greeter"
             ]
-        );
-        assert_eq!(
-            import.retry(),
-            format!("running `import {}` again", import.again)
         );
         assert!(import.cli_manifest_path.ends_with("cli/Cargo.toml"));
         assert!(import.lockfile_path.ends_with("Cargo.lock"));
@@ -370,6 +415,62 @@ mod tests {
             )
             }),
             "expected the dependency to be found under its other spelling; got: {message:?}"
+        );
+        Ok(())
+    }
+
+    /// `cargo metadata` creates the lockfile of a project that has none, and
+    /// the refusal for a key that collides comes after it, so a refused import
+    /// has to take the lockfile it made back out.
+    #[test]
+    fn a_refusal_after_the_fetch_leaves_a_project_with_no_lockfile_without_one() -> TestOutcome {
+        let project = project_with("prepare-no-lockfile", &["greeter"])?;
+        assert!(
+            !project.lockfile_path().exists(),
+            "this story starts with no lockfile, so cargo has one to make"
+        );
+        let before = project.snapshot()?;
+
+        let message = refusal(
+            &default_command_line(),
+            &["greeter", "add", "--path", "../greeter"],
+            &project.cli_dir(),
+        );
+
+        assert!(
+            message.as_deref().is_some_and(|message| message
+                .starts_with("`add` would be a top-level command of `ritual` twice")),
+            "expected the collision refusal; got: {message:?}"
+        );
+        assert_eq!(project.snapshot()?, before, "a refusal leaves no lockfile");
+        Ok(())
+    }
+
+    /// A lockfile that no longer matches the manifest is rewritten by `cargo
+    /// metadata`, so a refusal after it has to put the old bytes back.
+    #[test]
+    fn a_refusal_after_the_fetch_leaves_a_stale_lockfile_byte_for_byte() -> TestOutcome {
+        let project =
+            project_with("prepare-stale-lockfile", &["wake", "greeter"])?.with_a_lockfile()?;
+        // A dependency the lockfile does not know about makes it stale.
+        declare(&project, "wake", &[])?;
+        let before = project.snapshot()?;
+
+        let message = refusal(
+            &default_command_line(),
+            &["greeter", "add", "--path", "../greeter"],
+            &project.cli_dir(),
+        );
+
+        assert!(
+            message.as_deref().is_some_and(|message| message
+                .starts_with("`add` would be a top-level command of `ritual` twice")),
+            "expected the collision refusal; got: {message:?}"
+        );
+        assert_eq!(
+            project.snapshot()?,
+            before,
+            "a refusal leaves the lockfile as it was"
         );
         Ok(())
     }

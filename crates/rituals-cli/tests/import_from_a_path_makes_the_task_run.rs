@@ -11,7 +11,9 @@ mod support;
 
 use support::help::assert_refuses_unrecognized_subcommand;
 use support::task_sources::{task_output, write_path_task};
-use support::{Project, TempDir, TestOutcome, in_checkout, manifest, path_to_str};
+use support::{
+    Project, TempDir, TestOutcome, in_checkout, lockfile, manifest, path_to_str, run_binary,
+};
 
 const CRATE: &str = "greeter";
 const VERSION: &str = "0.1.0";
@@ -89,6 +91,46 @@ fn an_explicit_key_renames_the_imported_task() -> TestOutcome {
         );
 
         assert_refuses_unrecognized_subcommand(&project.run_cli(&[CRATE])?, CRATE);
+        Ok(())
+    })
+}
+
+#[test]
+fn a_task_imported_into_a_project_with_no_lockfile_says_it_created_one() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("import-path-creates-lockfile")?;
+        let project = Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
+        let task_dir = working_dir.path().join(CRATE);
+        write_path_task(&task_dir, checkout, CRATE, VERSION)?;
+        let binary = project.build()?;
+        std::fs::remove_file(project.root().join("Cargo.lock"))?;
+        assert_eq!(
+            lockfile(project.root())?,
+            None,
+            "this story starts with no lockfile"
+        );
+
+        let result = run_binary(
+            &binary,
+            project.root(),
+            &["import", CRATE, "--path", path_to_str(&task_dir)?],
+        )?;
+
+        result.expect_success("`import greeter --path <directory>`, with no lockfile");
+        assert!(
+            result.stdout.contains("created Cargo.lock"),
+            "expected the import to say it created the lockfile; stdout was:\n{}",
+            result.stdout
+        );
+        assert!(
+            !result.stdout.contains("updated Cargo.lock"),
+            "a lockfile that was not there was not updated; stdout was:\n{}",
+            result.stdout
+        );
+        assert!(
+            lockfile(project.root())?.is_some(),
+            "the import's lockfile must be on disk"
+        );
         Ok(())
     })
 }

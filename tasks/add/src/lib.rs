@@ -73,7 +73,8 @@ fn prepare(command_line: &CommandLine, arguments: &AddArguments) -> Result<Impor
 
     let current_dir = std::env::current_dir()
         .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
-    let document = metadata::fetch_in_its_own_project(&current_dir, package, "add", name.as_str())?;
+    let document = metadata::fetch(&current_dir)?;
+    document.ensure_runs_in_its_own_project(package, "add", name.as_str())?;
     let project = document.locate_project(package)?;
 
     // Runs before the leftover check below: whether `name` is already a

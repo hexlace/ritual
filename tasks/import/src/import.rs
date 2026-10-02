@@ -15,23 +15,20 @@ use std::path::{Path, PathBuf};
 
 use rituals::{CommandLine, Failure, Name, Outcome, report};
 use rituals_compose::manifest::Manifest;
-use rituals_compose::rollback::{self, Changes};
+use rituals_compose::rollback::Changes;
 use rituals_compose::{generated_file, metadata, top_level};
 
 use crate::cargo_add;
 
 /// Everything `import` is about to do, captured before the first write.
 ///
-/// [`Import::run`] runs inside [`rollback::attempt`], so a run that is
-/// refused or fails partway puts both files `cargo add` can change, the
-/// command line crate's manifest and the workspace's `Cargo.lock`, back byte
-/// for byte, and says so.
+/// [`Import::run`] runs inside the [`rollback::attempt`] that began at the
+/// first subprocess, so a run that is refused or fails partway puts both
+/// files `cargo add` can change, the command line crate's manifest and the
+/// workspace's `Cargo.lock`, back byte for byte, and says so.
 pub(crate) struct Import {
     pub(crate) package: String,
     pub(crate) key: Name,
-    /// The words that run this import again, as [`crate::arguments`] renders
-    /// them.
-    pub(crate) again: String,
     pub(crate) current_dir: PathBuf,
     pub(crate) workspace_root: PathBuf,
     pub(crate) cli_manifest_path: PathBuf,
@@ -49,8 +46,11 @@ impl Import {
     /// add`, which has rewritten it, and written through `changes` like any
     /// other. Reports each file changed, once all three steps have gone
     /// through.
+    ///
+    /// Whether the lockfile is reported as created is asked of `changes`,
+    /// which recorded it before the first `cargo metadata` wrote it: asking
+    /// the disk here would find the one that `cargo metadata` made.
     pub(crate) fn run(&self, changes: &mut Changes) -> Outcome {
-        let lockfile_existed = self.lockfile_path.exists();
         changes.run_changing(&[&self.cli_manifest_path, &self.lockfile_path], || {
             cargo_add::run(&self.current_dir, &self.cargo_add_arguments)
         })?;
@@ -59,6 +59,10 @@ impl Import {
         // itself is only known once `cargo add` has resolved it, wherever it
         // came from. Its refusal is returned as it is: it already says what
         // is wrong and what to do, and the rollback adds that nothing changed.
+        //
+        // This is `fetch`, not `fetch_in_its_own_project`: the project is
+        // known to be this one, and the lockfile it may write was recorded
+        // before the first fetch, which `record_file` keeps.
         metadata::fetch(&self.current_dir)?
             .ensure_dependency_is_a_task(&self.package, &self.key)?;
 
@@ -69,31 +73,26 @@ impl Import {
         for line in reported_lines(
             &self.cli_manifest_path,
             &self.workspace_root,
-            lockfile_existed,
+            !changes.recorded_as_absent(&self.lockfile_path),
         ) {
             report(line);
         }
         Ok(())
     }
-
-    /// What a person runs again once they have checked whatever a failed
-    /// run could not put back.
-    pub(crate) fn retry(&self) -> String {
-        format!("running `import {}` again", self.again)
-    }
 }
 
-/// Writes everything `import` describes, and either finishes by running the
-/// same path `regenerate` does, or puts the project back and reports why.
-pub(crate) fn finish(command_line: &CommandLine, import: &Import) -> Outcome {
-    rollback::attempt(&import.retry(), |changes| import.run(changes))?;
-    finish_by_regenerating(command_line, import)
+/// What a person runs again once they have checked whatever a failed run
+/// could not put back, for the words `again` that run the import.
+pub(crate) fn retry(again: &str) -> String {
+    format!("running `import {again}` again")
 }
 
 /// `import` has no idea of the task list of its own: it writes the manifest
 /// and then runs the regenerate path, so the two can never drift. Ends by
-/// naming the command that runs what was imported.
-fn finish_by_regenerating(command_line: &CommandLine, import: &Import) -> Outcome {
+/// naming the command that runs what was imported. Runs after the attempt
+/// that wrote the manifest has committed, so a failure here leaves the task
+/// imported and says what finishes it.
+pub(crate) fn finish_by_regenerating(command_line: &CommandLine, import: &Import) -> Outcome {
     generated_file::regenerate(command_line).map_err(|failure| {
         imported_but_not_regenerated(
             &failure,
@@ -151,7 +150,7 @@ mod tests {
     use rituals::{Failure, Name};
     use rituals_compose::rollback;
 
-    use super::{Import, imported_but_not_regenerated, next_step, reported_lines};
+    use super::{Import, imported_but_not_regenerated, next_step, reported_lines, retry};
     use crate::cargo_add;
     use crate::test_support::{ScratchProject, TestOutcome, typed_arguments};
 
@@ -207,7 +206,6 @@ mod tests {
         let key = Name::new(key)?;
         Ok(Import {
             package: "demo-ritual".to_string(),
-            again: words.join(" "),
             current_dir: project.cli_dir(),
             workspace_root: project.root().to_path_buf(),
             cli_manifest_path: project.cli_manifest_path(),
@@ -218,19 +216,15 @@ mod tests {
     }
 
     fn run_in_attempt(import: &Import) -> Result<(), Failure> {
-        rollback::attempt(&import.retry(), |changes| import.run(changes))
+        rollback::attempt(&retry("greeter"), |changes| import.run(changes))
     }
 
     #[test]
-    fn the_retry_names_import_and_the_words_that_run_it_again() -> TestOutcome {
-        let project = ScratchProject::new("retry-wording")?;
-        let import = import_in(&project, "greeter", &["greeter", "--path", "/w/greeter"])?;
-
+    fn the_retry_names_import_and_the_words_that_run_it_again() {
         assert_eq!(
-            import.retry(),
+            retry("greeter --path /w/greeter"),
             "running `import greeter --path /w/greeter` again"
         );
-        Ok(())
     }
 
     #[test]
