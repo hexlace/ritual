@@ -125,12 +125,10 @@ fn prepare(command_line: &CommandLine, arguments: &AddArguments) -> Result<Impor
     ensure_workspace_can_take_the_import(&workspace_manifest)?;
 
     let cli_manifest = Manifest::read(&cli_manifest_path)?;
-    let tasks_directory_was_created = !tasks_directory.exists();
 
     Ok(Import {
         name,
         task_crate_dir,
-        tasks_directory_was_created,
         workspace_manifest,
         cli_manifest,
         dependency_path,

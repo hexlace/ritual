@@ -15,21 +15,19 @@ use std::path::{Path, PathBuf};
 
 use rituals::{CommandLine, Failure, Name, Outcome, report};
 use rituals_compose::manifest::Manifest;
+use rituals_compose::rollback::{self, Changes};
 use rituals_compose::source::Source;
 use rituals_compose::{generated_file, task_crate, top_level};
 
 /// Everything `add` is about to write, captured before the first write.
 ///
-/// A run that reaches [`Import::write`] and fails partway is put back by
-/// [`Import::undo`] — extending the same promise from refusals to failures:
-/// a run of `add` that does not finish leaves the project exactly as it
-/// found it, and says so.
+/// [`Import::write`] runs inside [`rollback::attempt`], so a run that fails
+/// partway is put back — extending the same promise from refusals to
+/// failures: a run of `add` that does not finish leaves the project exactly
+/// as it found it, and says so.
 pub(crate) struct Import {
     pub(crate) name: Name,
     pub(crate) task_crate_dir: PathBuf,
-    /// `add` creates `tasks/` when this is the project's first task, and
-    /// removes it again if the run does not finish.
-    pub(crate) tasks_directory_was_created: bool,
     pub(crate) workspace_manifest: Manifest,
     pub(crate) cli_manifest: Manifest,
     pub(crate) dependency_path: String,
@@ -39,12 +37,22 @@ pub(crate) struct Import {
 impl Import {
     /// The four writes, in the order they are reported: the task crate's own
     /// two files, then the two manifests. Stops at the first failure.
-    fn write(&mut self) -> Outcome {
+    ///
+    /// The task crate's directory is reserved before anything is written,
+    /// and `tasks/` with it when this is the project's first task, so a
+    /// failed run removes both. Each manifest is written through `changes`,
+    /// so a failed run puts its bytes back; the undo runs in the reverse
+    /// order, so the manifests are restored before the directory is
+    /// removed. A member entry pointing at a directory that is gone is a
+    /// worse state than a directory nothing points at, so if the restore is
+    /// the step that fails, the directory is still there.
+    fn write(&mut self, changes: &mut Changes) -> Outcome {
+        changes.reserve_directory(&self.task_crate_dir)?;
         write_task_crate(&self.task_crate_dir, &self.name)?;
 
         let member = format!("tasks/{}", self.name);
         self.workspace_manifest.append_workspace_member(&member)?;
-        self.workspace_manifest.write()?;
+        self.workspace_manifest.write(changes)?;
         report(format!(
             "updated {}",
             relative_to(self.workspace_manifest.path(), &self.workspace_root).display()
@@ -52,7 +60,7 @@ impl Import {
 
         self.cli_manifest
             .import_task(&self.name, &self.dependency_path)?;
-        self.cli_manifest.write()?;
+        self.cli_manifest.write(changes)?;
         report(format!(
             "updated {}",
             relative_to(self.cli_manifest.path(), &self.workspace_root).display()
@@ -61,71 +69,19 @@ impl Import {
         Ok(())
     }
 
-    /// Puts back whatever is on disk that should not be, and returns the
-    /// failure to report. Carries no progress marker: every step is
-    /// conditioned on what it finds on disk, so it is correct whichever
-    /// write failed.
-    ///
-    /// Manifests are restored before the directory is removed: a member
-    /// entry pointing at a directory that is gone is a worse state than a
-    /// directory nothing points at, so if the restore is the step that
-    /// fails, the directory is still there. Every step's result is checked
-    /// the same way — a removal that fails leaves the project exactly as
-    /// unrestored as a manifest that could not be written back, and saying
-    /// so is the whole point of this function.
-    fn undo(&self, failure: &Failure) -> Failure {
-        let mut not_restored: Vec<String> = Vec::new();
-
-        if self.cli_manifest.restore_if_changed().is_err() {
-            not_restored.push(self.cli_manifest.path().display().to_string());
-        }
-        if self.workspace_manifest.restore_if_changed().is_err() {
-            not_restored.push(self.workspace_manifest.path().display().to_string());
-        }
-        if self.task_crate_dir.exists() && std::fs::remove_dir_all(&self.task_crate_dir).is_err() {
-            not_restored.push(self.task_crate_dir.display().to_string());
-        }
-        let tasks_directory = self.workspace_root.join("tasks");
-        // Plain `remove_dir`, which refuses a non-empty directory — that is
-        // the check that the crate directory really is gone, not an extra
-        // one. `tasks_directory.exists()` guards against a run that failed
-        // before `tasks/` itself was ever created: `remove_dir` on a path
-        // that was never there is not a restoration failure, it is nothing
-        // to restore.
-        if self.tasks_directory_was_created
-            && tasks_directory.exists()
-            && std::fs::remove_dir(&tasks_directory).is_err()
-        {
-            not_restored.push(tasks_directory.display().to_string());
-        }
-
-        if not_restored.is_empty() {
-            return Failure::new(format!(
-                "{failure}; ritual put the project back as it found it"
-            ));
-        }
-
-        let pronoun = if not_restored.len() == 1 {
-            "check it"
-        } else {
-            "check them"
-        };
-        Failure::new(format!(
-            "{failure}; ritual put the project back except for {} — {pronoun} before running \
-             `add {}` again",
-            rituals_compose::sentence::join_with_and(&not_restored),
-            self.name
-        ))
+    /// What a person runs again once they have checked whatever a failed
+    /// run could not put back.
+    fn retry(&self) -> String {
+        format!("running `add {}` again", self.name)
     }
 }
 
 /// Writes everything `import` describes, and either finishes by running the
 /// same path `regenerate` does, or puts the project back and reports why.
 pub(crate) fn finish(command_line: &CommandLine, mut import: Import) -> Outcome {
-    match import.write() {
-        Ok(()) => finish_by_regenerating(command_line, &import),
-        Err(failure) => Err(import.undo(&failure)),
-    }
+    let retry = import.retry();
+    rollback::attempt(&retry, |changes| import.write(changes))?;
+    finish_by_regenerating(command_line, &import)
 }
 
 /// `add` has no idea of the task list of its own; it writes the manifests
@@ -191,8 +147,9 @@ mod tests {
     use std::error::Error;
     use std::path::PathBuf;
 
-    use rituals::Name;
+    use rituals::{Failure, Name, Outcome};
     use rituals_compose::manifest::Manifest;
+    use rituals_compose::rollback::{self, Changes};
 
     use super::{Import, next_step};
     use crate::test_support::{ScratchDir, TestOutcome};
@@ -206,14 +163,26 @@ mod tests {
         );
     }
 
+    /// The retry wording is the end of `add`'s failure message when the undo
+    /// could not put everything back, so it has to name the command a person
+    /// types again, exactly as `add` always has.
+    #[test]
+    fn the_retry_names_add_and_the_name_it_was_given() -> TestOutcome {
+        let project = ScratchProject::new("retry-wording")?;
+        let import = project.import("lint")?;
+        assert_eq!(import.retry(), "running `add lint` again");
+        Ok(())
+    }
+
     /// Every file under a directory tree, as a path paired with its bytes,
-    /// sorted by path — a before/after diff for `undo` to be checked
+    /// sorted by path — a before/after diff for the undo to be checked
     /// against.
     type Snapshot = Vec<(PathBuf, Vec<u8>)>;
 
     /// A scratch project: a workspace manifest with one member and a
-    /// composed CLI manifest with one task already imported, ready for
-    /// `Import::write`/`undo` to be exercised directly against real files.
+    /// composed CLI manifest with one task already imported, ready for the
+    /// steps of `Import::write`, and the undo of a run that fails after
+    /// them, to be exercised directly against real files.
     struct ScratchProject {
         _root: ScratchDir,
         workspace_manifest_path: PathBuf,
@@ -253,7 +222,6 @@ mod tests {
             Ok(Import {
                 name: Name::new(name)?,
                 task_crate_dir: self.workspace_root.join("tasks").join(name),
-                tasks_directory_was_created: true,
                 workspace_manifest: Manifest::read(&self.workspace_manifest_path)?,
                 cli_manifest: Manifest::read(&self.cli_manifest_path)?,
                 dependency_path: format!("../tasks/{name}"),
@@ -281,17 +249,42 @@ mod tests {
         }
     }
 
+    /// Runs `steps` — the first few of `Import::write`'s — inside the same
+    /// rollback `finish` runs `Import::write` in, with the same retry
+    /// wording, then fails the way the next step would, and returns the
+    /// failure the rollback reports. Asserts it is the simulated failure, so
+    /// a step that failed is never mistaken for the one simulated after it.
+    fn fail_after(
+        import: &mut Import,
+        steps: impl FnOnce(&mut Import, &mut Changes) -> Outcome,
+    ) -> Failure {
+        let retry = import.retry();
+        let outcome = rollback::attempt(&retry, |changes| {
+            steps(import, changes)?;
+            Err::<(), _>(Failure::new("simulated failure"))
+        });
+        let Err(reported) = outcome else {
+            unreachable!("a run that always ends in Err cannot succeed");
+        };
+        assert!(
+            reported.to_string().starts_with("simulated failure;"),
+            "a step before the simulated failure failed: {reported}"
+        );
+        reported
+    }
+
     #[test]
     fn undo_after_only_the_crate_directory_was_written() -> TestOutcome {
         let project = ScratchProject::new("undo-crate-only")?;
         let before = project.snapshot()?;
 
-        let import = project.import("lint")?;
-        super::write_task_crate(&import.task_crate_dir, &import.name)?;
+        let mut import = project.import("lint")?;
         // Simulate the workspace-manifest write failing: nothing else has
         // happened yet.
-        let failure = rituals::Failure::new("simulated failure");
-        let reported = import.undo(&failure);
+        let reported = fail_after(&mut import, |import, changes| {
+            changes.reserve_directory(&import.task_crate_dir)?;
+            super::write_task_crate(&import.task_crate_dir, &import.name)
+        });
 
         assert!(
             reported
@@ -316,14 +309,14 @@ mod tests {
         let before = project.snapshot()?;
 
         let mut import = project.import("lint")?;
-        super::write_task_crate(&import.task_crate_dir, &import.name)?;
-        import
-            .workspace_manifest
-            .append_workspace_member("tasks/lint")?;
-        import.workspace_manifest.write()?;
-
-        let failure = rituals::Failure::new("simulated failure");
-        let reported = import.undo(&failure);
+        let reported = fail_after(&mut import, |import, changes| {
+            changes.reserve_directory(&import.task_crate_dir)?;
+            super::write_task_crate(&import.task_crate_dir, &import.name)?;
+            import
+                .workspace_manifest
+                .append_workspace_member("tasks/lint")?;
+            import.workspace_manifest.write(changes)
+        });
 
         assert!(
             reported
@@ -344,18 +337,18 @@ mod tests {
         let before = project.snapshot()?;
 
         let mut import = project.import("lint")?;
-        super::write_task_crate(&import.task_crate_dir, &import.name)?;
-        import
-            .workspace_manifest
-            .append_workspace_member("tasks/lint")?;
-        import.workspace_manifest.write()?;
-        import
-            .cli_manifest
-            .import_task(&import.name, &import.dependency_path)?;
-        import.cli_manifest.write()?;
-
-        let failure = rituals::Failure::new("simulated failure");
-        let reported = import.undo(&failure);
+        let reported = fail_after(&mut import, |import, changes| {
+            changes.reserve_directory(&import.task_crate_dir)?;
+            super::write_task_crate(&import.task_crate_dir, &import.name)?;
+            import
+                .workspace_manifest
+                .append_workspace_member("tasks/lint")?;
+            import.workspace_manifest.write(changes)?;
+            import
+                .cli_manifest
+                .import_task(&import.name, &import.dependency_path)?;
+            import.cli_manifest.write(changes)
+        });
 
         assert!(
             reported
@@ -380,11 +373,10 @@ mod tests {
         )?;
 
         let mut import = project.import("lint")?;
-        import.tasks_directory_was_created = false;
-        super::write_task_crate(&import.task_crate_dir, &import.name)?;
-
-        let failure = rituals::Failure::new("simulated failure");
-        let _ = import.undo(&failure);
+        let _ = fail_after(&mut import, |import, changes| {
+            changes.reserve_directory(&import.task_crate_dir)?;
+            super::write_task_crate(&import.task_crate_dir, &import.name)
+        });
 
         assert!(
             project.workspace_root.join("tasks/.keep").is_file(),
@@ -401,14 +393,14 @@ mod tests {
     /// from it — that is what write permission controls on a directory, not
     /// on the entries inside it — so `chmod 0o555` on the crate directory
     /// makes `remove_dir_all` fail without needing anything to hold the
-    /// directory open. Verifies `undo` reports the directory by name and
+    /// directory open. Verifies the undo reports the directory by name and
     /// leaves it on disk rather than claiming full restoration. Unix-only:
     /// this permission model has no direct Windows equivalent.
     ///
     /// Root ignores a directory's own write bit, so as uid 0 the removal this
     /// test relies on failing would succeed instead, and the second
     /// `set_permissions` below would fail with `NotFound` on a directory
-    /// `remove_dir_all` had already removed. A probe write right after the
+    /// the undo had already removed. A probe write right after the
     /// `chmod` tells the two cases apart, so a run under that condition
     /// reports "could not demonstrate" instead of a false pass or a spurious
     /// failure.
@@ -418,28 +410,41 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let project = ScratchProject::new("undo-crate-removal-fails")?;
-        let import = project.import("lint")?;
-        super::write_task_crate(&import.task_crate_dir, &import.name)?;
+        let mut import = project.import("lint")?;
+        let mut permission_is_enforced = true;
 
-        std::fs::set_permissions(
-            &import.task_crate_dir,
-            std::fs::Permissions::from_mode(0o555),
-        )?;
+        let reported = fail_after(&mut import, |import, changes| {
+            changes.reserve_directory(&import.task_crate_dir)?;
+            super::write_task_crate(&import.task_crate_dir, &import.name)?;
 
-        // Root ignores a directory's missing write bit entirely, so a probe
-        // write tells whether this process is actually subject to the
-        // permission above. If it is not, `remove_dir_all` below would
-        // succeed despite the `0o555`, and the scenario this test
-        // demonstrates cannot occur for this user: restore and return early,
-        // so a skipped check says so rather than passing silently.
-        let probe = import.task_crate_dir.join("probe");
-        let permission_is_enforced = std::fs::File::create(&probe).is_err();
-        if !permission_is_enforced {
-            let _ = std::fs::remove_file(&probe);
+            let setup = |error| Failure::new("changing permissions failed").caused_by(error);
             std::fs::set_permissions(
                 &import.task_crate_dir,
-                std::fs::Permissions::from_mode(0o755),
-            )?;
+                std::fs::Permissions::from_mode(0o555),
+            )
+            .map_err(setup)?;
+
+            // Root ignores a directory's missing write bit entirely, so a
+            // probe write tells whether this process is actually subject to
+            // the permission above. If it is not, the removal the undo makes
+            // would succeed despite the `0o555`, and the scenario this test
+            // demonstrates cannot occur for this user: restore before the
+            // undo runs, so a skipped check says so rather than passing
+            // silently.
+            let probe = import.task_crate_dir.join("probe");
+            permission_is_enforced = std::fs::File::create(&probe).is_err();
+            if !permission_is_enforced {
+                let _ = std::fs::remove_file(&probe);
+                std::fs::set_permissions(
+                    &import.task_crate_dir,
+                    std::fs::Permissions::from_mode(0o755),
+                )
+                .map_err(setup)?;
+            }
+            Ok(())
+        });
+
+        if !permission_is_enforced {
             crate::test_support::report_skip(
                 "undo_reports_the_crate_directory_when_removing_it_fails could \
                      not demonstrate a permission-denied removal because this process does \
@@ -447,9 +452,6 @@ mod tests {
             );
             return Ok(());
         }
-
-        let failure = rituals::Failure::new("simulated failure");
-        let reported = import.undo(&failure);
 
         // Restore permissions before any assertion can return early, so the
         // scratch directory this test made is still removable on drop

@@ -7,22 +7,23 @@ use std::path::{Path, PathBuf};
 use rituals::{Failure, Name};
 use toml_edit::{Array, DocumentMut, InlineTable, Item, RawString, Value};
 
+use crate::rollback::Changes;
+
 /// A manifest a scaffolding task is about to edit.
 ///
-/// Holds the bytes it had when it was read so that a failed run can put
-/// exactly those bytes back — rather than relying on `toml_edit`
-/// round-tripping an untouched document, which is a claim this crate would
-/// then depend on without checking.
+/// It is written only through a run's [`Changes`], which records the bytes
+/// on disk before the first write, so a failed run puts exactly those bytes
+/// back — rather than relying on `toml_edit` round-tripping an untouched
+/// document, which is a claim this crate would then depend on without
+/// checking.
 #[derive(Debug)]
 pub struct Manifest {
     path: PathBuf,
-    original: String,
     document: DocumentMut,
 }
 
 impl Manifest {
-    /// Reads and parses the manifest at `path`, keeping its original bytes
-    /// for [`Manifest::restore_if_changed`].
+    /// Reads and parses the manifest at `path`.
     ///
     /// # Errors
     ///
@@ -48,15 +49,14 @@ impl Manifest {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn read(path: &Path) -> Result<Self, Failure> {
-        let original = std::fs::read_to_string(path).map_err(|error| {
+        let text = std::fs::read_to_string(path).map_err(|error| {
             Failure::new(format!("reading {} failed", path.display())).caused_by(error)
         })?;
-        let document = original.parse::<DocumentMut>().map_err(|error| {
+        let document = text.parse::<DocumentMut>().map_err(|error| {
             Failure::new(format!("parsing {} failed", path.display())).caused_by(error)
         })?;
         Ok(Self {
             path: path.to_path_buf(),
-            original,
             document,
         })
     }
@@ -67,7 +67,9 @@ impl Manifest {
         &self.path
     }
 
-    /// Writes the current document back to [`Manifest::path`].
+    /// Writes the current document back to [`Manifest::path`], through
+    /// `changes`, so that the run it belongs to puts the file's bytes back if
+    /// it does not finish.
     ///
     /// This writes the whole file from the in-memory document, with no
     /// check that the file on disk still matches what [`Manifest::read`]
@@ -76,17 +78,13 @@ impl Manifest {
     /// overwritten by it. This is deliberate: it carries the same
     /// property `cargo add` itself has — one person runs this by hand, in
     /// one checkout, and every write it makes is visible in `git diff`
-    /// before it is committed. See [`Manifest::restore_if_changed`] for the
-    /// same threat model applied to a failed run's undo.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`Failure`] naming the path if writing fails.
+    /// before it is committed.
     ///
     /// # Examples
     ///
     /// ```
     /// use rituals_compose::manifest::Manifest;
+    /// use rituals_compose::rollback;
     ///
     /// # let directory = std::env::temp_dir()
     /// #     .join(format!("rituals-compose-doctest-manifest-write-{}", std::process::id()));
@@ -96,68 +94,20 @@ impl Manifest {
     /// let mut manifest = Manifest::read(&manifest_path)?;
     /// manifest.append_workspace_member("tasks/lint")?;
     ///
-    /// manifest.write()?;
+    /// rollback::attempt("running `add lint` again", |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
     /// assert!(on_disk.contains("tasks/lint"));
     /// # std::fs::remove_dir_all(&directory)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn write(&self) -> Result<(), Failure> {
-        std::fs::write(&self.path, self.document.to_string()).map_err(|error| {
-            Failure::new(format!("writing {} failed", self.path.display())).caused_by(error)
-        })
-    }
-
-    /// Writes `original` back to [`Manifest::path`], but only if the file on
-    /// disk no longer matches it — so a write that failed before it opened
-    /// the file (the ordinary case: nothing was touched) is not reported as
-    /// an undo failure for a file that was never written to.
-    ///
-    /// The same threat model documented on [`Manifest::write`] applies to
-    /// this restore: it overwrites whatever is on disk with the bytes
-    /// `Manifest::read` captured at the start of the run, with no check
-    /// that those bytes are still what a concurrent scaffolding task or a
-    /// hand edit landing during this run would want kept. Deliberate, for
-    /// the same reason as `write`.
     ///
     /// # Errors
     ///
-    /// Returns a [`Failure`] naming the path if reading it back or writing
-    /// the original bytes fails.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rituals_compose::manifest::Manifest;
-    ///
-    /// # let directory = std::env::temp_dir()
-    /// #     .join(format!("rituals-compose-doctest-manifest-restore-{}", std::process::id()));
-    /// # std::fs::create_dir_all(&directory)?;
-    /// let manifest_path = directory.join("Cargo.toml");
-    /// let original = "[package]\nname = \"demo\"\n";
-    /// # std::fs::write(&manifest_path, original)?;
-    /// let manifest = Manifest::read(&manifest_path)?;
-    ///
-    /// // A later step in the same run failed partway through, after
-    /// // writing something else to the file.
-    /// std::fs::write(&manifest_path, "[package]\nname = \"half-written\"\n")?;
-    ///
-    /// manifest.restore_if_changed()?;
-    /// assert_eq!(std::fs::read_to_string(&manifest_path)?, original);
-    /// # std::fs::remove_dir_all(&directory)?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    pub fn restore_if_changed(&self) -> Result<(), Failure> {
-        let current = std::fs::read_to_string(&self.path).map_err(|error| {
-            Failure::new(format!("reading {} failed", self.path.display())).caused_by(error)
-        })?;
-        if current == self.original {
-            return Ok(());
-        }
-        std::fs::write(&self.path, &self.original).map_err(|error| {
-            Failure::new(format!("writing {} failed", self.path.display())).caused_by(error)
-        })
+    /// Returns a [`Failure`] naming the path if reading what is there
+    /// before the write fails, or if writing fails.
+    pub fn write(&self, changes: &mut Changes) -> Result<(), Failure> {
+        changes.write(&self.path, self.document.to_string())
     }
 
     /// Reports whether this manifest's `[workspace.dependencies]` table
@@ -255,6 +205,7 @@ impl Manifest {
     /// ```
     /// use rituals::Name;
     /// use rituals_compose::manifest::Manifest;
+    /// use rituals_compose::rollback;
     ///
     /// # let directory = std::env::temp_dir()
     /// #     .join(format!("rituals-compose-doctest-manifest-import-{}", std::process::id()));
@@ -268,7 +219,7 @@ impl Manifest {
     /// let name = Name::new("lint")?;
     ///
     /// manifest.import_task(&name, "../tasks/lint")?;
-    /// manifest.write()?;
+    /// rollback::attempt("running `add lint` again", |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
     /// assert!(on_disk.contains("lint = { path = \"../tasks/lint\" }"));
@@ -1062,88 +1013,6 @@ mod tests {
         assert_eq!(filesystem_root.parent(), None);
 
         let _ = dependency_path(filesystem_root, &temp_dir.join("tasks/lint"));
-    }
-
-    #[test]
-    fn restore_if_changed_puts_back_the_original_bytes() -> TestOutcome {
-        let scratch = ScratchDir::new("restore-changed")?;
-        let path = scratch.path().join("Cargo.toml");
-        std::fs::write(&path, "[workspace]\nmembers = [\"ritual\"]\n")?;
-
-        let manifest = Manifest::read(&path)?;
-        std::fs::write(
-            &path,
-            "[workspace]\nmembers = [\"ritual\", \"tasks/lint\"]\n",
-        )?;
-
-        let restored = manifest.restore_if_changed();
-        assert!(
-            restored.is_ok(),
-            "expected the restore to succeed: {restored:?}"
-        );
-        assert_eq!(
-            std::fs::read_to_string(&path)?,
-            "[workspace]\nmembers = [\"ritual\"]\n"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn restore_if_changed_does_not_write_when_the_file_is_unchanged() -> TestOutcome {
-        let scratch = ScratchDir::new("restore-unchanged")?;
-        let path = scratch.path().join("Cargo.toml");
-        std::fs::write(&path, "[workspace]\nmembers = [\"ritual\"]\n")?;
-
-        let manifest = Manifest::read(&path)?;
-
-        // Read-only: if `restore_if_changed` tried to write despite the file
-        // already matching, this would turn that attempt into a failure
-        // instead of silently succeeding either way.
-        let mut permissions = std::fs::metadata(&path)?.permissions();
-        permissions.set_readonly(true);
-        std::fs::set_permissions(&path, permissions)?;
-
-        // A process that ignores the read-only bit (root, on Unix) can open
-        // the file for writing anyway, which would make the assertion below
-        // pass whether or not `restore_if_changed` actually attempted a
-        // write. This probe opens for write without writing anything, so it
-        // tells the two cases apart without disturbing the file's contents.
-        let permission_is_enforced = std::fs::OpenOptions::new().write(true).open(&path).is_err();
-
-        let restored = if permission_is_enforced {
-            manifest.restore_if_changed()
-        } else {
-            Ok(())
-        };
-
-        // Cleanup, on a scratch file this test alone created and is about to
-        // delete — not a security boundary `set_readonly(false)`'s
-        // world-writable warning is guarding here.
-        let mut permissions = std::fs::metadata(&path)?.permissions();
-        #[expect(
-            clippy::permissions_set_readonly_false,
-            reason = "restoring a scratch file's own permissions before removing it, not \
-                      granting access to anything"
-        )]
-        {
-            permissions.set_readonly(false);
-        }
-        std::fs::set_permissions(&path, permissions)?;
-
-        if !permission_is_enforced {
-            crate::test_support::report_skip(
-                "restore_if_changed_does_not_write_when_the_file_is_unchanged \
-                     could not demonstrate a blocked write because this process does not \
-                     honour the read-only permission bit",
-            );
-            return Ok(());
-        }
-
-        assert!(
-            restored.is_ok(),
-            "expected no write attempt against an unchanged, read-only file: {restored:?}"
-        );
-        Ok(())
     }
 
     #[test]
