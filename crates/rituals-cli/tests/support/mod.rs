@@ -52,6 +52,7 @@ pub(crate) mod help;
 pub(crate) mod manifest;
 pub(crate) mod process;
 pub(crate) mod project;
+pub(crate) mod task_sources;
 pub(crate) mod tree;
 
 use std::error::Error;
