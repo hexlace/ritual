@@ -17,15 +17,20 @@ use rituals_compose::shell;
 
 use crate::refusals;
 
-/// `import`'s arguments: the crate to import, the key it answers to, and
-/// where it comes from.
+/// Imports a task crate as a command of this project's command line.
 ///
-/// The grammar is Cargo's own, for the half that names the crate: the crate
-/// is `<crate>[@<version>]`, and `--git`, `--branch`, `--tag`, `--rev` and
-/// `--path` mean what they mean to `cargo add`. What clap checks is only how
-/// the flags relate (a path is not a git repository, a branch needs one, and
-/// a repository is taken at one reference or none), which is fixed, is shown
-/// in `--help`, and is refused before any of `import` runs.
+/// The crate is named the way `cargo add` names it, `<crate>[@<version>]`, and
+/// `--git`, `--branch`, `--tag`, `--rev` and `--path` mean what they mean to
+/// `cargo add`.
+//
+// clap's doc comment on this type is the text `--help` prints, so the notes
+// for a reader of the code are in `//` comments, which it does not print.
+//
+// The grammar is Cargo's own for the half that names the crate. What clap
+// checks is only how the flags relate (a path is not a git repository, a
+// branch needs one, and a repository is taken at one reference or none),
+// which is fixed, is shown in `--help`, and is refused before any of
+// `import` runs.
 //
 // The field for the crate is `crate_spec` because `crate` is a keyword.
 #[derive(clap::Args, Debug)]
@@ -239,6 +244,8 @@ fn suggested_key(crate_name: &str) -> Option<Name> {
 mod tests {
     use std::path::Path;
 
+    use rituals::clap::{self, Args};
+
     use super::{CrateSource, GitReference, ImportArguments, crate_name_of};
     use crate::test_support::{TestOutcome, clap_refuses, import_command, typed_arguments};
 
@@ -251,6 +258,24 @@ mod tests {
     }
 
     const IMPORT: &str = "cargo ritual import";
+
+    /// The doc comment on `ImportArguments` is the text `--help` prints, so
+    /// it is for the person running the command: what `import` does and how
+    /// the crate is named, and nothing about how the arguments are checked.
+    #[test]
+    fn the_long_help_says_what_import_does_and_nothing_about_how_it_is_built() {
+        let mut command = ImportArguments::augment_args(clap::Command::new("import"));
+        let help = command.render_long_help().to_string();
+
+        assert!(
+            help.contains("Imports a task crate as a command"),
+            "expected help to say what `import` does; help was:\n{help}"
+        );
+        assert!(
+            !help.contains("clap"),
+            "help is for a person running `import`, not for the code behind it; help was:\n{help}"
+        );
+    }
 
     #[test]
     fn the_crate_name_is_what_comes_before_the_first_at_sign() {
