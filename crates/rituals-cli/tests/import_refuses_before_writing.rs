@@ -379,6 +379,42 @@ fn a_crate_that_is_not_a_task_is_refused_naming_the_crate() -> TestOutcome {
     })
 }
 
+/// The control for a refused import's byte-for-byte story: Cargo's own `add`
+/// of the same crate does change the command line crate's manifest and the
+/// lockfile, so the bytes the story compares were put back rather than never
+/// touched.
+fn assert_cargo_add_changes_both(
+    project: &Project,
+    directory: &std::path::Path,
+    manifest_before: &[u8],
+    lockfile_before: &[u8],
+) -> TestOutcome {
+    let package = manifest::package_name(&project.cli_manifest()?)?;
+    project
+        .cargo(&[
+            "add",
+            "--package",
+            &package,
+            "plain",
+            "--path",
+            path_to_str(directory)?,
+        ])?
+        .expect_success("plain `cargo add` of the same crate");
+    assert_ne!(
+        manifest_before,
+        fs::read(project.cli_manifest_path())?,
+        "expected `cargo add` to change the command line crate's Cargo.toml; if it did not, \
+         this story proves nothing about putting it back"
+    );
+    assert_ne!(
+        lockfile_before,
+        fs::read(project.root().join("Cargo.lock"))?,
+        "expected `cargo add` to change Cargo.lock; if it did not, this story proves nothing \
+         about putting it back"
+    );
+    Ok(())
+}
+
 #[test]
 fn a_refused_task_check_leaves_the_manifest_and_lockfile_byte_for_byte() -> TestOutcome {
     in_checkout(|checkout| {
@@ -423,31 +459,7 @@ fn a_refused_task_check_leaves_the_manifest_and_lockfile_byte_for_byte() -> Test
             &snapshot_tree(project.root())?,
         );
 
-        // The control: Cargo's own `add` of the same crate does change both
-        // files, so the bytes above were put back rather than never touched.
-        let package = manifest::package_name(&project.cli_manifest()?)?;
-        project
-            .cargo(&[
-                "add",
-                "--package",
-                &package,
-                "plain",
-                "--path",
-                path_to_str(&directory)?,
-            ])?
-            .expect_success("plain `cargo add` of the same crate");
-        assert_ne!(
-            manifest_before,
-            fs::read(project.cli_manifest_path())?,
-            "expected `cargo add` to change the command line crate's Cargo.toml; if it did not, \
-             this story proves nothing about putting it back"
-        );
-        assert_ne!(
-            lockfile_before,
-            fs::read(&lockfile_path)?,
-            "expected `cargo add` to change Cargo.lock; if it did not, this story proves \
-             nothing about putting it back"
-        );
+        assert_cargo_add_changes_both(&project, &directory, &manifest_before, &lockfile_before)?;
         Ok(())
     })
 }
