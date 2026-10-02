@@ -45,10 +45,12 @@ const SUPPORTED_FORMAT_VERSION: u64 = 1;
 /// output.
 ///
 /// Cargo writes `Cargo.lock` here when the workspace has none, and rewrites
-/// it when it is stale. A task that promises to leave the project as it found
-/// it reaches Cargo through [`fetch_in_its_own_project`], which records the
-/// lockfile first; a caller of this function that is already inside a run has
-/// recorded it itself.
+/// it when it is stale. A task that has to leave the project as it found it
+/// when it fails therefore records the lockfile before this call.
+/// [`fetch_in_its_own_project`] does that recording, so a task that has not
+/// recorded the lockfile already should fetch through it; a caller that is
+/// already inside a run with the lockfile recorded may call this function
+/// directly.
 ///
 /// Invokes the cargo that launched this process, through [`cargo::command`],
 /// so a nested call never uses a different cargo than the one in charge. No flags beyond
@@ -138,7 +140,7 @@ pub fn fetch(current_dir: &Path) -> Result<Metadata, Failure> {
 ///
 /// // Shells out to a real `cargo metadata` and needs a workspace on disk
 /// // to run against, so this example is `no_run`.
-/// let key = rollback::attempt("running `import greeter` again", |changes| {
+/// let workspace_root = rollback::attempt("running `import greeter` again", |changes| {
 ///     let document = metadata::fetch_in_its_own_project(
 ///         changes,
 ///         Path::new("."),
@@ -149,7 +151,7 @@ pub fn fetch(current_dir: &Path) -> Result<Metadata, Failure> {
 ///     let project = document.locate_project("demo-ritual")?;
 ///     Ok(project.workspace_root().to_path_buf())
 /// })?;
-/// println!("workspace root: {}", key.display());
+/// println!("workspace root: {}", workspace_root.display());
 /// # Ok::<(), rituals::Failure>(())
 /// ```
 pub fn fetch_in_its_own_project(
