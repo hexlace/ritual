@@ -51,7 +51,9 @@ records each change before making it, and on failure every change is undone,
 the most recent first. A changed file gets its bytes back whether or not it
 is TOML, a file the run created is removed, a directory it created goes, and
 anything that could not be put back is named, with the caller's own words
-for trying again. A manifest can only be written through a run's record, so
+for trying again. The failure's own full stop is dropped so the report
+continues its sentence, and a run can ask what it found when it first
+recorded a file, to say "created" rather than "updated". A manifest can only be written through a run's record, so
 none is changed without one. One rollback means one set of rules about what
 "put back" means, rather than one per task drifting apart.
 
