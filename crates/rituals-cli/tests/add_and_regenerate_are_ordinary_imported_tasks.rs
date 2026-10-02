@@ -1,11 +1,11 @@
 //! `add` and `regenerate` are ordinary imported tasks, not framework
 //! built-ins. A scaffolded project imports ritual's management bundle —
-//! `rituals-core`, whose children are `add`, `regenerate`, `new` and
-//! `create` — the way it imports any task: a Cargo dependency, sourced from
+//! `rituals-core`, whose children are `add`, `regenerate`, `new`, `create` and
+//! `import` — the way it imports any task: a Cargo dependency, sourced from
 //! the same `--path` checkout as `rituals`, plus one entry, `ritual`, in
 //! `[package.metadata.ritual] tasks`. Nothing is reserved for those tasks at
 //! the assembly step: dropping the bundle the way any import is dropped
-//! drops all four of them from the command line.
+//! drops all of them from the command line.
 //!
 //! Every phase below shares one scaffolded project, so ritual's crates and
 //! their dependencies compile once for the whole story.
@@ -50,7 +50,7 @@ fn assert_the_bundle_comes_from_the_checkouts_crates_directory(
 }
 
 /// Phase 2 — a freshly scaffolded project's `--help` lists the bundle's
-/// four children, in the order the bundle declares them, and nothing else
+/// children, in the order the bundle declares them, and nothing else
 /// but clap's own `help`: they are mounted because the manifest names the
 /// bundle, flattened because the project's bin is named `ritual` too.
 fn assert_help_lists_the_bundles_children_in_order(project: &Project) -> TestOutcome {
@@ -59,7 +59,7 @@ fn assert_help_lists_the_bundles_children_in_order(project: &Project) -> TestOut
 
     assert_eq!(
         help::command_names(&help.stdout),
-        ["add", "regenerate", "new", "create", "help"],
+        ["add", "regenerate", "new", "create", "import", "help"],
         "stdout was:\n{}",
         help.stdout
     );
@@ -94,7 +94,15 @@ fn assert_a_later_task_follows_the_bundle(project: &Project) -> TestOutcome {
     help.expect_success("`cargo ritual --help` after `add greet`");
     assert_eq!(
         help::command_names(&help.stdout),
-        ["add", "regenerate", "new", "create", "greet", "help"],
+        [
+            "add",
+            "regenerate",
+            "new",
+            "create",
+            "import",
+            "greet",
+            "help"
+        ],
         "stdout was:\n{}",
         help.stdout
     );
@@ -136,7 +144,7 @@ fn verify_naming_a_task_add_is_refused(project: &Project) -> TestOutcome {
 }
 
 /// Phase 5 — removing ritual's bundle the way any import is removed drops
-/// all four of its children from the command line at once, and leaves
+/// all of its children from the command line at once, and leaves
 /// `greet` in place.
 ///
 /// The `tasks` entry and the dependency cannot go in one edit: the generated

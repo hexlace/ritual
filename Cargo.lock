@@ -139,6 +139,7 @@ dependencies = [
  "rituals",
  "rituals-core-add",
  "rituals-core-create",
+ "rituals-core-import",
  "rituals-core-new",
  "rituals-core-regenerate",
 ]
@@ -161,7 +162,7 @@ dependencies = [
 
 [[package]]
 name = "rituals-core-import"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "rituals",
  "rituals-compose",

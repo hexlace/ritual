@@ -1,5 +1,5 @@
 //! A project scaffolded with no `--cli` carries ritual's management bundle —
-//! `add`, `regenerate`, `new`, `create` — as one import under the key
+//! `add`, `regenerate`, `new`, `create`, `import` — as one import under the key
 //! `ritual`, flattened into its top level because the project's own bin is
 //! named `ritual` too. Hand-renaming that `[[bin]]` and rebuilding nests the
 //! bundle under `ritual` on the next build, with no other file touched.
@@ -131,7 +131,15 @@ fn assert_an_added_task_sits_flat_beside_the_bundle(project: &Project) -> TestOu
     help.expect_success("`cargo ritual --help`");
     assert_eq!(
         help::command_names(&help.stdout),
-        ["add", "regenerate", "new", "create", "my-task", "help"],
+        [
+            "add",
+            "regenerate",
+            "new",
+            "create",
+            "import",
+            "my-task",
+            "help"
+        ],
         "stdout was:\n{}",
         help.stdout
     );
@@ -163,7 +171,7 @@ fn assert_renaming_the_bin_nests_the_bundle(project: &Project) -> TestOutcome {
     nested_help.expect_success("the renamed binary with `ritual --help`");
     assert_eq!(
         help::command_names(&nested_help.stdout),
-        ["add", "regenerate", "new", "create", "help"],
+        ["add", "regenerate", "new", "create", "import", "help"],
         "stdout was:\n{}",
         nested_help.stdout
     );
