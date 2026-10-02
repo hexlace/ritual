@@ -785,7 +785,11 @@ mod tests {
         let reported = fail_after(|changes| {
             changes.reserve_directory(&lint)?;
             changes.reserve_directory(&format)?;
-            std::fs::write(lint.join("Cargo.toml"), "[package]\n")
+            // As `add` fills its directory: creating what is already there
+            // is not an error.
+            std::fs::create_dir_all(&lint)
+                .and_then(|()| std::fs::create_dir_all(&format))
+                .and_then(|()| std::fs::write(lint.join("Cargo.toml"), "[package]\n"))
                 .and_then(|()| std::fs::write(format.join("Cargo.toml"), "[package]\n"))
                 .map_err(|error| Failure::new("setup").caused_by(error))
         });
@@ -807,7 +811,8 @@ mod tests {
         let reported = fail_after(|changes| {
             changes.reserve_directory(&outer)?;
             changes.reserve_directory(&inner)?;
-            std::fs::write(outer.join("outer.txt"), "outer\n")
+            std::fs::create_dir_all(&inner)
+                .and_then(|()| std::fs::write(outer.join("outer.txt"), "outer\n"))
                 .and_then(|()| std::fs::write(inner.join("inner.txt"), "inner\n"))
                 .map_err(|error| Failure::new("setup").caused_by(error))
         });
@@ -830,7 +835,8 @@ mod tests {
 
         let _ = fail_after(|changes| {
             changes.reserve_directory(&task)?;
-            std::fs::write(task.join("Cargo.toml"), "[package]\n")
+            std::fs::create_dir_all(&task)
+                .and_then(|()| std::fs::write(task.join("Cargo.toml"), "[package]\n"))
                 .map_err(|error| Failure::new("setup").caused_by(error))
         });
 
