@@ -428,9 +428,10 @@ The steps, in order:
    are two crates to Rust, whatever their versions, and the generated file
    hands one's `Task` to the other's `run`. The task crate has to name
    `rituals` as a direct dependency, because that is the `rituals` ritual can
-   read: a crate that only re-exports another crate's task builds, but which
-   `rituals` it hands over is a step further away than the check looks. A
-   crate that is not one is refused.
+   read. A crate that only re-exports another crate's task does build, but
+   the `rituals` that task is built on belongs to the crate it re-exports
+   from, which the check does not reach. A crate that is not one is
+   refused.
 5. **The append.** The key joins `[package.metadata.ritual] tasks`.
 6. **Regenerate**, once the run has committed. If it fails, the failure says
    the task is imported and names the `regenerate` command that finishes it.
