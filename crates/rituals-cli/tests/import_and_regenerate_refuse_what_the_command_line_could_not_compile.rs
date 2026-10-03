@@ -1,7 +1,7 @@
 //! `import` and `regenerate` refuse a task the generated command line could
 //! not compile with: a task built on a different `rituals` from the one the
 //! project uses, and a key that would hide a crate the generated file names
-//! (`std` or `core`). Once such a task were written, the command line would
+//! (`std` or `core`), which `add` refuses too. Once such a task were written, the command line would
 //! no longer build, and with it the `remove` that would take the task back
 //! out, so the refusal has to come first.
 //!
@@ -10,7 +10,7 @@
 //! anything runs, and a task once `cargo add` has said what it is built on,
 //! with what `cargo add` wrote put back. `regenerate` refuses the same task
 //! written in by hand, through the same rule, and leaves the generated file
-//! as it was.
+//! as it was. `add` refuses such a key before it scaffolds anything.
 
 mod support;
 
@@ -229,6 +229,28 @@ fn regenerate_refuses_a_hand_written_task_under_std_or_core() -> TestOutcome {
                 refused_leaving_the_project_as_it_was(&project, &binary, &["regenerate"])?;
 
             assert_eq!(message, hides_a_crate(key));
+        }
+        Ok(())
+    })
+}
+
+#[test]
+fn add_refuses_the_names_std_and_core() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("add-std-core")?;
+        let project = Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
+        let binary = project.build()?;
+
+        for name in ["std", "core"] {
+            let message = refused_leaving_the_project_as_it_was(&project, &binary, &["add", name])?;
+
+            assert_eq!(message, hides_a_crate(name));
+            let task_crate_dir = project.root().join("tasks").join(name);
+            assert!(
+                !task_crate_dir.exists(),
+                "a refused `add {name}` must not scaffold {}",
+                task_crate_dir.display()
+            );
         }
         Ok(())
     })

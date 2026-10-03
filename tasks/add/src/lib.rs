@@ -11,7 +11,7 @@ use import::Import;
 use rituals::{CommandLine, Failure, Name, Outcome, Task, clap};
 use rituals_compose::manifest::{self, Manifest};
 use rituals_compose::rust_name::other_spelling_clause;
-use rituals_compose::{metadata, top_level};
+use rituals_compose::{generated_file, metadata, top_level};
 
 /// `add`'s one argument: the name the new task will answer to.
 #[derive(clap::Args)]
@@ -43,8 +43,11 @@ fn run(command_line: &CommandLine, arguments: &AddArguments) -> Outcome {
 }
 
 /// Validates `name` first, since it is the one input here a person typed
-/// directly rather than something already trusted by construction, then weighs
-/// it against the bin name the running command line was built as, then against
+/// directly rather than something already trusted by construction, then asks
+/// it the key rule every writer of a key asks: a key that would hide `std` or
+/// `core` leaves a command line that cannot compile, and so cannot run the
+/// `regenerate` or `remove` that would take it back out. Then weighs it
+/// against the bin name the running command line was built as, then against
 /// that *running* command line's own top level — each cheaper and more specific
 /// than the next, none of them needing a subprocess, and each a fact about the
 /// name itself rather than about the project's wider state. The bin-name check
@@ -55,7 +58,7 @@ fn run(command_line: &CommandLine, arguments: &AddArguments) -> Outcome {
 /// `already_imported_refusal` below: in a default-scaffolded project the bundle
 /// is already imported under that key, and that refusal would otherwise answer
 /// a different question — "already a task" rather than "that slot has to be a
-/// bundle" — with the wrong remedy. Every check after these three runs against
+/// bundle" — with the wrong remedy. Every check after these four runs against
 /// the project itself, once `cargo metadata` has been fetched, in this order:
 /// `name` is not already imported, `tasks/<name>` is not a leftover directory,
 /// no workspace member is already called `name`, the project's *existing* task
@@ -68,6 +71,7 @@ fn run(command_line: &CommandLine, arguments: &AddArguments) -> Outcome {
 /// nothing is written until every refusal here has passed.
 fn prepare(command_line: &CommandLine, arguments: &AddArguments) -> Result<Import, Failure> {
     let name = Name::new(&arguments.name)?;
+    generated_file::ensure_key_hides_no_crate(&name)?;
     ensure_the_name_is_not_the_bin_name(&name, command_line.identity().binary_name())?;
     top_level::ensure_command_is_free(command_line, name.as_str())?;
     let package = command_line.identity().package_name();
