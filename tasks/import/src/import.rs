@@ -59,11 +59,9 @@ impl Import {
         // itself is only known once `cargo add` has resolved it, wherever it
         // came from. Its refusal is returned as it is: it already says what
         // is wrong and what to do, and the rollback adds that nothing changed.
-        //
-        // This is `fetch`, not `fetch_in_its_own_project`: the project is
-        // known to be this one, and the lockfile it may write was recorded
-        // before the first fetch, which `record_file` keeps.
-        metadata::fetch(&self.current_dir)?
+        // The project is known to be this one by now, so there is nothing
+        // more to check about where it runs.
+        metadata::fetch_recording(changes, &self.current_dir)?
             .ensure_dependency_is_a_task(&self.package, &self.key)?;
 
         let mut cli_manifest = Manifest::read(&self.cli_manifest_path)?;

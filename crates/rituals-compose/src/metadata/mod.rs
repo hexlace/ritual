@@ -19,7 +19,7 @@ use rituals::{Failure, Name, Outcome};
 use crate::cargo;
 use crate::generated_file::Entry;
 use crate::rollback::Changes;
-use crate::workspace::{Located, locate_project};
+use crate::workspace::{self, Located, locate_project};
 
 pub use schema::Metadata;
 pub(crate) use schema::{Declared, DepKind, Dependency, Node, NodeDependency, Package};
@@ -48,11 +48,9 @@ const SUPPORTED_FORMAT_VERSION: u64 = 1;
 ///
 /// Cargo writes `Cargo.lock` here when the workspace has none, and rewrites
 /// it when it is stale. A task that has to leave the project as it found it
-/// when it fails therefore records the lockfile before this call.
-/// [`fetch_in_its_own_project`] does that recording, so a task that has not
-/// recorded the lockfile already should fetch through it; a caller that is
-/// already inside a run with the lockfile recorded may call this function
-/// directly.
+/// when it fails fetches through [`fetch_recording`] or
+/// [`fetch_in_its_own_project`] instead, which record the lockfile first.
+/// This one is for a run that makes no such promise.
 ///
 /// Invokes the cargo that launched this process, through [`cargo::command`],
 /// so a nested call never uses a different cargo than the one in charge. No flags beyond
@@ -100,26 +98,61 @@ pub fn fetch(current_dir: &Path) -> Result<Metadata, Failure> {
     parse(&output.stdout)
 }
 
+/// Fetches the metadata of the project `directory` is in, recording the
+/// lockfile that fetch may write.
+///
+/// [`fetch`] for a run that promises to leave the project as it found it:
+/// `cargo metadata` creates `Cargo.lock` when there is none and rewrites it
+/// when it is stale, so the lockfile it would write, the one
+/// [`workspace::lockfile`](crate::workspace::lockfile) finds, is recorded in
+/// `changes` before the fetch, and a run that fails afterwards puts it back.
+/// Taking `changes` is what makes the call impossible to make without the
+/// record. A lockfile the run has recorded already keeps its first record,
+/// so fetching again later in the run is the same call.
+///
+/// # Errors
+///
+/// Returns a [`Failure`] with Cargo's own words when it finds no workspace
+/// for `directory`, and [`fetch`]'s own failure when `cargo metadata`
+/// cannot be run, fails for another reason, or answers with something this
+/// framework does not understand.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+///
+/// use rituals_compose::{metadata, rollback};
+///
+/// // Shells out to a real `cargo metadata` and needs a workspace on disk
+/// // to run against, so this example is `no_run`.
+/// let members = rollback::attempt("running `remove lint` again", |changes| {
+///     let document = metadata::fetch_recording(changes, Path::new("."))?;
+///     // ... a refusal from here on leaves the lockfile as it was found.
+///     Ok(document.member_directories().len())
+/// })?;
+/// println!("{members} members");
+/// # Ok::<(), rituals::Failure>(())
+/// ```
+pub fn fetch_recording(changes: &mut Changes, directory: &Path) -> Result<Metadata, Failure> {
+    let lockfile = workspace::lockfile(directory)?;
+    changes.run_changing(&[lockfile.as_path()], || fetch(directory))
+}
+
 /// Fetches the metadata of the project `current_dir` is in, recording the
 /// lockfile that fetch may write, and refuses unless that project is the one
 /// `package_name` belongs to.
 ///
-/// [`fetch`] followed by [`Metadata::ensure_runs_in_its_own_project`], for a
-/// task that promises to leave the project as it found it: `cargo metadata`
-/// creates `Cargo.lock` when there is none and rewrites it when it is stale,
-/// so the workspace's lockfile is recorded in `changes` before the fetch, and
-/// a run that fails afterwards puts it back. Taking `changes` is what makes
-/// the call impossible to make without the record.
-///
-/// The workspace is found first, with `cargo locate-project`, which writes
-/// nothing: the lockfile is the root's, and the root is only known from
-/// Cargo. Where Cargo finds no workspace, `cargo metadata` is not run at all,
-/// so nothing unrecorded can be written. If it finds no manifest either,
-/// there is no Cargo project, and the refusal is the one a project that is
-/// not this one gets, which names the command to run inside the right one,
-/// where Cargo's own words say what is missing and nothing about what to do.
-/// A manifest Cargo finds but cannot place in a workspace keeps Cargo's own
-/// words, which say what is wrong with it.
+/// [`fetch_recording`] followed by
+/// [`Metadata::ensure_runs_in_its_own_project`], for a task that runs only
+/// inside its own project and promises to leave it as it found it. Where
+/// Cargo finds no manifest at or above `current_dir` there is no Cargo
+/// project, and the refusal is the one a project that is not this one gets,
+/// which names the command to run inside the right one, where Cargo's own
+/// words say what is missing and nothing about what to do. That is asked
+/// with `cargo locate-project`, which writes nothing, so `cargo metadata` is
+/// not run at all. A manifest Cargo finds but cannot place in a workspace
+/// keeps Cargo's own words, which say what is wrong with it.
 ///
 /// `command` and `arguments` are what the person typed after the binary's
 /// name, as for [`Metadata::ensure_runs_in_its_own_project`].
@@ -128,10 +161,8 @@ pub fn fetch(current_dir: &Path) -> Result<Metadata, Failure> {
 ///
 /// Returns a [`Failure`] that names the command to run instead when there is
 /// no Cargo manifest at or above `current_dir`, or when no workspace member
-/// is called `package_name`, one carrying Cargo's own words when a manifest
-/// is found but no workspace for it, and [`fetch`]'s own failure when `cargo
-/// metadata` cannot be run, fails for another reason, or answers with
-/// something this framework does not understand.
+/// is called `package_name`, and [`fetch_recording`]'s own failure
+/// otherwise.
 ///
 /// # Examples
 ///
@@ -163,20 +194,12 @@ pub fn fetch_in_its_own_project(
     command: &str,
     arguments: &str,
 ) -> Result<Metadata, Failure> {
-    match locate_project(current_dir, true)? {
-        Located::Found(workspace_manifest) => {
-            let lockfile = workspace_manifest.with_file_name("Cargo.lock");
-            let document = changes.run_changing(&[lockfile.as_path()], || fetch(current_dir))?;
-            document.ensure_runs_in_its_own_project(package_name, command, arguments)?;
-            Ok(document)
-        }
-        Located::NotFound(no_workspace) => match locate_project(current_dir, false)? {
-            Located::Found(_nearest_manifest) => Err(Failure::new(format!(
-                "cargo locate-project failed: {no_workspace}"
-            ))),
-            Located::NotFound(_no_manifest) => Err(outside_its_project_refusal(command, arguments)),
-        },
+    if let Located::NotFound(_no_manifest) = locate_project(current_dir, false)? {
+        return Err(outside_its_project_refusal(command, arguments));
     }
+    let document = fetch_recording(changes, current_dir)?;
+    document.ensure_runs_in_its_own_project(package_name, command, arguments)?;
+    Ok(document)
 }
 
 /// Asks Cargo what the package whose manifest is `manifest_path` declares,

@@ -195,11 +195,11 @@ pub fn regenerate(command_line: &CommandLine) -> Outcome {
 /// `directory` is where `cargo metadata` runs, as [`regenerate`] runs it
 /// from the current directory; any directory of the project will do.
 /// `cargo metadata` creates or rewrites `Cargo.lock` when it is missing or
-/// behind the manifests, so before it runs, the lockfile it would write is
-/// found with [`workspace::lockfile`](crate::workspace::lockfile) and
-/// recorded in `changes`: the workspace root's, whichever directory
-/// `directory` is. The caller has already checked that this command line
-/// runs inside its own project; this does not repeat the check.
+/// behind the manifests, so it runs through
+/// [`metadata::fetch_recording`](crate::metadata::fetch_recording), which
+/// records the workspace root's lockfile in `changes` first, whichever
+/// directory `directory` is. The caller has already checked that this
+/// command line runs inside its own project; this does not repeat the check.
 ///
 /// # Errors
 ///
@@ -236,8 +236,7 @@ pub fn regenerate_recording(
     command_line: &CommandLine,
     directory: &Path,
 ) -> Result<Regenerated, Failure> {
-    let lockfile = crate::workspace::lockfile(directory)?;
-    let document = changes.run_changing(&[lockfile.as_path()], || metadata::fetch(directory))?;
+    let document = metadata::fetch_recording(changes, directory)?;
 
     regenerate_from(command_line, &document, |path, content| {
         changes.write(path, content)

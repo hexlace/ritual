@@ -14,7 +14,7 @@ use arguments::ImportArguments;
 use import::Import;
 use rituals::{CommandLine, Failure, Name, Outcome, Task};
 use rituals_compose::rollback::{self, Changes};
-use rituals_compose::{metadata, top_level};
+use rituals_compose::{metadata, top_level, workspace};
 
 /// This task, for a command line to mount under whatever name imports it.
 ///
@@ -112,7 +112,7 @@ fn prepare(
         current_dir: current_dir.to_path_buf(),
         workspace_root: project.workspace_root().to_path_buf(),
         cli_manifest_path: project.manifest_path().to_path_buf(),
-        lockfile_path: project.workspace_root().join("Cargo.lock"),
+        lockfile_path: workspace::lockfile(current_dir)?,
     })
 }
 
