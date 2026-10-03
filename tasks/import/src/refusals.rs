@@ -98,7 +98,7 @@ pub(crate) fn already_imported_refusal(
             "`{package}` already has a dependency called `{key}`{other_spelling} that is not in \
              [package.metadata.ritual] tasks; import this crate under another key, or, to make \
              that dependency the task, add `\"{key}\"` to that list and run `{regenerate}`",
-            other_spelling = other_spelling_clause(key.as_str()),
+            other_spelling = other_spelling_clause(key),
         ))),
         (false, true) => Err(Failure::new(format!(
             "`{key}` is named in [package.metadata.ritual] tasks but `{package}` has no \

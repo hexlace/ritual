@@ -6,6 +6,8 @@
 //! reports, or tells a person about the other spelling, goes through here, so
 //! the rule is written once.
 
+use rituals::Name;
+
 /// Returns the name Rust sees for a dependency key or package name: the
 /// spelling with every hyphen read as an underscore.
 ///
@@ -22,22 +24,29 @@ pub fn extern_identifier(spelling: &str) -> String {
     spelling.replace('-', "_")
 }
 
-/// Returns the clause that tells a person the other spelling of `spelling`,
-/// led by a space, or an empty string when there is no other spelling.
+/// Returns the clause that tells a person the other spelling of `name`, led
+/// by a space, or an empty string when there is no other spelling.
+///
+/// A [`Name`] holds no underscore, so the other spelling of one with a
+/// hyphen is always the identifier Rust reads it as, and one with no hyphen
+/// has none.
 ///
 /// # Examples
 ///
 /// ```
+/// use rituals::Name;
 /// use rituals_compose::rust_name::other_spelling_clause;
 ///
 /// assert_eq!(
-///     other_spelling_clause("a-b"),
+///     other_spelling_clause(&Name::new("a-b")?),
 ///     " (or `a_b`, which Rust reads as the same name)"
 /// );
-/// assert_eq!(other_spelling_clause("ab"), "");
+/// assert_eq!(other_spelling_clause(&Name::new("ab")?), "");
+/// # Ok::<(), rituals::InvalidName>(())
 /// ```
 #[must_use]
-pub fn other_spelling_clause(spelling: &str) -> String {
+pub fn other_spelling_clause(name: &Name) -> String {
+    let spelling = name.as_str();
     let identifier = extern_identifier(spelling);
     if identifier == spelling {
         String::new()
@@ -48,6 +57,8 @@ pub fn other_spelling_clause(spelling: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use rituals::Name;
+
     use super::{extern_identifier, other_spelling_clause};
 
     #[test]
@@ -62,11 +73,12 @@ mod tests {
     }
 
     #[test]
-    fn the_other_spelling_is_named_only_when_there_is_one() {
+    fn the_other_spelling_is_named_only_when_there_is_one() -> Result<(), rituals::InvalidName> {
         assert_eq!(
-            other_spelling_clause("a-b"),
+            other_spelling_clause(&Name::new("a-b")?),
             " (or `a_b`, which Rust reads as the same name)"
         );
-        assert_eq!(other_spelling_clause("a_b"), "");
+        assert_eq!(other_spelling_clause(&Name::new("ab")?), "");
+        Ok(())
     }
 }

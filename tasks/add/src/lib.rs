@@ -238,7 +238,7 @@ fn already_imported_refusal(
             "`{package}` already has a dependency called `{name}`{other_spelling} that is not in \
              [package.metadata.ritual] tasks; add `\"{name}\"` to that list and run \
              `{regenerate}`",
-            other_spelling = other_spelling_clause(name.as_str()),
+            other_spelling = other_spelling_clause(name),
         ))),
         (false, true) => Err(Failure::new(format!(
             "`{name}` is named in [package.metadata.ritual] tasks but `{package}` has no \
