@@ -85,12 +85,14 @@ const INCLUDE_EXTENSION: &str = "toml";
 ///
 /// # Errors
 ///
-/// Returns a [`Failure`] naming a configuration file that Cargo would
-/// refuse too: one that exists but cannot be read or is not valid TOML, an
-/// `include` that is not a list of paths and `{ path, optional }` tables or
-/// names a file that is not `.toml`, an include that is not `optional` of a
-/// file that does not exist, and a file included twice from one starting
-/// file, which Cargo calls a cycle.
+/// Returns a [`Failure`] naming a configuration file that Cargo refuses
+/// too: one that exists but cannot be read or is not valid TOML; and,
+/// wherever Cargo reads `include`, an `include` that is not a list of paths
+/// and `{ path, optional }` tables or names a file that is not `.toml`, an
+/// include that is not `optional` of a file that does not exist, and a file
+/// included twice from one starting file, which Cargo calls a cycle. A
+/// Cargo too old to read `include` ignores some of these; they are refused
+/// there too, because any Cargo that reads `include` refuses the project.
 pub fn entries_pointing_under(starts: &[&Path], directory: &Path) -> Result<Vec<String>, Failure> {
     let cargo_home = std::env::var_os("CARGO_HOME")
         .map(PathBuf::from)
@@ -161,7 +163,7 @@ fn entries_through(file: PathBuf, directory: &Path) -> Result<Vec<String>, Failu
         if seen.contains(&file) {
             return Err(Failure::new(format!(
                 "{} is included twice from one configuration file, which Cargo refuses as a \
-                 cycle",
+                 cycle wherever it reads `include`",
                 file.display()
             )));
         }
@@ -170,8 +172,9 @@ fn entries_through(file: PathBuf, directory: &Path) -> Result<Vec<String>, Failu
             match required_by {
                 Some(includer) => {
                     return Err(Failure::new(format!(
-                        "{} includes {}, which does not exist, and Cargo refuses an include \
-                         that is not `optional` when its file is missing",
+                        "{} includes {}, which does not exist, and wherever Cargo reads \
+                         `include` it refuses one that is not `optional` when its file is \
+                         missing",
                         includer.display(),
                         file.display()
                     )));
@@ -259,7 +262,7 @@ fn includes(document: &DocumentMut, file: &Path) -> Result<Vec<Include>, Failure
     let unreadable = || {
         Failure::new(format!(
             "`include` in {} is not a list of paths and `{{ path, optional }}` tables, which \
-             Cargo refuses",
+             Cargo refuses wherever it reads `include`",
             file.display()
         ))
     };
