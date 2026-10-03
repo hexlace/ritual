@@ -109,7 +109,9 @@ fn prepare(
 
     // Dropped only when nothing else depends on the crate: another package's
     // own dependency on it would otherwise stop inheriting.
-    let drops_inherited_entry = manifests.cli().inherits_workspace_dependency(import.key())
+    let drops_inherited_entry = import
+        .dependency_key()
+        .is_some_and(|key| manifests.cli().inherits_workspace_dependency(key))
         && import.other_dependents().is_empty();
 
     let member = match (import.directory(), import.is_workspace_member()) {
@@ -122,7 +124,9 @@ fn prepare(
                 workspace_root: &workspace_root,
                 current_dir,
                 manifests: &manifests,
-                dropped_workspace_dependency: drops_inherited_entry.then(|| import.key()),
+                dropped_workspace_dependency: import
+                    .dependency_key()
+                    .filter(|_| drops_inherited_entry),
             },
             &format!("{remove_command} {}", arguments.name),
         )?),
@@ -131,7 +135,7 @@ fn prepare(
 
     Ok(Removal {
         key: import.key().to_string(),
-        has_dependency: import.package_name().is_some(),
+        dependency_key: import.dependency_key().map(str::to_string),
         drops_inherited_entry,
         manifests,
         workspace_root,

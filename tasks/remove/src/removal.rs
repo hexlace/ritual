@@ -92,8 +92,10 @@ pub(crate) struct Removal {
     pub(crate) key: String,
     pub(crate) manifests: Manifests,
     pub(crate) workspace_root: PathBuf,
-    /// Whether a normal dependency of the composed CLI has this key.
-    pub(crate) has_dependency: bool,
+    /// The key the composed CLI's normal dependency for this task is
+    /// written under, `None` when it has none. Rust reads `-` and `_` in a
+    /// key as one name, so it can be [`Removal::key`]'s other spelling.
+    pub(crate) dependency_key: Option<String>,
     /// Whether the `[workspace.dependencies]` entry the dependency inherits
     /// goes too, because nothing else in the workspace depends on it.
     pub(crate) drops_inherited_entry: bool,
@@ -152,21 +154,20 @@ impl Removal {
     /// entry, and writes what changed. Returns whether a workspace manifest
     /// that is a different file from the composed CLI's was written.
     fn take_out_dependency(&mut self, changes: &mut Changes) -> Result<bool, Failure> {
-        if !self.has_dependency {
+        let Some(dependency_key) = &self.dependency_key else {
             return Ok(false);
-        }
-        if !self.manifests.cli_mut().remove_dependency(&self.key) {
+        };
+        if !self.manifests.cli_mut().remove_dependency(dependency_key) {
             return Err(Failure::new(format!(
-                "{} has no dependency called `{}` to remove",
+                "{} has no dependency called `{dependency_key}` to remove",
                 self.manifests.cli().path().display(),
-                self.key
             )));
         }
 
         let workspace = self.manifests.workspace_mut();
         let mut edited = false;
         if self.drops_inherited_entry {
-            edited |= workspace.remove_workspace_dependency(&self.key);
+            edited |= workspace.remove_workspace_dependency(dependency_key);
         }
         if let Some(member) = &self.member {
             edited |= workspace.remove_workspace_member(&member.directory);
@@ -408,7 +409,7 @@ mod tests {
                 key: "lint".to_string(),
                 manifests: Manifests::read(&self.cli_manifest_path, &self.workspace_manifest_path)?,
                 workspace_root: self.workspace_root.clone(),
-                has_dependency: true,
+                dependency_key: Some("lint".to_string()),
                 drops_inherited_entry: true,
                 member: Some(Member {
                     directory: self.workspace_root.join("tasks/lint"),
@@ -581,7 +582,7 @@ mod tests {
     fn a_key_with_no_dependency_leaves_the_manifests_alone() -> TestOutcome {
         let project = ScratchProject::new("no-dependency")?;
         let mut removal = project.removal()?;
-        removal.has_dependency = false;
+        removal.dependency_key = None;
         removal.member = None;
         let workspace_before = std::fs::read_to_string(&project.workspace_manifest_path)?;
 
