@@ -104,7 +104,7 @@ pub fn fetch(current_dir: &Path) -> Result<Metadata, Failure> {
 /// [`fetch`] for a run that promises to leave the project as it found it:
 /// `cargo metadata` creates `Cargo.lock` when there is none and rewrites it
 /// when it is stale, so the lockfile it would write, the one
-/// [`workspace::lockfile`](crate::workspace::lockfile) finds, is recorded in
+/// [`workspace::lockfile`] finds, is recorded in
 /// `changes` before the fetch, and a run that fails afterwards puts it back.
 /// Taking `changes` is what makes the call impossible to make without the
 /// record. A lockfile the run has recorded already keeps its first record,
