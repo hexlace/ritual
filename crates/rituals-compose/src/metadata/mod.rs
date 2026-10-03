@@ -139,20 +139,17 @@ pub fn fetch_recording(changes: &mut Changes, directory: &Path) -> Result<Metada
     changes.run_changing(&[lockfile.as_path()], || fetch(directory))
 }
 
-/// Fetches the metadata of the project `current_dir` is in, recording the
-/// lockfile that fetch may write, and refuses unless that project is the one
-/// `package_name` belongs to.
+/// Refuses when Cargo finds no manifest at or above `current_dir`, so there
+/// is no Cargo project there at all.
 ///
-/// [`fetch_recording`] followed by
-/// [`Metadata::ensure_runs_in_its_own_project`], for a task that runs only
-/// inside its own project and promises to leave it as it found it. Where
-/// Cargo finds no manifest at or above `current_dir` there is no Cargo
-/// project, and the refusal is the one a project that is not this one gets,
-/// which names the command to run inside the right one, where Cargo's own
-/// words say what is missing and nothing about what to do. That is asked
-/// with `cargo locate-project`, which writes nothing, so `cargo metadata` is
-/// not run at all. A manifest Cargo finds but cannot place in a workspace
-/// keeps Cargo's own words, which say what is wrong with it.
+/// The refusal is the one a project that is not this one gets from
+/// [`fetch_in_its_own_project`], which names the command to run inside the
+/// right one, where Cargo's own words say what is missing and nothing about
+/// what to do. It is asked with `cargo locate-project`, which writes
+/// nothing, so a task asks it before its run begins: with no project there
+/// is nothing a run could put back, and a refusal from inside one would say
+/// it put the project back. A manifest Cargo finds but cannot place in a
+/// workspace keeps Cargo's own words, which say what is wrong with it.
 ///
 /// `command` and `arguments` are what the person typed after the binary's
 /// name, as for [`Metadata::ensure_runs_in_its_own_project`].
@@ -160,9 +157,46 @@ pub fn fetch_recording(changes: &mut Changes, directory: &Path) -> Result<Metada
 /// # Errors
 ///
 /// Returns a [`Failure`] that names the command to run instead when there is
-/// no Cargo manifest at or above `current_dir`, or when no workspace member
-/// is called `package_name`, and [`fetch_recording`]'s own failure
-/// otherwise.
+/// no Cargo manifest at or above `current_dir`, and one saying so when
+/// `cargo` cannot be run at all.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+///
+/// use rituals_compose::metadata;
+///
+/// // Runs `cargo locate-project` against the directory on disk, so this
+/// // example is `no_run`.
+/// metadata::ensure_inside_a_project(Path::new("."), "import", "greeter")?;
+/// # Ok::<(), rituals::Failure>(())
+/// ```
+pub fn ensure_inside_a_project(current_dir: &Path, command: &str, arguments: &str) -> Outcome {
+    match locate_project(current_dir, false)? {
+        Located::NotFound(_no_manifest) => Err(outside_its_project_refusal(command, arguments)),
+        Located::Found(_manifest) => Ok(()),
+    }
+}
+
+/// Fetches the metadata of the project `current_dir` is in, recording the
+/// lockfile that fetch may write, and refuses unless that project is the one
+/// `package_name` belongs to.
+///
+/// [`fetch_recording`] followed by
+/// [`Metadata::ensure_runs_in_its_own_project`], for a task that runs only
+/// inside its own project and promises to leave it as it found it. A task
+/// asks [`ensure_inside_a_project`] first, before its run begins; called
+/// where there is no project at all, this fails with Cargo's own words.
+///
+/// `command` and `arguments` are what the person typed after the binary's
+/// name, as for [`Metadata::ensure_runs_in_its_own_project`].
+///
+/// # Errors
+///
+/// Returns a [`Failure`] that names the command to run instead when no
+/// workspace member is called `package_name`, and [`fetch_recording`]'s own
+/// failure otherwise.
 ///
 /// # Examples
 ///
@@ -194,9 +228,6 @@ pub fn fetch_in_its_own_project(
     command: &str,
     arguments: &str,
 ) -> Result<Metadata, Failure> {
-    if let Located::NotFound(_no_manifest) = locate_project(current_dir, false)? {
-        return Err(outside_its_project_refusal(command, arguments));
-    }
     let document = fetch_recording(changes, current_dir)?;
     document.ensure_runs_in_its_own_project(package_name, command, arguments)?;
     Ok(document)
@@ -675,7 +706,10 @@ mod tests {
 
     use rituals::{Failure, Name};
 
-    use super::{Metadata, fetch_in_its_own_project, outside_its_project_refusal, parse};
+    use super::{
+        Metadata, ensure_inside_a_project, fetch_in_its_own_project, outside_its_project_refusal,
+        parse,
+    };
     use crate::rollback::attempt;
     use crate::test_support::{ScratchDir, TestOutcome};
 
@@ -728,6 +762,8 @@ mod tests {
         })
     }
 
+    /// Asked before any run begins, so the refusal is the whole message: it
+    /// does not say a project was put back where there is none.
     #[test]
     fn outside_any_workspace_the_refusal_says_to_work_inside_a_project() -> TestOutcome {
         // Cargo's own words here are "could not find `Cargo.toml`", which
@@ -735,16 +771,26 @@ mod tests {
         // run inside their project instead.
         let scratch = ScratchDir::new("fetch-outside-any-workspace")?;
 
-        let outcome = fetch_in_a_run(scratch.path(), "demo-ritual");
+        let outcome = ensure_inside_a_project(scratch.path(), "import", "greeter");
 
         assert_eq!(
-            outcome.err().as_deref(),
-            Some(
-                outside_its_project_refusal("import", "greeter")
-                    .to_string()
-                    .as_str()
-            ),
-            "expected a directory with no project to be refused"
+            outcome.err().map(|failure| failure.to_string()),
+            Some(outside_its_project_refusal("import", "greeter").to_string()),
+            "expected a directory with no project to be refused, with nothing after the \
+             refusal"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn inside_a_project_the_check_passes_and_writes_nothing() -> TestOutcome {
+        let scratch = scratch_package("ensure-inside-a-project")?;
+
+        ensure_inside_a_project(scratch.path(), "import", "greeter")?;
+
+        assert!(
+            !scratch.path().join("Cargo.lock").exists(),
+            "asking whether there is a project writes no lockfile"
         );
         Ok(())
     }

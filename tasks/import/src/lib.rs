@@ -41,10 +41,12 @@ fn run(command_line: &CommandLine, arguments: &ImportArguments) -> Outcome {
     // run no subprocess, so a refusal of the key leaves nothing to put back
     // and is not in the attempt. That includes a key that would hide `std`
     // or `core`, which the task check after `cargo add` refuses too, but only
-    // once Cargo has run.
+    // once Cargo has run. Nor is the refusal for running where there is no
+    // project at all in the attempt, since there is nothing to put back.
     let key = arguments.key(&import_command, &current_dir)?;
     generated_file::ensure_key_hides_no_crate(&key)?;
     let again = arguments.to_run_again(&current_dir);
+    metadata::ensure_inside_a_project(&current_dir, "import", &again)?;
 
     let import = rollback::attempt(&import::retry(&again), |changes| {
         let import = prepare(command_line, arguments, &current_dir, key, &again, changes)?;
@@ -126,7 +128,7 @@ mod tests {
     use rituals::{CommandLine, Identity};
 
     use rituals::Failure;
-    use rituals_compose::{generated_file, rollback};
+    use rituals_compose::{generated_file, metadata, rollback};
 
     use super::{Import, prepare};
     use crate::test_support::{
@@ -136,9 +138,9 @@ mod tests {
     /// What the rollback appends to a failure of the run `prepare` is in.
     const PUT_BACK: &str = "; ritual put the project back as it found it";
 
-    /// `prepare` as `run` calls it: the key decided first, outside the
-    /// attempt, and the rest inside the attempt that begins at the first
-    /// subprocess.
+    /// `prepare` as `run` calls it: the key and whether there is a project
+    /// at all decided first, outside the attempt, and the rest inside the
+    /// attempt that begins at the first subprocess.
     fn prepared(
         command_line: &CommandLine,
         words: &[&str],
@@ -148,6 +150,7 @@ mod tests {
         let key = arguments.key("cargo ritual import", current_dir)?;
         generated_file::ensure_key_hides_no_crate(&key)?;
         let again = arguments.to_run_again(current_dir);
+        metadata::ensure_inside_a_project(current_dir, "import", &again)?;
         rollback::attempt("running `import` again", |changes| {
             prepare(command_line, &arguments, current_dir, key, &again, changes)
         })
@@ -310,6 +313,32 @@ mod tests {
                 .as_deref()
                 .is_some_and(|message| message.starts_with("`my_crate` is not a usable name;")),
             "expected the key's refusal first; got: {message:?}"
+        );
+        Ok(())
+    }
+
+    /// Outside any project the refusal is made before the run begins, so it
+    /// does not end by saying a project was put back.
+    #[test]
+    fn outside_any_project_the_refusal_says_nothing_was_put_back() -> TestOutcome {
+        let empty = ScratchDir::new("prepare-outside-no-rollback")?;
+
+        let failure = prepared(
+            &default_command_line(),
+            &["greeter", "--path", "../greeter"],
+            empty.path(),
+        )
+        .err()
+        .ok_or("expected the import to be refused outside a project")?;
+
+        let message = failure.to_string();
+        assert!(
+            message.starts_with("`import` works inside the project"),
+            "expected the outside-project refusal; got: {message}"
+        );
+        assert!(
+            !message.contains("put the project back"),
+            "nothing was put back where there is no project; got: {message}"
         );
         Ok(())
     }
