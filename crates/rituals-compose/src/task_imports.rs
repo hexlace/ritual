@@ -377,7 +377,7 @@ fn members_inside<'a>(
         .filter(|package| {
             package.id != resolved.id
                 && metadata.workspace_members.contains(&package.id)
-                && package.manifest_path.starts_with(directory)
+                && lies_under(&package.manifest_path, directory)
         })
         .map(|package| package.name.as_str())
         .collect()

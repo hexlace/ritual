@@ -437,6 +437,21 @@ build can start from — the one `remove` runs in, the workspace root, and
 each member's — and in every directory above them, then the one in
 `$CARGO_HOME`, and every file each of those includes, at any depth.
 
+A path points into the directory when the filesystem says it does, not when
+its text matches. Cargo opens paths through the filesystem, so `Tasks/Lint`
+on a file system that folds case, `alias/lint` when `alias` links to `tasks`,
+and an absolute path through a link above the project all name `tasks/lint`
+to it. So each path is followed a component at a time, through symbolic
+links, and compared with the directory by file identity. When the directory
+is itself a link, a path through the link points into it and a path to its
+target does not, because deleting the link leaves the target. Cargo removes
+`.` and `..` as text before it opens a dependency's, a `[patch]`'s, a `paths`
+override's, a member's or a target's path, and opens an `include` as written,
+so a `..` after a link goes up from the link's own directory in the first and
+from where the link leads in the second; each is followed the way Cargo
+follows it. Past a component that does not exist the filesystem has no
+answer, and the rest is compared as text.
+
 **Git decides whether a directory can be deleted.** Before deleting, `remove`
 asks git for every file under the directory: staged and unstaged changes,
 untracked files and ignored files all count. If any exist it refuses and

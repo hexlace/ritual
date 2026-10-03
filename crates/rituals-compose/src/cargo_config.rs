@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 use rituals::Failure;
 use toml_edit::{DocumentMut, Item, TableLike, Value};
 
-use crate::paths::lies_under;
+use crate::paths::{lies_under, opens_through};
 
 /// The names Cargo reads a configuration file under, in a `.cargo`
 /// directory or in `$CARGO_HOME`, in the order it prefers them: it reads the
@@ -191,7 +191,9 @@ fn entries_through(file: PathBuf, directory: &Path) -> Result<Vec<String>, Failu
         let mut included = Vec::new();
         for Include { path, optional } in includes(&document, &file)? {
             let target = holder.join(&path);
-            if lies_under(&target, directory) {
+            // Opened as written, so a `..` after a link goes up from where
+            // the link leads.
+            if opens_through(&target, directory) {
                 // Gone with the directory: Cargo skips an `optional` file it
                 // cannot find, and refuses to build without any other.
                 if !optional {
