@@ -433,9 +433,15 @@ lockfile.
 
 Cargo's configuration is read the way Cargo reads it: the `.cargo/config`
 file, or `.cargo/config.toml` when there is none, in every directory a
-build can start from — the one `remove` runs in, the workspace root, and
-each member's — and in every directory above them, then the one in
-`$CARGO_HOME`, and every file each of those includes, at any depth.
+build can start from and in every directory above it, then the one in
+`$CARGO_HOME`, and every file each of those includes, at any depth. A build
+can start from any directory, so the directories read from are the one
+`remove` runs in, the workspace root, each member's, and every directory
+under the root holding a `.cargo/config` or `.cargo/config.toml` that git
+tracks or would track, which `git ls-files --cached --others
+--exclude-standard` lists. A build started anywhere else in the project
+reads nothing those miss: every configuration file above it is in one of
+those directories or above the root.
 
 A path points into the directory when the filesystem says it does, not when
 its text matches. Cargo opens paths through the filesystem, so `Tasks/Lint`
@@ -479,6 +485,10 @@ cannot look, and it does not refuse over them:
   which depends on what was vendored there;
 - `--config` and `CARGO_*` overrides, because they are given to a later
   build, and `remove` cannot see what that build will be given;
+- a `.cargo/config` or `.cargo/config.toml` that git ignores, or that sits
+  in a repository of its own inside the project, because git does not list
+  it with the project's files, and a file the project does not keep is not
+  one `remove` can tell from a stray one;
 - a `build.rs`, `include_str!` or `#[path]` reaching into it, because what
   code reads at build time is not knowable from the manifests;
 - line endings under `core.autocrlf`, because git gives back a file's

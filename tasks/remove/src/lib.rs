@@ -251,26 +251,31 @@ fn plan_member(
     if !globs.is_empty() {
         return Err(globs_refusal(&shown, &globs));
     }
+    let git_obstacle = |obstacle| {
+        git_refusal(
+            obstacle,
+            import.key(),
+            &shown,
+            retry_command,
+            &top_level::management_command(command_line, "regenerate"),
+        )
+    };
     let mut entries = workspace.entries_pointing_under(directory, dropped_workspace_dependency);
-    // A build reads the configuration above wherever it starts, and the
-    // project's own command line can be run from any member's directory.
+    // A build reads the configuration above wherever it starts: the project's
+    // own command line can be run from any member's directory, and a build
+    // from any directory below one holding a `.cargo` configuration reads it.
+    let configured =
+        git::directories_holding_cargo_configuration(workspace_root).map_err(git_obstacle)?;
     let mut starts = vec![current_dir, workspace_root];
     starts.extend(document.member_directories());
+    starts.extend(configured.iter().map(PathBuf::as_path));
     entries.extend(cargo_config::entries_pointing_under(&starts, directory)?);
     if !entries.is_empty() {
         return Err(entries_refusal(&shown, &entries));
     }
 
     let from_top_level =
-        git::ensure_git_can_give_back(directory, workspace_root).map_err(|obstacle| {
-            git_refusal(
-                obstacle,
-                import.key(),
-                &shown,
-                retry_command,
-                &top_level::management_command(command_line, "regenerate"),
-            )
-        })?;
+        git::ensure_git_can_give_back(directory, workspace_root).map_err(git_obstacle)?;
 
     Ok(Member {
         directory: directory.to_path_buf(),

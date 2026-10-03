@@ -7,8 +7,9 @@
 //! without it: a crate that declares a path into the directory, whatever its
 //! kind, feature or place, a `members` glob whose last match the directory
 //! is, and a `[patch]` or `paths` into it, in the manifest, in
-//! `.cargo/config.toml`, in a file that includes, at any depth, or in a
-//! member's own `.cargo/config.toml`; and an include, not `optional`, of a
+//! `.cargo/config.toml`, in a file that includes, at any depth, in a
+//! member's own `.cargo/config.toml`, or in one in a directory that is not a
+//! member at all; and an include, not `optional`, of a
 //! file inside it. Each story's project builds, and passes `cargo metadata`,
 //! before `remove` runs; each refusal leaves the tree byte-identical,
 //! `Cargo.lock` included, and then the cause is cleared and the same
@@ -469,6 +470,42 @@ fn a_patch_in_a_members_own_cargo_config_is_refused_from_the_root() -> TestOutco
         git::commit_everything(project.root())?;
         assert_remove_succeeds_and_it_builds(&project, "greet")?;
         build_from_member()?.expect_success("`cargo build` in the member's directory after");
+        Ok(())
+    })
+}
+
+/// Delphi's reproduction: a build started in `docs/`, which is neither a
+/// member nor above one, reads `docs/.cargo/config.toml`, which no build
+/// from the root or a member sees. A `[patch]` into the task there is
+/// refused, and once it is gone the same `remove` succeeds and a build from
+/// `docs/` still works.
+#[test]
+fn a_patch_in_cargo_config_in_a_directory_that_is_not_a_member_is_refused() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("remove-refuses-non-member-config")?;
+        let project = project_with_a_committed_task(checkout, &working_dir, "greet")?;
+        let docs = project.root().join("docs");
+        std::fs::create_dir_all(docs.join(".cargo"))?;
+        write_text(
+            &docs.join(".cargo/config.toml"),
+            &PATCH_INTO_GREET.replace("tasks/greet", "../tasks/greet"),
+        )?;
+        let build_from_docs = || support::process::cargo(&docs, &project.target_dir(), &["build"]);
+        build_from_docs()?.expect_success("`cargo build` in docs/");
+        git::commit_everything(project.root())?;
+
+        assert_remove_is_refused_and_leaves_the_lockfile(
+            &project,
+            "greet",
+            &["[patch.crates-io] greet in ", "docs/.cargo/config.toml"],
+            |_| Ok(()),
+        )?;
+
+        std::fs::remove_file(docs.join(".cargo/config.toml"))?;
+        write_text(&docs.join("readme.md"), "Documentation.\n")?;
+        git::commit_everything(project.root())?;
+        assert_remove_succeeds_and_it_builds(&project, "greet")?;
+        build_from_docs()?.expect_success("`cargo build` in docs/ after");
         Ok(())
     })
 }
