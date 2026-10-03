@@ -1294,6 +1294,39 @@ mod tests {
         Ok(())
     }
 
+    /// A dependency that is a task in every other way, reached under the key
+    /// `std`, as `cargo add --rename std` writes one: the import check refuses
+    /// it for its key, as the resolver does, so neither accepts what the
+    /// other would refuse.
+    #[test]
+    fn a_task_under_a_key_that_would_hide_std_is_refused_by_both_checks() -> TestOutcome {
+        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        set_demo_ritual_metadata(
+            &mut metadata,
+            serde_json::json!({ "ritual": { "tasks": ["std"] } }),
+        );
+        let edge = demo_ritual_node(&mut metadata)
+            .deps
+            .iter_mut()
+            .find(|dependency| dependency.name == "task_true")
+            .ok_or("expected a task_true dependency edge in the fixture")?;
+        edge.name = "std".to_string();
+        let hides_std = "`std` would hide Rust's own `std` crate, which the generated command line \
+                         is built on, and it would no longer compile; give this task another key";
+
+        let import_check = metadata
+            .ensure_dependency_is_a_task("demo-ritual", &Name::new("std")?)
+            .err()
+            .map(|failure| failure.to_string());
+        let resolver = resolve(&metadata, "demo-ritual")
+            .err()
+            .map(|failure| failure.to_string());
+
+        assert_eq!(import_check.as_deref(), Some(hides_std));
+        assert_eq!(resolver.as_deref(), Some(hides_std));
+        Ok(())
+    }
+
     #[test]
     fn a_name_listed_twice_is_refused() -> TestOutcome {
         let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
