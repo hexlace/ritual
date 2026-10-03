@@ -5,12 +5,16 @@
 //! check of the project as it is can pass for a project that breaks the
 //! moment the directory goes. So each of these asks about the project
 //! without it: a crate that declares a path into the directory, whatever its
-//! kind, feature or place, a `members` glob whose last match the
-//! directory is, and a `[patch]` into it, in the manifest or in
-//! `.cargo/config.toml`. Each story's project builds, and passes `cargo metadata`,
+//! kind, feature or place, a `members` glob whose last match the directory
+//! is, and a `[patch]` or `paths` into it, in the manifest, in
+//! `.cargo/config.toml`, in a file that includes, at any depth, or in a
+//! member's own `.cargo/config.toml`; and an include, not `optional`, of a
+//! file inside it. Each story's project builds, and passes `cargo metadata`,
 //! before `remove` runs; each refusal leaves the tree byte-identical,
 //! `Cargo.lock` included, and then the cause is cleared and the same
-//! `remove` succeeds and leaves a project that builds with `--locked`.
+//! `remove` succeeds and leaves a project that builds with `--locked`. An
+//! `optional` include whose file is missing is no reason to refuse, and is
+//! not one.
 //!
 //! A `members` entry spelled the way Cargo reads it but not the way it was
 //! written by `add` — `tasks/./lint`, `tasks//lint`, `x/../tasks/lint`, the
@@ -272,5 +276,183 @@ fn a_patch_into_the_directory_is_refused_in_the_manifest_and_in_cargo_config() -
         write_text(&cargo_config, &config_before)?;
         git::commit_everything(project.root())?;
         assert_remove_succeeds_and_it_builds(&project, "greet")
+    })
+}
+
+/// An unused `[patch]` into `tasks/greet`, which Cargo reads on every build
+/// wherever it is written.
+const PATCH_INTO_GREET: &str = "[patch.crates-io]\ngreet = { path = \"tasks/greet\" }\n";
+
+/// Puts `include` at the top of the project's `.cargo/config.toml`, where a
+/// top-level key has to go to stay out of the tables below it, and writes
+/// each of `files` under the project root; then checks the project builds
+/// and commits it. Returns what `.cargo/config.toml` held before.
+fn include_configuration(
+    project: &Project,
+    include: &str,
+    files: &[(&str, &str)],
+) -> support::Outcome<String> {
+    let cargo_config = project.root().join(".cargo/config.toml");
+    let before = support::read_text(&cargo_config)?;
+    write_text(&cargo_config, &format!("{include}\n{before}"))?;
+    for (path, contents) in files {
+        let path = project.root().join(path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        write_text(&path, contents)?;
+    }
+    assert_it_builds(project, &format!("with `{include}` in .cargo/config.toml"))?;
+    git::commit_everything(project.root())?;
+    Ok(before)
+}
+
+/// Puts `.cargo/config.toml` back as `before`, deletes `files`, and commits.
+fn clear_configuration(project: &Project, before: &str, files: &[(&str, &str)]) -> TestOutcome {
+    write_text(&project.root().join(".cargo/config.toml"), before)?;
+    for (path, _) in files {
+        std::fs::remove_file(project.root().join(path))?;
+    }
+    git::commit_everything(project.root())
+}
+
+/// Cargo reads every file a configuration file includes, so a `[patch]` or
+/// a `paths` override into the directory is read there as surely as in
+/// `.cargo/config.toml` itself. Each is refused, naming the included file,
+/// and once the include is gone the same `remove` succeeds.
+#[test]
+fn a_patch_or_paths_in_an_included_file_is_refused_naming_that_file() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("remove-refuses-included-config")?;
+        let project = project_with_a_committed_task(checkout, &working_dir, "greet")?;
+
+        for (setting, expected) in [
+            (PATCH_INTO_GREET, "[patch.crates-io] greet in "),
+            (
+                "paths = [\"tasks/greet\"]\n",
+                "`paths` entry `tasks/greet` in ",
+            ),
+        ] {
+            let files = [(".cargo/extra.toml", setting)];
+            let before = include_configuration(&project, "include = [\"extra.toml\"]", &files)?;
+            assert_remove_is_refused_and_leaves_the_lockfile(
+                &project,
+                "greet",
+                &[expected, ".cargo/extra.toml"],
+                |_| Ok(()),
+            )?;
+            clear_configuration(&project, &before, &files)?;
+        }
+
+        assert_remove_succeeds_and_it_builds(&project, "greet")
+    })
+}
+
+/// An included file can include another, and Cargo follows it; so is the
+/// check, to the `[patch]` two files down.
+#[test]
+fn a_patch_two_includes_down_is_refused_naming_its_file() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("remove-refuses-nested-include")?;
+        let project = project_with_a_committed_task(checkout, &working_dir, "greet")?;
+        let files = [
+            (
+                ".cargo/first.toml",
+                "include = [{ path = \"second.toml\" }]\n",
+            ),
+            (".cargo/second.toml", PATCH_INTO_GREET),
+        ];
+
+        let before = include_configuration(&project, "include = [\"first.toml\"]", &files)?;
+        assert_remove_is_refused_and_leaves_the_lockfile(
+            &project,
+            "greet",
+            &["[patch.crates-io] greet in ", ".cargo/second.toml"],
+            |_| Ok(()),
+        )?;
+
+        clear_configuration(&project, &before, &files)?;
+        assert_remove_succeeds_and_it_builds(&project, "greet")
+    })
+}
+
+/// Cargo builds without an `optional` include whose file is missing, so one
+/// is no reason to refuse: `remove` goes through and the project builds.
+#[test]
+fn a_missing_optional_include_does_not_stop_remove() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("remove-passes-missing-optional-include")?;
+        let project = project_with_a_committed_task(checkout, &working_dir, "greet")?;
+        include_configuration(
+            &project,
+            "include = [{ path = \"absent.toml\", optional = true }]",
+            &[],
+        )?;
+
+        assert_remove_succeeds_and_it_builds(&project, "greet")
+    })
+}
+
+/// An include that is not `optional` of a file inside the directory: once
+/// the directory goes, Cargo refuses to build at all, so `remove` refuses
+/// first, naming the include.
+#[test]
+fn a_required_include_of_a_file_in_the_directory_is_refused() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("remove-refuses-include-into-it")?;
+        let project = project_with_a_committed_task(checkout, &working_dir, "greet")?;
+        let include = "include = [\"../tasks/greet/settings.toml\"]";
+        let files = [("tasks/greet/settings.toml", "[alias]\n")];
+
+        let before = include_configuration(&project, include, &files)?;
+        assert_remove_is_refused_and_leaves_the_lockfile(
+            &project,
+            "greet",
+            &["`include` of `../tasks/greet/settings.toml` in "],
+            |_| Ok(()),
+        )?;
+
+        clear_configuration(&project, &before, &files)?;
+        assert_remove_succeeds_and_it_builds(&project, "greet")
+    })
+}
+
+/// A build started in a member's directory reads that directory's
+/// `.cargo/config.toml`, which a build from the root never sees. A `[patch]`
+/// into the task there is refused when `remove` runs from the root, and
+/// once it is gone the same `remove` succeeds and the member still builds
+/// from its own directory.
+#[test]
+fn a_patch_in_a_members_own_cargo_config_is_refused_from_the_root() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("remove-refuses-member-config")?;
+        let project = project_with_a_committed_task(checkout, &working_dir, "greet")?;
+        let member = project.composed_cli_dir().to_path_buf();
+        let relative = member
+            .strip_prefix(project.root())?
+            .join(".cargo/config.toml");
+        let back_to_root = "../".repeat(member.strip_prefix(project.root())?.components().count());
+        std::fs::create_dir_all(member.join(".cargo"))?;
+        write_text(
+            &member.join(".cargo/config.toml"),
+            &PATCH_INTO_GREET.replace("tasks/greet", &format!("{back_to_root}tasks/greet")),
+        )?;
+        let build_from_member =
+            || support::process::cargo(&member, &project.target_dir(), &["build"]);
+        build_from_member()?.expect_success("`cargo build` in the member's directory");
+        git::commit_everything(project.root())?;
+
+        assert_remove_is_refused_and_leaves_the_lockfile(
+            &project,
+            "greet",
+            &["[patch.crates-io] greet in ", path_to_str(&relative)?],
+            |_| Ok(()),
+        )?;
+
+        std::fs::remove_file(member.join(".cargo/config.toml"))?;
+        git::commit_everything(project.root())?;
+        assert_remove_succeeds_and_it_builds(&project, "greet")?;
+        build_from_member()?.expect_success("`cargo build` in the member's directory after");
+        Ok(())
     })
 }

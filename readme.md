@@ -257,8 +257,12 @@ It refuses, and leaves the project as it found it, `Cargo.lock` included, when:
   Cargo would then read as a path that does not exist (add an explicit
   member, or remove the glob);
 - a `[patch]`, `[replace]` or `[workspace.dependencies]` entry, or a
-  `paths` or `[patch]` setting in a `.cargo/config.toml`, points into the
+  `paths` or `[patch]` setting in Cargo's configuration, points into the
   directory, since Cargo reads those whether or not anything uses them.
+  That is the configuration a build reads from the workspace root, from any
+  member's directory, or from where you run `remove`, and every file it
+  includes; an `include` of a file in the directory refuses too, unless it
+  is `optional`.
 
 If anything fails while `remove` is writing manifests or regenerating, the
 project is put back as it was. The directory's deletion comes last, after

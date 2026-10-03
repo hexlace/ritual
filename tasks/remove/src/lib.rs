@@ -252,10 +252,11 @@ fn plan_member(
         return Err(globs_refusal(&shown, &globs));
     }
     let mut entries = workspace.entries_pointing_under(directory, dropped_workspace_dependency);
-    entries.extend(cargo_config::entries_pointing_under(
-        &[current_dir, workspace_root],
-        directory,
-    )?);
+    // A build reads the configuration above wherever it starts, and the
+    // project's own command line can be run from any member's directory.
+    let mut starts = vec![current_dir, workspace_root];
+    starts.extend(document.member_directories());
+    entries.extend(cargo_config::entries_pointing_under(&starts, directory)?);
     if !entries.is_empty() {
         return Err(entries_refusal(&shown, &entries));
     }

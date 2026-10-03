@@ -363,6 +363,37 @@ impl Metadata {
         crate::task_imports::dependents_outside_the_graph(self, directory)
     }
 
+    /// Returns the directory of every workspace member, each holding its
+    /// manifest.
+    ///
+    /// A build can start in any of them, and Cargo reads the configuration
+    /// files of the directory a build starts in, so a check of what that
+    /// configuration points at starts from each.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    ///
+    /// use rituals_compose::metadata;
+    ///
+    /// // Reads a document `fetch` already produced from a real
+    /// // `cargo metadata` call, so this example stays `no_run`.
+    /// let document = metadata::fetch(Path::new("."))?;
+    /// for directory in document.member_directories() {
+    ///     println!("a build may start in {}", directory.display());
+    /// }
+    /// # Ok::<(), rituals::Failure>(())
+    /// ```
+    #[must_use]
+    pub fn member_directories(&self) -> Vec<&Path> {
+        self.packages
+            .iter()
+            .filter(|package| self.workspace_members.contains(&package.id))
+            .filter_map(|package| package.manifest_path.parent())
+            .collect()
+    }
+
     /// Reports whether any workspace member in this document is already
     /// named `name` — a task's crate is named after the command, so this is
     /// what tells `add` a name is already taken by an unrelated package.
@@ -555,6 +586,43 @@ mod tests {
         if let Err(error) = metadata {
             assert!(error.to_string().contains('2'));
         }
+    }
+
+    /// Every package in the fixture is a member; one taken out of
+    /// `workspace_members` stands for a dependency outside the workspace.
+    #[test]
+    fn member_directories_are_each_members_manifest_directory_and_no_other() -> TestOutcome {
+        let directories_of = |document: &str| -> Result<Vec<String>, rituals::Failure> {
+            Ok(parse(document.as_bytes())?
+                .member_directories()
+                .iter()
+                .map(|directory| directory.display().to_string())
+                .collect())
+        };
+        let member = |name: &str| format!("/scrubbed/checkout/{name}");
+
+        assert_eq!(
+            directories_of(DEMO_WORKSPACE)?,
+            [
+                "cli",
+                "task-dev-only",
+                "task-keyword",
+                "task-malformed",
+                "task-null",
+                "task-renamed-source",
+                "task-true",
+            ]
+            .map(member)
+        );
+
+        let task_true_outside = DEMO_WORKSPACE.replacen(
+            "task-null#0.1.0\",\n    \"path+file:///scrubbed/checkout/task-true#0.1.0\",",
+            "task-null#0.1.0\",",
+            1,
+        );
+        assert_ne!(task_true_outside, DEMO_WORKSPACE);
+        assert!(!directories_of(&task_true_outside)?.contains(&member("task-true")));
+        Ok(())
     }
 
     #[test]

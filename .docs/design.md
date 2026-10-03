@@ -416,9 +416,10 @@ it works from any directory of the project.
   a target built from a file in it; a glob in `members` or
   `default-members` whose last match it is; and a `[patch]`, `[replace]` or
   `[workspace.dependencies]` entry, or a `paths` or `[patch]` setting in
-  Cargo's configuration, pointing into it. Also a directory that holds
-  other members, lies outside the workspace root once symbolic links are
-  followed, or whose entry is the last in `default-members`.
+  Cargo's configuration, pointing into it, and an `include` of a file in
+  it that is not `optional`. Also a directory that holds other members,
+  lies outside the workspace root once symbolic links are followed, or
+  whose entry is the last in `default-members`.
 
 These are decided while the directory still exists, so each asks about the
 project without it rather than about the project as it is: a final `cargo
@@ -429,6 +430,12 @@ a path crate `cargo metadata` did not load at all, such as one behind an
 optional dependency nothing turns on, is asked about with `cargo metadata
 --no-deps`, because Cargo still reads its manifest when it resolves the
 lockfile.
+
+Cargo's configuration is read the way Cargo reads it: the `.cargo/config`
+file, or `.cargo/config.toml` when there is none, in every directory a
+build can start from — the one `remove` runs in, the workspace root, and
+each member's — and in every directory above them, then the one in
+`$CARGO_HOME`, and every file each of those includes, at any depth.
 
 **Git decides whether a directory can be deleted.** Before deleting, `remove`
 asks git for every file under the directory: staged and unstaged changes,
