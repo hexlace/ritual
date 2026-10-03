@@ -378,16 +378,32 @@ fn a_patch_two_includes_down_is_refused_naming_its_file() -> TestOutcome {
 
 /// Cargo builds without an `optional` include whose file is missing, so one
 /// is no reason to refuse: `remove` goes through and the project builds.
+///
+/// A Cargo too old to read an `include` table at all, such as the one the
+/// minimum supported Rust version brings, refuses the configuration before
+/// the story starts, so there the story is skipped, saying so.
 #[test]
 fn a_missing_optional_include_does_not_stop_remove() -> TestOutcome {
     in_checkout(|checkout| {
         let working_dir = TempDir::new("remove-passes-missing-optional-include")?;
         let project = project_with_a_committed_task(checkout, &working_dir, "greet")?;
-        include_configuration(
-            &project,
-            "include = [{ path = \"absent.toml\", optional = true }]",
-            &[],
+        let cargo_config = project.root().join(".cargo/config.toml");
+        let before = support::read_text(&cargo_config)?;
+        write_text(
+            &cargo_config,
+            &format!("include = [{{ path = \"absent.toml\", optional = true }}]\n{before}"),
         )?;
+
+        let build = project.cargo(&["build"])?;
+        if build.exit_code != Some(0) && build.stderr.contains("failed to parse key `include`") {
+            support::checkout::report_skip(
+                "a missing optional include could not be demonstrated because the Cargo running \
+                 this suite cannot read an `include` table",
+            );
+            return Ok(());
+        }
+        build.expect_success("`cargo build` with a missing optional include");
+        git::commit_everything(project.root())?;
 
         assert_remove_succeeds_and_it_builds(&project, "greet")
     })
