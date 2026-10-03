@@ -262,9 +262,14 @@ It refuses, and leaves the project as it found it, `Cargo.lock` included, when:
   `paths` or `[patch]` setting in Cargo's configuration, points into the
   directory, since Cargo reads those whether or not anything uses them.
   That is the configuration a build reads from the workspace root, from any
-  member's directory, or from where you run `remove`, and every file it
-  includes; an `include` of a file in the directory refuses too, unless it
-  is `optional`.
+  member's directory, from where you run `remove`, or from any directory
+  holding a `.cargo` configuration that git tracks or would track, and every
+  file it includes; an `include` of a file in the directory refuses too,
+  unless it is `optional`.
+
+A path points into the directory however it is spelled, as long as Cargo
+would reach the directory through it: in another case on a file system that
+ignores case, or through a symbolic link.
 
 If anything fails while `remove` is writing manifests or regenerating, the
 project is put back as it was. The directory's deletion comes last, after
