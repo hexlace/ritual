@@ -439,9 +439,9 @@ can start from any directory, so the directories read from are the one
 `remove` runs in, the workspace root, each member's, and every directory
 under the root holding a `.cargo/config` or `.cargo/config.toml` that git
 tracks or would track, which `git ls-files --cached --others
---exclude-standard` lists. A build started anywhere else in the project
-reads nothing those miss: every configuration file above it is in one of
-those directories or above the root.
+--exclude-standard` lists. That listing is matched by name, so a few
+configuration files a build could still read are outside it, and are listed
+under what `remove` cannot see.
 
 A path points into the directory when the filesystem says it does, not when
 its text matches. Cargo opens paths through the filesystem, so `Tasks/Lint`
@@ -489,6 +489,11 @@ cannot look, and it does not refuse over them:
   in a repository of its own inside the project, because git does not list
   it with the project's files, and a file the project does not keep is not
   one `remove` can tell from a stray one;
+- a configuration file git lists under another name: in a `.cargo` that is
+  itself a symbolic link, or in a `.Cargo` on a file system that ignores
+  case, because the listing matches the name git stores;
+- the configuration in or below the directory of a member that lies outside
+  the workspace root, because git lists only what is under the root;
 - a `build.rs`, `include_str!` or `#[path]` reaching into it, because what
   code reads at build time is not knowable from the manifests;
 - line endings under `core.autocrlf`, because git gives back a file's

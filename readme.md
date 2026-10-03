@@ -263,9 +263,11 @@ It refuses, and leaves the project as it found it, `Cargo.lock` included, when:
   directory, since Cargo reads those whether or not anything uses them.
   That is the configuration a build reads from the workspace root, from any
   member's directory, from where you run `remove`, or from any directory
-  holding a `.cargo` configuration that git tracks or would track, and every
-  file it includes; an `include` of a file in the directory refuses too,
-  unless it is `optional`.
+  under the root holding a `.cargo/config` or `.cargo/config.toml` that git
+  tracks or would track by that name, and every file it includes; an
+  `include` of a file in the directory refuses too, unless it is
+  `optional`. [The design](.docs/design.md#what-remove-does) lists what
+  this does not reach.
 
 A path points into the directory however it is spelled, as long as Cargo
 would reach the directory through it: in another case on a file system that
