@@ -242,8 +242,8 @@ fn already_imported_refusal(
         ))),
         (false, true) => Err(Failure::new(format!(
             "`{name}` is named in [package.metadata.ritual] tasks but `{package}` has no \
-             dependency called `{name}`; drop it from the list, then run add again, or import \
-             the crate it names with `{import} <crate> {name}`"
+             dependency called `{name}`; drop it from the list, then run add again or \
+             `{import} <crate> {name}`"
         ))),
         (false, false) => Ok(()),
     }
@@ -410,11 +410,11 @@ mod tests {
             let message = error.to_string();
             assert!(message.contains("named in [package.metadata.ritual] tasks"));
             assert!(message.contains("no dependency called `zzz`"));
-            assert!(message.contains("drop it from the list, then run add again"));
             assert!(
-                message
-                    .contains("import the crate it names with `cargo ritual import <crate> zzz`"),
-                "expected the import command as the way to supply the dependency; message was: \
+                message.contains(
+                    "drop it from the list, then run add again or `cargo ritual import <crate> zzz`"
+                ),
+                "expected the drop first, then either add or the import command; message was: \
                  {message}"
             );
             assert!(
