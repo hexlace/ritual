@@ -103,6 +103,13 @@ itself a task is refused before anything is written, naming the dependency,
 rather than surfacing as a surprise at compile time. Nothing is discovered by
 scanning; both ends are explicit.
 
+Declaring itself is not quite enough. A task also has to be built on the very
+`rituals` package the CLI crate uses, and its key has to be one the generated
+file compiles with, which `std` and `core` are not. Either failure would only
+show at compile time, and a command line that does not compile cannot run
+the `remove` that would put it right, so both are refused before anything is
+written too.
+
 `import` runs this check right after `cargo add`, when Cargo has declared the
 dependency and the crate's own manifest is known, whichever source it came
 from. It asks through the same rule the resolver applies when `regenerate`
@@ -391,8 +398,15 @@ runs, so `import` keeps no task list of its own either.
 
 The steps, in order:
 
-1. **Resolve the key.** This reads only what was typed, so a key that is not
-   a usable name is refused with nothing to put back.
+1. **Resolve the key, and find the project.** The key is read only from
+   what was typed, so a key that is not a usable name is refused with
+   nothing to put back. So is a key the generated file could not compile
+   with: `std` or `core` would stand in for Rust's own crates, which the
+   file reaches by those names, and a command line that does not compile
+   cannot run the `remove` that would take the key back out. Then
+   `cargo locate-project`, which writes nothing, says whether there is a
+   project here at all, and where there is none the refusal hands back the
+   command to run inside one.
 2. **Snapshot, then check.** From the first `cargo metadata` on, the run is
    one rollback. That call creates the workspace's `Cargo.lock` when there is
    none and rewrites a stale one, so the lockfile is recorded before it runs,
@@ -409,17 +423,23 @@ The steps, in order:
    grammar is Cargo's. Cargo's output is captured, so a refusal is one line
    of ritual's own.
 4. **The cross-check.** A fresh `cargo metadata` says what the crate declares
-   about itself, and the dependency under the key must be a task. A crate
-   that is not one is refused.
+   about itself, and the dependency under the key must be a task built on the
+   very `rituals` package the CLI crate uses. Two packages called `rituals`
+   are two crates to Rust, whatever their versions, and the generated file
+   hands one's `Task` to the other's `run`. A crate that is not one is
+   refused.
 5. **The append.** The key joins `[package.metadata.ritual] tasks`.
 6. **Regenerate**, once the run has committed. If it fails, the failure says
    the task is imported and names the `regenerate` command that finishes it.
 
-A refusal at any of the first five steps puts the CLI crate's manifest and the
+A refusal at any of steps two to five puts the CLI crate's manifest and the
 workspace's `Cargo.lock` back, and removes a lockfile the run created. The undo
 restores the recorded bytes rather than running `cargo remove`: that puts back
-exactly what was there, in the lockfile as well as the manifest, and it cannot
-fail the way a second Cargo run can.
+exactly what was there, in the lockfile as well as the manifest. It writes each
+file in place, so it fails where a file cannot be written in place, such as a
+read-only manifest, which `cargo add` replaces by rename. The refusal then
+says which files ritual could not put back, for the person to check before
+running `import` again.
 
 ## What `remove` does
 
