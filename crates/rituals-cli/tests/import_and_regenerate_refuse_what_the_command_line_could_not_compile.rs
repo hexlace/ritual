@@ -1,7 +1,9 @@
 //! `import` and `regenerate` refuse a task the generated command line could
 //! not compile with: a task built on a different `rituals` from the one the
 //! project uses, and a key that would hide a crate the generated file names
-//! (`std` or `core`), which `add` refuses too. Once such a task were written, the command line would
+//! (`std` or `core`), which `add` refuses too. They also refuse a task crate
+//! that names no `rituals` of its own, since without one ritual cannot tell
+//! which `rituals` its task is built on. Once such a task were written, the command line would
 //! no longer build, and with it the `remove` that would take the task back
 //! out, so the refusal has to come first.
 //!
@@ -15,7 +17,8 @@
 mod support;
 
 use support::task_sources::{
-    LocalRegistry, write_other_rituals, write_path_task, write_path_task_built_on,
+    LocalRegistry, write_facade_task, write_other_rituals, write_path_task,
+    write_path_task_built_on,
 };
 use support::{
     Project, RunOutput, TempDir, TestOutcome, assert_trees_identical, in_checkout, lockfile,
@@ -252,6 +255,66 @@ fn add_refuses_the_names_std_and_core() -> TestOutcome {
                 task_crate_dir.display()
             );
         }
+        Ok(())
+    })
+}
+
+/// A task crate that only re-exports another crate's task does build, but
+/// ritual cannot see which `rituals` that task is built on without a direct
+/// dependency of its own, so it is refused with the dependency to add.
+const FACADE: &str = "facade";
+
+/// The refusal for [`FACADE`], after what `import` or `regenerate` puts in
+/// front of it and before what it puts after.
+const NAMES_NO_DIRECT_RITUALS: &str = "does not name rituals as a direct dependency, so ritual \
+     cannot tell which rituals its task is built on; add `rituals` to its [dependencies]";
+
+#[test]
+fn import_refuses_a_task_crate_that_names_no_rituals_of_its_own() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("import-facade")?;
+        let project = Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
+        let task_dir = working_dir.path().join(CRATE);
+        write_path_task(&task_dir, checkout, CRATE, "0.1.0")?;
+        let facade_dir = working_dir.path().join(FACADE);
+        write_facade_task(&facade_dir, FACADE, &task_dir, CRATE)?;
+        let binary = project.build()?;
+
+        let message = refused_leaving_the_project_as_it_was(
+            &project,
+            &binary,
+            &["import", FACADE, "--path", path_to_str(&facade_dir)?],
+        )?;
+
+        assert_eq!(
+            message,
+            format!("`{FACADE}` declares `task = true` but {NAMES_NO_DIRECT_RITUALS}{PUT_BACK}")
+        );
+        Ok(())
+    })
+}
+
+#[test]
+fn regenerate_refuses_a_hand_written_task_crate_that_names_no_rituals_of_its_own() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("regenerate-facade")?;
+        let project = Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
+        let task_dir = working_dir.path().join(CRATE);
+        write_path_task(&task_dir, checkout, CRATE, "0.1.0")?;
+        let facade_dir = working_dir.path().join(FACADE);
+        write_facade_task(&facade_dir, FACADE, &task_dir, CRATE)?;
+        let binary = project.build()?;
+        project.mount(&facade_dir, FACADE, FACADE)?;
+
+        let message = refused_leaving_the_project_as_it_was(&project, &binary, &["regenerate"])?;
+
+        assert_eq!(
+            message,
+            format!(
+                "`{FACADE}` is named in [package.metadata.ritual] tasks, but `{FACADE}` \
+                 {NAMES_NO_DIRECT_RITUALS}, or drop `{FACADE}` from the list"
+            )
+        );
         Ok(())
     })
 }

@@ -91,6 +91,27 @@ pub(crate) fn write_path_task_built_on(
     )
 }
 
+/// Writes a task crate at `directory` that names no `rituals` of its own:
+/// it depends by path only on the task crate called `reexported` at
+/// `reexported_directory`, and hands over that crate's task as its own.
+pub(crate) fn write_facade_task(
+    directory: &Path,
+    crate_name: &str,
+    reexported_directory: &Path,
+    reexported: &str,
+) -> TestOutcome {
+    crates::write_crate(
+        directory,
+        &format!(
+            "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+             [dependencies]\n{reexported} = {{ path = {:?} }}\n\n\
+             [package.metadata.ritual]\ntask = true\n",
+            path_to_str(reexported_directory)?
+        ),
+        &format!("//! A task re-exported from `{reexported}`.\n\npub use {reexported}::task;\n"),
+    )
+}
+
 /// Writes a plain crate at `directory` that never declares itself a task:
 /// no `[package.metadata.ritual]` table, and no dependencies.
 pub(crate) fn write_unmarked_crate(directory: &Path, crate_name: &str) -> TestOutcome {

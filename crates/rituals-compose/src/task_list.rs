@@ -335,8 +335,13 @@ enum RitualsDisagreement<'a> {
     /// The composed CLI has no normal dependency on `rituals`, so no task
     /// can be mounted in it.
     CliHasNone,
-    /// The task's crate has no normal dependency on `rituals`, so it has no
-    /// `rituals::Task` to hand over.
+    /// The task's crate has no normal dependency on `rituals` of its own.
+    ///
+    /// It may still build, handing over a task it re-exports from a crate it
+    /// depends on, but that task's `rituals` is then a step further away
+    /// than the crate ritual imports, and a re-export of a task built on
+    /// another `rituals` is as broken as the task itself. Asking for a
+    /// direct dependency keeps the one comparison that decides it.
     TaskHasNone { task: &'a Package },
     /// Each resolves to a different package.
     Differs {
@@ -419,13 +424,15 @@ fn rituals_refusal(
                         format!("`{key}` resolves to `{crate_name}`, which")
                     };
                     Failure::new(format!(
-                        "{subject} declares `task = true` but does not depend on rituals, so it \
-                         has no task to hand a command line; choose a task crate built on rituals"
+                        "{subject} declares `task = true` but does not name rituals as a direct \
+                         dependency, so ritual cannot tell which rituals its task is built on; \
+                         add `rituals` to its [dependencies]"
                     ))
                 }
                 Asking::Listed => Failure::new(format!(
-                    "{listed}`{crate_name}` does not depend on rituals, so it has no task to hand \
-                     a command line; drop `{key}` from the list"
+                    "{listed}`{crate_name}` does not name rituals as a direct dependency, so \
+                     ritual cannot tell which rituals its task is built on; add `rituals` to its \
+                     [dependencies]{or_drop}"
                 )),
             }
         }
@@ -1218,7 +1225,7 @@ mod tests {
     }
 
     #[test]
-    fn a_task_crate_that_does_not_depend_on_rituals_is_refused() -> TestOutcome {
+    fn a_task_crate_with_no_direct_dependency_on_rituals_is_refused() -> TestOutcome {
         let (import_check, resolver) = both_refusals(|metadata| {
             node_of(metadata, "task-true")?
                 .deps
@@ -1229,16 +1236,18 @@ mod tests {
         assert_eq!(
             import_check.as_deref(),
             Some(
-                "`task-true` declares `task = true` but does not depend on rituals, so it has no \
-                 task to hand a command line; choose a task crate built on rituals"
+                "`task-true` declares `task = true` but does not name rituals as a direct \
+                 dependency, so ritual cannot tell which rituals its task is built on; add \
+                 `rituals` to its [dependencies]"
             )
         );
         assert_eq!(
             resolver.as_deref(),
             Some(
                 "`task-true` is named in [package.metadata.ritual] tasks, but `task-true` does \
-                 not depend on rituals, so it has no task to hand a command line; drop \
-                 `task-true` from the list"
+                 not name rituals as a direct dependency, so ritual cannot tell which rituals its \
+                 task is built on; add `rituals` to its [dependencies], or drop `task-true` from \
+                 the list"
             )
         );
         Ok(())

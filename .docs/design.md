@@ -426,8 +426,11 @@ The steps, in order:
    about itself, and the dependency under the key must be a task built on the
    very `rituals` package the CLI crate uses. Two packages called `rituals`
    are two crates to Rust, whatever their versions, and the generated file
-   hands one's `Task` to the other's `run`. A crate that is not one is
-   refused.
+   hands one's `Task` to the other's `run`. The task crate has to name
+   `rituals` as a direct dependency, because that is the `rituals` ritual can
+   read: a crate that only re-exports another crate's task builds, but which
+   `rituals` it hands over is a step further away than the check looks. A
+   crate that is not one is refused.
 5. **The append.** The key joins `[package.metadata.ritual] tasks`.
 6. **Regenerate**, once the run has committed. If it fails, the failure says
    the task is imported and names the `regenerate` command that finishes it.
