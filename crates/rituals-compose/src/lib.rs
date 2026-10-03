@@ -2,14 +2,15 @@
 //! maintained.
 //!
 //! This is what a scaffolding task links against — such as `add`, `create`,
-//! `new`, `regenerate` and `remove`, the task crates ritual's own bundle
-//! groups — for the renderers that produce a task crate's own files and a
-//! composed command line's generated file, for the metadata and manifest
-//! operations those tasks need, and for the [`rollback`] that puts a project
-//! back when a task's run does not finish. Nothing here runs on a composed
-//! command line's own path: assembling a command line from a project's
-//! imports and dispatching to one of them live in `rituals`, which a composed
-//! CLI crate depends on directly.
+//! `import`, `new`, `regenerate` and `remove`, the task crates ritual's own
+//! bundle groups — for the renderers that produce a task crate's own files and
+//! a composed command line's generated file, for the metadata and manifest
+//! operations those tasks need, for the [`cargo`] a task that runs Cargo uses
+//! and the [`shell`] that renders a command for a person to copy, and for the
+//! [`rollback`] that puts a project back when a task's run does not finish.
+//! Nothing here runs on a composed command line's own path: assembling a
+//! command line from a project's imports and dispatching to one of them live
+//! in `rituals`, which a composed CLI crate depends on directly.
 //!
 //! Nothing from `rituals` is re-exported here. Every crate that needs
 //! [`rituals::Task`], [`rituals::CommandLine`] or [`rituals::run`] already
@@ -45,6 +46,7 @@
 //! # Ok::<(), rituals::InvalidName>(())
 //! ```
 
+pub mod cargo;
 pub mod cargo_config;
 pub mod generated_file;
 pub mod manifest;
@@ -52,7 +54,9 @@ pub mod metadata;
 mod paths;
 mod project;
 pub mod rollback;
+pub mod rust_name;
 pub mod sentence;
+pub mod shell;
 pub mod source;
 pub mod task_crate;
 mod task_imports;

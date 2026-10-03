@@ -5,10 +5,8 @@
 use std::path::Path;
 
 use rituals::{Failure, Name, Outcome, Task, clap, report};
-use rituals_compose::source::{
-    Source, SourceArguments, assert_is_a_ritual_checkout, escape_toml_string,
-};
-use rituals_compose::{task_crate, workspace};
+use rituals_compose::source::{Source, SourceArguments, assert_is_a_ritual_checkout};
+use rituals_compose::{shell, task_crate, workspace};
 
 /// `create`'s arguments: the name of the crate to scaffold, and where
 /// ritual's own crates come from.
@@ -69,17 +67,14 @@ fn run(arguments: &Arguments) -> Outcome {
     Ok(())
 }
 
-/// The lines `create` ends on: the dependency line that imports the new
-/// crate, on a line of its own so it pastes as TOML, and the one edit
-/// after it.
+/// The lines `create` ends on: the `import` command that brings the new
+/// crate into the project that will use it.
 ///
-/// The path is absolute so the line works from any project on this machine;
-/// a crate moved into a shared repository changes only that field. A path
-/// that is not valid UTF-8 cannot be written in a Cargo manifest at all, so
-/// then the line says that instead of printing one that points nowhere.
-//
-// No `[dependencies]` header line: the manifest the line goes into already
-// has that table, and pasting a second header would make it invalid.
+/// The path is absolute so the command works from any project on this
+/// machine, and the whole command is rendered by [`shell::join`] so a path
+/// with a space in it still pastes. A path that is not valid UTF-8 cannot be
+/// written in a Cargo manifest at all, so then the line says that instead
+/// of printing one that points nowhere.
 fn next_steps(name: &Name, crate_dir: &Path) -> Vec<String> {
     let Some(path) = crate_dir.to_str() else {
         return vec![format!(
@@ -87,19 +82,15 @@ fn next_steps(name: &Name, crate_dir: &Path) -> Vec<String> {
              can name it; move it to a path that is before importing it"
         )];
     };
-    vec![
-        "next: to import it, add this under [dependencies] in a project's ritual/Cargo.toml:"
-            .to_string(),
-        format!("{name} = {{ path = \"{}\" }}", escape_toml_string(path)),
-        // `create` runs outside any project, so it cannot know what the
-        // importing project calls its command line: both spellings, as the
-        // refusals give them.
-        format!(
-            "then add \"{name}\" to [package.metadata.ritual] tasks and run \
-             cargo ritual regenerate there (or cargo <name> ritual regenerate if it was made \
-             with --cli <name>)"
-        ),
-    ]
+    let import = shell::join(["import", name.as_str(), "--path", path]);
+    // `create` runs outside any project, so it cannot know what the
+    // importing project calls its command line: both spellings, as the
+    // refusals give them. The place comes first because that is the order a
+    // person acts in.
+    vec![format!(
+        "next: in the project that will use it, run cargo ritual {import} (or cargo <name> \
+         ritual {import} if it was made with --cli <name>)"
+    )]
 }
 
 /// Writes every file `create` scaffolds into `target_dir`, which the caller
@@ -214,27 +205,40 @@ mod tests {
     use super::{next_steps, refusal, validate_source};
 
     #[test]
-    fn the_next_steps_name_both_edits_with_a_dependency_line_ready_to_paste() {
+    fn the_next_step_is_the_import_command_to_run_in_the_project_that_will_use_it() {
         let name = Name::new("lint").expect("lint is a valid name");
         let lines = next_steps(&name, Path::new("/work/lint"));
         assert_eq!(
             lines,
             [
-                "next: to import it, add this under [dependencies] in a project's \
-                 ritual/Cargo.toml:",
-                "lint = { path = \"/work/lint\" }",
-                "then add \"lint\" to [package.metadata.ritual] tasks and run cargo ritual \
-                 regenerate there (or cargo <name> ritual regenerate if it was made with --cli \
-                 <name>)",
+                "next: in the project that will use it, run cargo ritual import lint --path \
+                 /work/lint (or cargo <name> ritual import lint --path /work/lint if it was \
+                 made with --cli <name>)",
+            ]
+        );
+    }
+
+    /// The path is typed into a shell, so one with a space in it is quoted
+    /// the way the shell will read it back.
+    #[test]
+    fn a_path_with_a_space_is_quoted_so_the_command_pastes_as_written() {
+        let name = Name::new("lint").expect("lint is a valid name");
+        let lines = next_steps(&name, Path::new("/my work/lint"));
+        assert_eq!(
+            lines,
+            [
+                "next: in the project that will use it, run cargo ritual import lint --path \
+                 '/my work/lint' (or cargo <name> ritual import lint --path '/my work/lint' if \
+                 it was made with --cli <name>)",
             ]
         );
     }
 
     /// A path that is not valid UTF-8 cannot appear in a Cargo manifest, so
-    /// no dependency line is printed for it, lossy or otherwise.
+    /// no command is printed for it, lossy or otherwise.
     #[cfg(unix)]
     #[test]
-    fn a_path_that_is_not_utf8_gets_a_plain_statement_instead_of_a_dependency_line() {
+    fn a_path_that_is_not_utf8_gets_a_plain_statement_instead_of_a_command() {
         use std::os::unix::ffi::OsStrExt;
 
         let name = Name::new("lint").expect("lint is a valid name");

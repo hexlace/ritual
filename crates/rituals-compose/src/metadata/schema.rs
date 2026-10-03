@@ -75,6 +75,11 @@ pub(crate) struct Declared {
 pub(crate) struct Package {
     pub(crate) id: String,
     pub(crate) name: String,
+    pub(crate) version: String,
+    /// Where the package comes from, as Cargo spells it
+    /// (`registry+https://…`, `git+https://…`), or `None` for a package at a
+    /// path on disk.
+    pub(crate) source: Option<String>,
     pub(crate) manifest_path: PathBuf,
     pub(crate) targets: Vec<Target>,
     /// Every dependency the manifest declares, of every kind, on every

@@ -36,6 +36,19 @@
           "path": "/scrubbed/checkout/task-renamed-source"
         },
         {
+          "name": "rituals",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/scrubbed/checkout/rituals"
+        },
+        {
           "name": "task-malformed",
           "source": null,
           "req": "*",
@@ -129,6 +142,47 @@
       "rust_version": null
     },
     {
+      "name": "rituals",
+      "version": "0.1.2",
+      "id": "path+file:///scrubbed/checkout/rituals#0.1.2",
+      "license": null,
+      "license_file": null,
+      "description": null,
+      "source": null,
+      "dependencies": [],
+      "targets": [
+        {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "rituals",
+          "src_path": "/scrubbed/checkout/rituals/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        }
+      ],
+      "features": {},
+      "manifest_path": "/scrubbed/checkout/rituals/Cargo.toml",
+      "metadata": null,
+      "publish": null,
+      "authors": [],
+      "categories": [],
+      "keywords": [],
+      "readme": null,
+      "repository": null,
+      "homepage": null,
+      "documentation": null,
+      "edition": "2021",
+      "links": null,
+      "default_run": null,
+      "rust_version": null
+    },
+    {
       "name": "task-dev-only",
       "version": "0.1.0",
       "id": "path+file:///scrubbed/checkout/task-dev-only#0.1.0",
@@ -136,7 +190,21 @@
       "license_file": null,
       "description": null,
       "source": null,
-      "dependencies": [],
+      "dependencies": [
+        {
+          "name": "rituals",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/scrubbed/checkout/rituals"
+        }
+      ],
       "targets": [
         {
           "kind": [
@@ -177,7 +245,21 @@
       "license_file": null,
       "description": null,
       "source": null,
-      "dependencies": [],
+      "dependencies": [
+        {
+          "name": "rituals",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/scrubbed/checkout/rituals"
+        }
+      ],
       "targets": [
         {
           "kind": [
@@ -222,7 +304,21 @@
       "license_file": null,
       "description": null,
       "source": null,
-      "dependencies": [],
+      "dependencies": [
+        {
+          "name": "rituals",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/scrubbed/checkout/rituals"
+        }
+      ],
       "targets": [
         {
           "kind": [
@@ -267,7 +363,21 @@
       "license_file": null,
       "description": null,
       "source": null,
-      "dependencies": [],
+      "dependencies": [
+        {
+          "name": "rituals",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/scrubbed/checkout/rituals"
+        }
+      ],
       "targets": [
         {
           "kind": [
@@ -308,7 +418,21 @@
       "license_file": null,
       "description": null,
       "source": null,
-      "dependencies": [],
+      "dependencies": [
+        {
+          "name": "rituals",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/scrubbed/checkout/rituals"
+        }
+      ],
       "targets": [
         {
           "kind": [
@@ -353,7 +477,21 @@
       "license_file": null,
       "description": null,
       "source": null,
-      "dependencies": [],
+      "dependencies": [
+        {
+          "name": "rituals",
+          "source": null,
+          "req": "*",
+          "kind": null,
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/scrubbed/checkout/rituals"
+        }
+      ],
       "targets": [
         {
           "kind": [
@@ -414,6 +552,7 @@
       {
         "id": "path+file:///scrubbed/checkout/cli#demo-ritual@0.0.0",
         "dependencies": [
+          "path+file:///scrubbed/checkout/rituals#0.1.2",
           "path+file:///scrubbed/checkout/task-dev-only#0.1.0",
           "path+file:///scrubbed/checkout/task-keyword#0.1.0",
           "path+file:///scrubbed/checkout/task-malformed#0.1.0",
@@ -422,6 +561,16 @@
           "path+file:///scrubbed/checkout/task-true#0.1.0"
         ],
         "deps": [
+          {
+            "name": "rituals",
+            "pkg": "path+file:///scrubbed/checkout/rituals#0.1.2",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          },
           {
             "name": "task_dev_only",
             "pkg": "path+file:///scrubbed/checkout/task-dev-only#0.1.0",
@@ -486,39 +635,123 @@
         "features": []
       },
       {
-        "id": "path+file:///scrubbed/checkout/task-dev-only#0.1.0",
+        "id": "path+file:///scrubbed/checkout/rituals#0.1.2",
         "dependencies": [],
         "deps": [],
+        "features": []
+      },
+      {
+        "id": "path+file:///scrubbed/checkout/task-dev-only#0.1.0",
+        "dependencies": [
+          "path+file:///scrubbed/checkout/rituals#0.1.2"
+        ],
+        "deps": [
+          {
+            "name": "rituals",
+            "pkg": "path+file:///scrubbed/checkout/rituals#0.1.2",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          }
+        ],
         "features": []
       },
       {
         "id": "path+file:///scrubbed/checkout/task-keyword#0.1.0",
-        "dependencies": [],
-        "deps": [],
+        "dependencies": [
+          "path+file:///scrubbed/checkout/rituals#0.1.2"
+        ],
+        "deps": [
+          {
+            "name": "rituals",
+            "pkg": "path+file:///scrubbed/checkout/rituals#0.1.2",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          }
+        ],
         "features": []
       },
       {
         "id": "path+file:///scrubbed/checkout/task-malformed#0.1.0",
-        "dependencies": [],
-        "deps": [],
+        "dependencies": [
+          "path+file:///scrubbed/checkout/rituals#0.1.2"
+        ],
+        "deps": [
+          {
+            "name": "rituals",
+            "pkg": "path+file:///scrubbed/checkout/rituals#0.1.2",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          }
+        ],
         "features": []
       },
       {
         "id": "path+file:///scrubbed/checkout/task-null#0.1.0",
-        "dependencies": [],
-        "deps": [],
+        "dependencies": [
+          "path+file:///scrubbed/checkout/rituals#0.1.2"
+        ],
+        "deps": [
+          {
+            "name": "rituals",
+            "pkg": "path+file:///scrubbed/checkout/rituals#0.1.2",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          }
+        ],
         "features": []
       },
       {
         "id": "path+file:///scrubbed/checkout/task-renamed-source#0.1.0",
-        "dependencies": [],
-        "deps": [],
+        "dependencies": [
+          "path+file:///scrubbed/checkout/rituals#0.1.2"
+        ],
+        "deps": [
+          {
+            "name": "rituals",
+            "pkg": "path+file:///scrubbed/checkout/rituals#0.1.2",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          }
+        ],
         "features": []
       },
       {
         "id": "path+file:///scrubbed/checkout/task-true#0.1.0",
-        "dependencies": [],
-        "deps": [],
+        "dependencies": [
+          "path+file:///scrubbed/checkout/rituals#0.1.2"
+        ],
+        "deps": [
+          {
+            "name": "rituals",
+            "pkg": "path+file:///scrubbed/checkout/rituals#0.1.2",
+            "dep_kinds": [
+              {
+                "kind": null,
+                "target": null
+              }
+            ]
+          }
+        ],
         "features": []
       }
     ],

@@ -79,7 +79,7 @@ fn assert_fresh_project_builds_and_lists_management_tasks(project: &Project) -> 
     let help = project.cargo(&["run", "--", "--help"])?;
     help.expect_success("`cargo run -- --help` on a freshly scaffolded project");
 
-    for command in ["add", "regenerate", "new", "create", "remove"] {
+    for command in ["add", "regenerate", "new", "create", "import", "remove"] {
         assert!(
             help::lists_command(&help.stdout, command),
             "expected --help to list the `{command}` task; stdout was:\n{}",

@@ -10,10 +10,7 @@
 
 mod support;
 
-use support::manifest;
-use support::{
-    Project, ResultContext, TempDir, TestOutcome, in_checkout, path_to_str, read_text, run_ritual,
-};
+use support::{Project, TempDir, TestOutcome, in_checkout, path_to_str, read_text, run_ritual};
 
 /// The lines a successful run wrote to stdout.
 fn lines(stdout: &str) -> Vec<&str> {
@@ -132,7 +129,7 @@ fn a_named_command_line_spells_its_hints_with_its_own_name() -> TestOutcome {
 }
 
 #[test]
-fn create_ends_with_a_dependency_line_that_pastes_as_toml() -> TestOutcome {
+fn create_ends_with_the_import_command_that_brings_the_new_crate_in() -> TestOutcome {
     in_checkout(|checkout| {
         let working_dir = TempDir::new("output-create")?;
         let created = run_ritual(
@@ -141,29 +138,21 @@ fn create_ends_with_a_dependency_line_that_pastes_as_toml() -> TestOutcome {
         )?;
         created.expect_success("`ritual create lint`");
         let crate_dir = working_dir.path().join("lint");
-        let dependency_line = format!("lint = {{ path = \"{}\" }}", path_to_str(&crate_dir)?);
+        // The scratch directory's path has nothing in it a shell would quote,
+        // so the command is the plain words; the quoting itself is tested
+        // where it is rendered.
+        let typed = format!("import lint --path {}", path_to_str(&crate_dir)?);
+        let next = format!(
+            "next: in the project that will use it, run cargo ritual {typed} (or cargo <name> \
+             ritual {typed} if it was made with --cli <name>)"
+        );
         assert_eq!(
             lines(&created.stdout),
             [
                 "created lint/Cargo.toml",
                 "created lint/src/lib.rs",
-                "next: to import it, add this under [dependencies] in a project's \
-                 ritual/Cargo.toml:",
-                dependency_line.as_str(),
-                "then add \"lint\" to [package.metadata.ritual] tasks and run cargo ritual \
-                 regenerate there (or cargo <name> ritual regenerate if it was made with --cli \
-                 <name>)",
+                next.as_str(),
             ]
-        );
-
-        // The line is pasted into a manifest, so TOML's own parser decides
-        // whether it is one: under `[dependencies]` it names this crate.
-        let pasted: toml_edit::DocumentMut = format!("[dependencies]\n{dependency_line}\n")
-            .parse()
-            .context("the printed dependency line is not TOML")?;
-        assert_eq!(
-            manifest::string_at(&pasted, &["dependencies", "lint", "path"]),
-            Some(path_to_str(&crate_dir)?)
         );
         Ok(())
     })

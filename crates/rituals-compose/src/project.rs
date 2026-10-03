@@ -18,6 +18,7 @@ use std::path::Path;
 use rituals::{Failure, Name};
 
 use crate::metadata::{Metadata, Package};
+use crate::rust_name::extern_identifier;
 
 /// Everything the framework needs to know about the composed CLI crate it
 /// is running as part of: where the workspace is, which package it is, and
@@ -83,9 +84,16 @@ impl Project<'_> {
     }
 
     /// Reports whether this project's manifest already declares a
-    /// dependency under `key` — matched by name or, when the dependency is
-    /// renamed, by its `package = "…"` rename, since either one occupies
-    /// the key a new import would need.
+    /// dependency under `key` — the dependency's key being its rename when it
+    /// has one, and its name otherwise — since that key is the one a new
+    /// import would need.
+    ///
+    /// Keys are compared as rustc names them, with `-` read as `_`: a
+    /// dependency declared as `a_b` occupies the key `a-b`. Cargo accepts
+    /// two dependencies whose keys differ only that way, and `cargo build`
+    /// then refuses the pair (`E0464`, multiple candidates for the one name),
+    /// so a literal comparison would let a manifest through that does not
+    /// build.
     ///
     /// # Examples
     ///
@@ -108,8 +116,10 @@ impl Project<'_> {
     /// ```
     #[must_use]
     pub fn declares_dependency_key(&self, key: &Name) -> bool {
+        let key_identifier = extern_identifier(key.as_str());
         self.package.dependencies.iter().any(|dependency| {
-            dependency.rename.as_deref().unwrap_or(&dependency.name) == key.as_str()
+            let dependency_key = dependency.rename.as_deref().unwrap_or(&dependency.name);
+            extern_identifier(dependency_key) == key_identifier
         })
     }
 
@@ -157,8 +167,8 @@ impl Project<'_> {
 /// receive — `Identity::package_name()` — rather than being read directly:
 /// `cargo metadata` walks up from the current directory to find the
 /// workspace root, and this function then identifies the caller among the
-/// workspace's members by name, so `add`, `regenerate` and `remove` work
-/// from any subdirectory of a project.
+/// workspace's members by name, so `add`, `import`, `regenerate` and `remove`
+/// work from any subdirectory of a project.
 ///
 /// # Errors
 ///
@@ -245,6 +255,8 @@ mod tests {
         Package {
             id: "demo-ritual 0.1.0".to_string(),
             name: "demo-ritual".to_string(),
+            version: "0.1.0".to_string(),
+            source: None,
             manifest_path: PathBuf::from("/workspace/ritual/Cargo.toml"),
             targets: Vec::new(),
             dependencies: dependency_names
@@ -355,6 +367,17 @@ mod tests {
             assert!(!project.declares_dependency_key(&valid_name("task-renamed-source")));
         }
         Ok(())
+    }
+
+    /// Rust reads `a-b` and `a_b` as one name, `a_b`, so a dependency
+    /// declared either way occupies the key written the other way.
+    #[test]
+    fn declares_dependency_key_reads_a_hyphen_and_an_underscore_as_one_name() {
+        let package = package_with(&["a_b", "c-d"], &[]);
+        let project = project_over(&package);
+        assert!(project.declares_dependency_key(&valid_name("a-b")));
+        assert!(project.declares_dependency_key(&valid_name("c-d")));
+        assert!(!project.declares_dependency_key(&valid_name("a-bc")));
     }
 
     #[test]

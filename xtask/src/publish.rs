@@ -272,20 +272,21 @@ mod tests {
         names
     }
 
-    const RELEASED: [&str; 9] = [
+    const RELEASED: [&str; 10] = [
         "rituals",
         "rituals-cli",
         "rituals-compose",
         "rituals-core",
         "rituals-core-add",
         "rituals-core-create",
+        "rituals-core-import",
         "rituals-core-new",
         "rituals-core-regenerate",
         "rituals-core-remove",
     ];
 
     #[test]
-    fn this_workspace_releases_nine_crates_and_never_publishes_xtask() {
+    fn this_workspace_releases_every_crate_and_never_publishes_xtask() {
         let members = members(&this_workspace()).expect("the metadata has the expected shape");
         let plan = plan(members, |_| Ok::<_, Infallible>(false)).expect("infallible");
         assert_eq!(names(&plan.to_publish), RELEASED);
@@ -364,6 +365,7 @@ mod tests {
                 "rituals-core",
                 "rituals-core-add",
                 "rituals-core-create",
+                "rituals-core-import",
                 "rituals-core-regenerate",
                 "rituals-core-remove",
                 "xtask",
