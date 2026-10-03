@@ -240,7 +240,9 @@ It refuses, and leaves the project as it found it, `Cargo.lock` included, when:
 - the task has a directory to delete and git cannot give back everything in
   it. That means the project is not a git repository, the directory is or
   holds a git repository of its own, a submodule included, or it holds files
-  that are uncommitted, untracked or ignored; the refusal names them;
+  that are uncommitted, untracked or ignored; the refusal names them. A
+  directory that is a symbolic link is deleted as the link alone, so it is
+  the link that has to be committed;
 - the directory holds files git has been told not to look at, with
   `--assume-unchanged` or `--skip-worktree`, or files stored through a
   `filter` other than Git LFS's, since `git status` can call those clean

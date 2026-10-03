@@ -89,6 +89,10 @@ pub(crate) enum Flag {
 /// Returns the directory spelled from git's top level, the path a person
 /// gives `git checkout` to get it back.
 ///
+/// When `directory` is itself a symbolic link, deleting it removes only the
+/// link, so the link is what git is asked about: it has to be tracked and
+/// unchanged, and the path returned is the link's, not its target's.
+///
 /// Ignored files count against it: a build directory inside the task is
 /// files git cannot give back, and a check that let them through would no
 /// longer be able to say that git can give back everything it deletes.
@@ -110,6 +114,17 @@ fn check_with(
     directory: &Path,
     workspace_root: &Path,
 ) -> Result<PathBuf, Obstacle> {
+    let is_a_link = directory
+        .symlink_metadata()
+        .map_err(|error| {
+            Obstacle::Failed(format!("reading {} failed: {error}", directory.display()))
+        })?
+        .file_type()
+        .is_symlink();
+    if is_a_link {
+        return check_link_with(&new_git, directory, workspace_root);
+    }
+
     let top_level = top_level_of(&new_git, directory)?;
     let directory_itself = canonical(directory)?;
 
@@ -118,23 +133,8 @@ fn check_with(
     if top_level.starts_with(&directory_itself) {
         return Err(Obstacle::OwnRepository(PathBuf::new()));
     }
-    match top_level_of(&new_git, workspace_root) {
-        Ok(projects) if projects == top_level => {}
-        Ok(_) | Err(Obstacle::NotARepository) => {
-            return Err(Obstacle::OtherRepository(top_level));
-        }
-        Err(obstacle) => return Err(obstacle),
-    }
-    let from_top_level = directory_itself
-        .strip_prefix(&top_level)
-        .map(Path::to_path_buf)
-        .map_err(|_| {
-            Obstacle::Failed(format!(
-                "git puts {} in the repository at {}, which does not hold it",
-                directory_itself.display(),
-                top_level.display()
-            ))
-        })?;
+    ensure_the_projects(&new_git, &top_level, workspace_root)?;
+    let from_top_level = from_the_top_level(&directory_itself, &top_level)?;
 
     // One read of the index answers three questions: whether any entry is a
     // submodule, which is tracked as a gitlink, mode 160000, and which
@@ -194,9 +194,98 @@ fn check_with(
         return Err(Obstacle::Filtered(filtered));
     }
 
+    ensure_nothing_dirty(&new_git, directory, ".")?;
+    Ok(from_top_level)
+}
+
+/// [`check_with`] for a `link`, a symbolic link standing where the directory
+/// is: deleting it removes the link and leaves what it points at, so git is
+/// asked about the link itself, from the directory holding it, and never
+/// about the files it leads to. Git keeps a link as one entry, and gives it
+/// back from that when it is tracked and unchanged.
+///
+/// A link runs no `filter` driver, so only the index and the status are
+/// read.
+fn check_link_with(
+    new_git: &impl Fn() -> Command,
+    link: &Path,
+    workspace_root: &Path,
+) -> Result<PathBuf, Obstacle> {
+    let (Some(holder), Some(name)) = (link.parent(), link.file_name()) else {
+        return Err(Obstacle::Failed(format!(
+            "{} has no directory holding it to ask git from",
+            link.display()
+        )));
+    };
+    let top_level = top_level_of(new_git, holder)?;
+    ensure_the_projects(new_git, &top_level, workspace_root)?;
+    let from_top_level = from_the_top_level(&canonical(holder)?, &top_level)?.join(name);
+    // Literal, so a link whose name holds `*` or `?` is not read as a
+    // pattern matching others.
+    let pathspec = format!(":(literal){}", name.to_string_lossy());
+
+    let index = parse_index(&run_git(
+        new_git,
+        holder,
+        &["ls-files", "--stage", "-v", "-z", "--", &pathspec],
+    )?)?;
+    let unwatched: Vec<Unwatched> = index
+        .iter()
+        .filter_map(|entry| {
+            entry.flag.map(|flag| Unwatched {
+                path: from_top_level.clone(),
+                flag,
+            })
+        })
+        .collect();
+    if !unwatched.is_empty() {
+        return Err(Obstacle::Unwatched(unwatched));
+    }
+
+    ensure_nothing_dirty(new_git, holder, &pathspec)?;
+    Ok(from_top_level)
+}
+
+/// Refuses when `top_level` is not the repository `workspace_root` is in:
+/// whatever that other repository vouches for, the project's git cannot give
+/// it back.
+fn ensure_the_projects(
+    new_git: &impl Fn() -> Command,
+    top_level: &Path,
+    workspace_root: &Path,
+) -> Result<(), Obstacle> {
+    match top_level_of(new_git, workspace_root) {
+        Ok(projects) if projects == top_level => Ok(()),
+        Ok(_) | Err(Obstacle::NotARepository) => {
+            Err(Obstacle::OtherRepository(top_level.to_path_buf()))
+        }
+        Err(obstacle) => Err(obstacle),
+    }
+}
+
+/// `path`, resolved through symbolic links, spelled from `top_level`.
+fn from_the_top_level(path: &Path, top_level: &Path) -> Result<PathBuf, Obstacle> {
+    path.strip_prefix(top_level)
+        .map(Path::to_path_buf)
+        .map_err(|_| {
+            Obstacle::Failed(format!(
+                "git puts {} in the repository at {}, which does not hold it",
+                path.display(),
+                top_level.display()
+            ))
+        })
+}
+
+/// Refuses when anything `pathspec` matches, asked from `asked_in`, is
+/// untracked, ignored, or changed since the last commit, naming each.
+fn ensure_nothing_dirty(
+    new_git: &impl Fn() -> Command,
+    asked_in: &Path,
+    pathspec: &str,
+) -> Result<(), Obstacle> {
     let status = run_git(
-        &new_git,
-        directory,
+        new_git,
+        asked_in,
         &[
             "--no-optional-locks",
             "status",
@@ -205,7 +294,7 @@ fn check_with(
             "--untracked-files=all",
             "--ignored=matching",
             "--",
-            ".",
+            pathspec,
         ],
     )?;
     // Git names each path in the status from the top level, whichever
@@ -214,9 +303,8 @@ fn check_with(
         .into_iter()
         .map(PathBuf::from)
         .collect();
-
     if dirty.is_empty() {
-        Ok(from_top_level)
+        Ok(())
     } else {
         Err(Obstacle::Dirty(dirty))
     }
@@ -562,6 +650,81 @@ mod tests {
                 PathBuf::from("task/src/lib.rs"),
                 PathBuf::from("task/untracked.txt"),
             ]
+        );
+        Ok(())
+    }
+
+    /// A repository holding `vendor/task`, committed, and `tasks/task`, an
+    /// uncommitted symbolic link to it.
+    fn a_link_to_a_committed_task(
+        tag: &str,
+    ) -> Result<(ScratchDir, PathBuf), Box<dyn std::error::Error>> {
+        let scratch = ScratchDir::new(tag)?;
+        std::fs::create_dir_all(scratch.path().join("vendor/task"))?;
+        std::fs::create_dir_all(scratch.path().join("tasks"))?;
+        std::fs::write(scratch.path().join("vendor/task/lib.rs"), "// committed\n")?;
+        git(scratch.path(), &["init"])?;
+        commit_everything(scratch.path())?;
+        let link = scratch.path().join("tasks/task");
+        std::os::unix::fs::symlink("../vendor/task", &link)?;
+        Ok((scratch, link))
+    }
+
+    /// Deleting a link removes only the link, so it is the link git has to
+    /// give back: an untracked or ignored one is refused, named by its own
+    /// path, whatever state its target is in.
+    #[test]
+    fn an_untracked_or_ignored_link_is_refused_naming_the_link() -> TestOutcome {
+        let (scratch, link) = a_link_to_a_committed_task("git-link-untracked")?;
+        assert_eq!(
+            check(scratch.path(), &link),
+            Err(Obstacle::Dirty(vec![PathBuf::from("tasks/task")]))
+        );
+
+        std::fs::write(scratch.path().join("tasks/.gitignore"), "task\n")?;
+        git(scratch.path(), &["add", "tasks/.gitignore"])?;
+        git(scratch.path(), &["commit", "--message", "ignore the link"])?;
+        assert_eq!(
+            check(scratch.path(), &link),
+            Err(Obstacle::Dirty(vec![PathBuf::from("tasks/task")]))
+        );
+        Ok(())
+    }
+
+    /// A committed link passes, spelled as the link, and a change inside its
+    /// target is not the link's business, since the target is not deleted;
+    /// pointing the link elsewhere, or telling git not to look at it, is.
+    #[test]
+    fn a_committed_link_passes_as_itself_until_it_changes_or_is_unwatched() -> TestOutcome {
+        let (scratch, link) = a_link_to_a_committed_task("git-link-committed")?;
+        commit_everything(scratch.path())?;
+        std::fs::write(scratch.path().join("vendor/task/lib.rs"), "// changed\n")?;
+        assert_eq!(
+            check(scratch.path(), &link),
+            Ok(PathBuf::from("tasks/task"))
+        );
+
+        git(
+            scratch.path(),
+            &["update-index", "--assume-unchanged", "tasks/task"],
+        )?;
+        assert_eq!(
+            check(scratch.path(), &link),
+            Err(Obstacle::Unwatched(vec![Unwatched {
+                path: PathBuf::from("tasks/task"),
+                flag: Flag::AssumeUnchanged,
+            }]))
+        );
+        git(
+            scratch.path(),
+            &["update-index", "--no-assume-unchanged", "tasks/task"],
+        )?;
+
+        std::fs::remove_file(&link)?;
+        std::os::unix::fs::symlink("../vendor", &link)?;
+        assert_eq!(
+            check(scratch.path(), &link),
+            Err(Obstacle::Dirty(vec![PathBuf::from("tasks/task")]))
         );
         Ok(())
     }

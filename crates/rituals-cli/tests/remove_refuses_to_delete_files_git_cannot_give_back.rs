@@ -5,12 +5,15 @@
 //! give none of them back: `remove` refuses there too, names the directory,
 //! and says to delete it by hand. Neither can a submodule inside the task,
 //! even a clean one, since the project's git records only the commit it
-//! points at: `remove` refuses it as a repository of its own, by name.
+//! points at: `remove` refuses it as a repository of its own, by name. A
+//! task directory that is a symbolic link is deleted as the link alone, so
+//! the link is what git has to give back, and an untracked one is refused.
 //!
 //! Each refusal is checked against the same project once the cause is
 //! cleared — the files committed, the repository made, the submodule
-//! removed — where `remove` succeeds, so the refusal is shown to be about
-//! that cause and not about anything else in the fixture.
+//! removed, the link committed — where `remove` succeeds, so the refusal is
+//! shown to be about that cause and not about anything else in the
+//! fixture.
 
 mod support;
 
@@ -144,6 +147,68 @@ fn a_clean_submodule_in_the_task_is_refused_as_a_repository_of_its_own() -> Test
         assert!(
             !exists(&project.root().join("tasks/greet")),
             "expected tasks/greet to be deleted once git could give it back"
+        );
+        Ok(())
+    })
+}
+
+/// `tasks/greet` as a symbolic link to `vendor/greet`, with only the target
+/// committed. Deleting the directory removes the link alone, so the link is
+/// what git has to give back, and an untracked one is refused, named by its
+/// own path rather than its target's, with the link still in place: the
+/// tree snapshot walks only directories and regular files, so the link is
+/// checked by itself. Once the link is committed, `remove` deletes the link
+/// and leaves its target.
+#[test]
+fn an_untracked_link_at_the_task_directory_is_refused_naming_the_link() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("remove-refuses-untracked-link")?;
+        let project = project_with_a_committed_task(checkout, &working_dir, "greet")?;
+        let link = project.root().join("tasks/greet");
+        let target = project.root().join("vendor/greet");
+        std::fs::create_dir(project.root().join("vendor"))?;
+        std::fs::rename(&link, &target)?;
+        std::os::unix::fs::symlink("../vendor/greet", &link)?;
+        git::git(project.root(), &["add", "--all", "--", "vendor"])?
+            .expect_success("`git add` of the link's target");
+        git::git(
+            project.root(),
+            &["rm", "-r", "--cached", "--quiet", "tasks/greet"],
+        )?
+        .expect_success("`git rm --cached` of the task's old files");
+        git::git(
+            project.root(),
+            &["commit", "--message", "move greet behind a link"],
+        )?
+        .expect_success("committing the target alone");
+        let status = git::git(
+            project.root(),
+            &["status", "--porcelain", "--untracked-files=all"],
+        )?;
+        assert_eq!(
+            status.stdout, "?? tasks/greet\n",
+            "fixture precondition: only the link is untracked"
+        );
+
+        assert_remove_is_refused_and_writes_nothing(
+            &project,
+            "greet",
+            &[":/tasks/greet;", "git cannot give back"],
+        )?;
+        assert_eq!(
+            std::fs::read_link(&link)?,
+            std::path::Path::new("../vendor/greet"),
+            "a refused remove must leave the link as it was"
+        );
+
+        git::commit_everything(project.root())?;
+        project
+            .run_cli(&["remove", "greet"])?
+            .expect_success("`remove greet` once the link is committed");
+        assert!(!exists(&link), "expected the link to be deleted");
+        assert!(
+            target.join("Cargo.toml").exists(),
+            "expected the link's target to be left alone"
         );
         Ok(())
     })

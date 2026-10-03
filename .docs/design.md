@@ -450,7 +450,9 @@ repository, a machine with no `git`, a task directory that is a repository
 of its own, and one in a repository that is not the project's, such as
 through a symbolic link, are refused the same way. The
 refusal says to take the task out by hand, because deleting could not be made
-safe, and nothing is written.
+safe, and nothing is written. A task directory that is itself a symbolic
+link is deleted as the link alone, leaving what it points at, so git is
+asked about the link: it has to be committed and unchanged.
 
 The generated file's header says how to recover a command line that no longer
 compiles: put the dependency back, drop the entry, regenerate, then remove
