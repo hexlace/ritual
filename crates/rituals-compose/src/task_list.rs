@@ -1,8 +1,10 @@
 //! Resolving a composed CLI's `[package.metadata.ritual] tasks` list into
 //! the entries its generated file lists.
 //!
-//! Reached through [`crate::metadata::Metadata::resolve_task_list`] — this
-//! module holds the behaviour, that method is the entry point.
+//! Reached through [`crate::metadata::Metadata::resolve_task_list`], and
+//! [`crate::metadata::Metadata::resolve_task_list_excluding`] for the list
+//! with one key left out — this module holds the behaviour, those methods
+//! are the entry points.
 //
 // `redundant_pub_crate` (clippy nursery) wants `pub` here because this
 // module is private, but `pub(crate)` is the visibility that is actually
@@ -43,23 +45,40 @@ use crate::sentence::join_with_and;
 /// declared only under a `cfg(...)` target, or a dependency that resolves
 /// to a crate whose `task` value is missing, `false`, or not a boolean.
 pub(crate) fn resolve(metadata: &Metadata, package_name: &str) -> Result<Vec<Entry>, Failure> {
+    resolve_leaving_out(metadata, package_name, None)
+}
+
+/// [`resolve`] with every occurrence of `excluded` left out of the list
+/// before any name is checked, so what remains can be verified while
+/// `excluded` is about to be removed, whatever is wrong with it.
+///
+/// An `excluded` that is not in the list changes nothing.
+///
+/// # Errors
+///
+/// Returns the same refusals as [`resolve`], for the names that remain.
+pub(crate) fn resolve_excluding(
+    metadata: &Metadata,
+    package_name: &str,
+    excluded: &str,
+) -> Result<Vec<Entry>, Failure> {
+    resolve_leaving_out(metadata, package_name, Some(excluded))
+}
+
+/// The one resolution both entry points above run, so that leaving a key
+/// out cannot change what is checked for the rest.
+fn resolve_leaving_out(
+    metadata: &Metadata,
+    package_name: &str,
+    excluded: Option<&str>,
+) -> Result<Vec<Entry>, Failure> {
     let project = project::locate(metadata, package_name)?;
     let cli_package = project.package;
 
-    let relative_manifest_path = cli_package
-        .manifest_path
-        .strip_prefix(project.workspace_root)
-        .unwrap_or(cli_package.manifest_path.as_path());
-
-    let Some(tasks_value) = cli_package
-        .metadata
-        .get("ritual")
-        .and_then(|ritual| ritual.get("tasks"))
-    else {
-        return Err(tasks_absent(package_name, relative_manifest_path));
-    };
-
-    let task_name_strings = read_task_name_strings(tasks_value, relative_manifest_path)?;
+    let task_name_strings: Vec<&str> = declared_keys(&project, package_name)?
+        .into_iter()
+        .filter(|key| Some(*key) != excluded)
+        .collect();
     let task_names = validate_task_names(&task_name_strings)?;
     assert_no_duplicates(&task_names)?;
 
@@ -80,23 +99,48 @@ pub(crate) fn resolve(metadata: &Metadata, package_name: &str) -> Result<Vec<Ent
         .collect()
 }
 
+/// Reads `project`'s `[package.metadata.ritual] tasks` list as the strings
+/// it holds, in manifest order, without checking that any of them is a
+/// usable name or names a dependency.
+///
+/// # Errors
+///
+/// Returns a [`Failure`] naming the manifest when the list is absent or is
+/// not a list of strings.
+pub(crate) fn declared_keys<'a>(
+    project: &project::Project<'a>,
+    package_name: &str,
+) -> Result<Vec<&'a str>, Failure> {
+    let cli_package = project.package;
+    let relative_manifest_path = cli_package
+        .manifest_path
+        .strip_prefix(project.workspace_root)
+        .unwrap_or(cli_package.manifest_path.as_path());
+
+    let Some(tasks_value) = cli_package
+        .metadata
+        .get("ritual")
+        .and_then(|ritual| ritual.get("tasks"))
+    else {
+        return Err(tasks_absent(package_name, relative_manifest_path));
+    };
+
+    read_task_name_strings(tasks_value, relative_manifest_path)
+}
+
 /// Reads `value` as a JSON array of strings, or refuses naming
 /// `manifest_path`.
-fn read_task_name_strings(
-    value: &serde_json::Value,
+fn read_task_name_strings<'a>(
+    value: &'a serde_json::Value,
     manifest_path: &Path,
-) -> Result<Vec<String>, Failure> {
+) -> Result<Vec<&'a str>, Failure> {
     let Some(array) = value.as_array() else {
         return Err(wrong_shape(manifest_path));
     };
 
     array
         .iter()
-        .map(|item| {
-            item.as_str()
-                .map(str::to_string)
-                .ok_or_else(|| wrong_shape(manifest_path))
-        })
+        .map(|item| item.as_str().ok_or_else(|| wrong_shape(manifest_path)))
         .collect()
 }
 
@@ -104,7 +148,7 @@ fn read_task_name_strings(
 /// first invalid one — this runs before duplicates are checked, so a name
 /// that is both invalid and repeated is refused for its spelling, not its
 /// repetition.
-fn validate_task_names(names: &[String]) -> Result<Vec<Name>, Failure> {
+fn validate_task_names(names: &[&str]) -> Result<Vec<Name>, Failure> {
     names
         .iter()
         .map(|name_string| Name::new(name_string).map_err(Failure::from))
@@ -266,7 +310,7 @@ fn not_marked(key: &str, resolved_name: &str) -> Failure {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve;
+    use super::{resolve, resolve_excluding};
     use crate::generated_file::Entry;
     use crate::metadata::{DepKind, Metadata, Node, parse};
     use crate::test_support::TestOutcome;
@@ -549,6 +593,96 @@ mod tests {
         if let Err(error) = entries {
             assert!(error.to_string().contains("is not a list of strings"));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn excluding_a_broken_key_lets_the_rest_resolve() -> TestOutcome {
+        // `task-null` is a dependency that does not declare `task = true`,
+        // so a list holding it is refused; leaving that key out is what
+        // lets the others be checked while it is being removed.
+        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        set_demo_ritual_metadata(
+            &mut metadata,
+            serde_json::json!({ "ritual": { "tasks": ["task-true", "task-null", "move"] } }),
+        );
+        assert!(
+            resolve(&metadata, "demo-ritual").is_err(),
+            "the list was meant to be broken by task-null"
+        );
+
+        let entries = resolve_excluding(&metadata, "demo-ritual", "task-null")?;
+
+        assert_eq!(
+            entries,
+            vec![
+                Entry::new("task-true", "task_true"),
+                Entry::new("move", "move"),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn excluding_a_key_still_refuses_another_broken_one() -> TestOutcome {
+        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        set_demo_ritual_metadata(
+            &mut metadata,
+            serde_json::json!({
+                "ritual": { "tasks": ["task-true", "task-null", "task-malformed"] }
+            }),
+        );
+
+        let result = resolve_excluding(&metadata, "demo-ritual", "task-null");
+
+        let failure = result
+            .err()
+            .ok_or("task-malformed was meant to be refused")?;
+        assert!(
+            failure.to_string().contains("task-malformed"),
+            "failure was: {failure}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn excluding_a_key_that_is_not_listed_resolves_the_whole_list() -> TestOutcome {
+        let metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+
+        assert_eq!(
+            resolve_excluding(&metadata, "demo-ritual", "absent")?,
+            resolve(&metadata, "demo-ritual")?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn excluding_a_key_that_is_listed_twice_leaves_out_both() -> TestOutcome {
+        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        set_demo_ritual_metadata(
+            &mut metadata,
+            serde_json::json!({ "ritual": { "tasks": ["task-true", "move", "task-true"] } }),
+        );
+
+        let entries = resolve_excluding(&metadata, "demo-ritual", "task-true")?;
+
+        assert_eq!(entries, vec![Entry::new("move", "move")]);
+        Ok(())
+    }
+
+    #[test]
+    fn excluding_a_key_still_refuses_a_list_of_the_wrong_shape() -> TestOutcome {
+        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        set_demo_ritual_metadata(
+            &mut metadata,
+            serde_json::json!({ "ritual": { "tasks": "task-true" } }),
+        );
+
+        let failure = resolve_excluding(&metadata, "demo-ritual", "task-true")
+            .err()
+            .ok_or("a list of the wrong shape was meant to be refused")?;
+
+        assert!(failure.to_string().contains("is not a list of strings"));
         Ok(())
     }
 }

@@ -150,11 +150,11 @@ could have. Nothing is special-cased for the global one.
 
 ## Management tasks are a bundle
 
-Every command line carries ritual's own management tasks, `add`, `regenerate`,
-`new` and `create`, as one bundle: the crate `rituals-core`, imported under
-the key `ritual` with an ordinary dependency line and an ordinary `tasks`
-entry. Inside a project there is therefore no globally installed tool to keep
-in sync with the project.
+Every command line carries ritual's own management tasks, `add`,
+`regenerate`, `new`, `create` and `remove`, as one bundle: the crate
+`rituals-core`, imported under the key `ritual` with an ordinary dependency
+line and an ordinary `tasks` entry. Inside a project there is therefore no
+globally installed tool to keep in sync with the project.
 
 They are an ordinary imported bundle rather than names built into the
 dispatcher. Built-in names would be reserved in every command line, which
@@ -166,7 +166,9 @@ own scaffolder. The shape below meets these requirements:
 - a project that takes the defaults keeps `cargo ritual <task>`;
 - a project that names its own command line gets `cargo <name> <task>`, and
   ritual's tasks under `cargo <name> ritual …`;
-- renaming and removing are the project's business, and recoverable by hand.
+- renaming is the project's business, and recoverable by hand; `remove`
+  refuses to take the bundle out, because without its commands nothing could
+  put it back.
 
 ## Bundles and the top level
 
@@ -277,17 +279,18 @@ then handed a `CommandLine` at invocation, carrying the identity and the
 commands the top level got from a flattened bundle. The change is two edits:
 the constructor's name, and one prepended parameter.
 
-`add` and `regenerate` use exactly this. They need it to find their own
-project among the workspace's members, and to check a name against the
-running top level before writing.
+`add`, `regenerate` and `remove` use exactly this. They need it to find
+their own project among the workspace's members, and `add` and `regenerate`
+also need it to check a name against the running top level before writing.
 
 ## Each task owns its precondition
 
 The whole bundle mounts everywhere. A project's command line carries `new`,
-and the global binary carries `add` and `regenerate`. The alternative was a
-conditional import, where a task is present or absent depending on where the
-command line stands. That would be the first exception to the tree being the
-same shape everywhere. So each task guards itself instead:
+and the global binary carries `add`, `regenerate` and `remove`. The
+alternative was a conditional import, where a task is present or absent
+depending on where the command line stands. That would be the first exception
+to the tree being the same shape everywhere. So each task guards itself
+instead:
 
 - **`new` and `create` refuse inside a Cargo workspace.** That means under a
   declared workspace root, or under a manifest Cargo cannot resolve a
@@ -301,11 +304,12 @@ same shape everywhere. So each task guards itself instead:
   `Cargo.toml`, and a walk gets that case wrong. An excluded directory with
   no manifest of its own is still inside the workspace to Cargo, so `create`
   and `new` refuse there.
-- **`add` and `regenerate` refuse outside their own project.** They look for
-  the package their own command line was built from, by name. In any other
-  workspace they refuse and name the command to run in the person's own
-  project. So the global binary's `add` and `regenerate` work only inside the
-  ritual repository, and a project uses its own `cargo ritual add`.
+- **`add`, `regenerate` and `remove` refuse outside their own project.**
+  They look for the package their own command line was built from, by name.
+  In any other workspace they refuse and name the command to run in the
+  person's own project. So the global binary's `add`, `regenerate` and
+  `remove` work only inside the ritual repository, and a project uses its own
+  `cargo ritual add`.
   Identity by package name is all this checks. A project's built binary run
   by hand inside a different project whose CLI crate has the same package
   name is taken for that project's own, and its collision check then reads
@@ -360,27 +364,145 @@ project's lint table could fail a freshly scaffolded handler before its
 author has written a line. Under `clippy::pedantic`, for example, a handler
 that always returns `Ok(())` trips `unnecessary_wraps`.
 
-## Removal
+## What `remove` does
 
-Removing a task follows an order Cargo requires. First drop its entry from
-`[package.metadata.ritual] tasks`. Then run `regenerate`, so the generated
-file stops naming the crate. Only then remove the dependency line (and, for
-a crate in the workspace, its member entry and its directory). The generated
-file names every mounted crate, and the command line has to compile for
-`regenerate` to run, so the crate has to stay a dependency until the file
-stops naming it.
+Removing a task by hand follows an order Cargo requires. First drop its entry
+from `[package.metadata.ritual] tasks`. Then run `regenerate`, so the
+generated file stops naming the crate. Only then remove the dependency line
+(and, for a crate in the workspace, its member entry and its directory). The
+generated file names every mounted crate, and the command line has to compile
+for `regenerate` to run, so the crate has to stay a dependency until the file
+stops naming it. Removing the dependency first leaves a generated file that no
+longer compiles, and so no `regenerate` to fix it.
 
-Removing the dependency first leaves a generated file that no longer
-compiles, and so no `regenerate` to fix it. The generated file's header says
-how to recover: put the dependency back, drop the entry, regenerate, then
-remove the dependency.
+`remove <key | crate>` does those steps in that order. The argument is a key
+in `tasks`, or a crate that exactly one key imports; a key wins over a crate
+of the same name. It drops the key, regenerates, removes the dependency line,
+and removes the `[workspace.dependencies]` entry the dependency inherited
+when no other package uses it. For a crate that is a member
+of the workspace it also removes the `members` entry, and the same directory
+from `default-members`. An entry names the directory when Cargo would read
+it as that directory, so `tasks/./lint` and the absolute path are taken out
+too. A glob in `members` is left alone, because deleting the directory is
+enough, unless it would match nothing once the directory goes, which
+refuses. Which crate is a workspace member comes from `cargo metadata`, and
+its directory from the dependency's `path`, never from a fixed directory
+name. A path dependency outside the workspace loses only its
+dependency line, and its directory stays.
 
-The same order holds for ritual's own bundle, which takes all four management
-tasks with it, `regenerate` included. After that the command line cannot
-regenerate itself. Putting it back is a hand edit: restore the dependency
-line, the `tasks` entry, and the one mount line in the generated file. That
-is the way this repository's first generated file was written. Removing the
-bundle is the project's call, not something ritual guards against.
+Everything up to the dependency line happens inside one rollback, so a run
+that fails leaves the project as it found it, `Cargo.lock` included. A final
+`cargo metadata` inside it checks that the edited manifests still resolve and
+brings the lock up to date. The directory is deleted after that, outside the
+rollback and as the last step, because git is the way back for a deletion,
+not a rename aside. A deletion that fails partway says that the manifests are
+already updated and that git can give back what was deleted, with a `git
+checkout` that names the directory from git's top level (`:/tasks/lint`), so
+it works from any directory of the project.
+
+**Why it refuses first.** Before anything is written `remove` refuses:
+
+- a name that is neither a key nor a crate one imports, and a crate that
+  several keys import (it names them, and says to remove one by its key);
+- a key whose package is `rituals-core`, whatever the key is called. The
+  bundle holds the commands that put a task back, so without it nothing
+  could; that is the one removal the project cannot undo from its own
+  command line;
+- a list whose other entries would not resolve without this one, with
+  `regenerate`'s own message;
+- for a member whose directory would be deleted, anything Cargo would still
+  read once it is gone: a dependency on it declared by any package, of any
+  kind, on any target, optional or not, in the workspace or outside it, and
+  a target built from a file in it; a glob in `members` or
+  `default-members` whose last match it is; and a `[patch]`, `[replace]` or
+  `[workspace.dependencies]` entry, or a `paths` or `[patch]` setting in
+  Cargo's configuration, pointing into it, and an `include` of a file in
+  it that is not `optional`. Also a directory that holds other members,
+  lies outside the workspace root once symbolic links are followed, or
+  whose entry is the last in `default-members`.
+
+These are decided while the directory still exists, so each asks about the
+project without it rather than about the project as it is: a final `cargo
+metadata` runs before the deletion and cannot see what the deletion
+breaks. Dependents come from what each package declares, not from the
+resolved graph, which holds only the edges the active features reach; and
+a path crate `cargo metadata` did not load at all, such as one behind an
+optional dependency nothing turns on, is asked about with `cargo metadata
+--no-deps`, because Cargo still reads its manifest when it resolves the
+lockfile.
+
+Cargo's configuration is read the way Cargo reads it: the `.cargo/config`
+file, or `.cargo/config.toml` when there is none, in every directory a
+build can start from and in every directory above it, then the one in
+`$CARGO_HOME`, and every file each of those includes, at any depth. A build
+can start from any directory, so the directories read from are the one
+`remove` runs in, the workspace root, each member's, and every directory
+under the root holding a `.cargo/config` or `.cargo/config.toml` that git
+tracks or would track, which `git ls-files --cached --others
+--exclude-standard` lists. That listing is matched by name, so a few
+configuration files a build could still read are outside it, and are listed
+under what `remove` cannot see.
+
+A path points into the directory when the filesystem says it does, not when
+its text matches. Cargo opens paths through the filesystem, so `Tasks/Lint`
+on a file system that folds case, `alias/lint` when `alias` links to `tasks`,
+and an absolute path through a link above the project all name `tasks/lint`
+to it. So each path is followed a component at a time, through symbolic
+links, and compared with the directory by file identity. When the directory
+is itself a link, a path through the link points into it and a path to its
+target does not, because deleting the link leaves the target. Cargo removes
+`.` and `..` as text before it opens a dependency's, a `[patch]`'s, a `paths`
+override's, a member's or a target's path, and opens an `include` as written,
+so a `..` after a link goes up from the link's own directory in the first and
+from where the link leads in the second; each is followed the way Cargo
+follows it. Past a component that does not exist the filesystem has no
+answer, and the rest is compared as text.
+
+**Git decides whether a directory can be deleted.** Before deleting, `remove`
+asks git for every file under the directory: staged and unstaged changes,
+untracked files and ignored files all count. If any exist it refuses and
+names them, so every file `remove` deletes is one git can give back. Build
+output counts too: letting it through would make that sentence false. So do
+the files `git status` calls clean without being able to give back: a file
+marked `--assume-unchanged`, or `--skip-worktree` while it is on disk, whose
+edits git does not look at, and a file stored through a `filter` other than
+Git LFS's, which can store less than is on disk. A project that is not a git
+repository, a machine with no `git`, a task directory that is a repository
+of its own, and one in a repository that is not the project's, such as
+through a symbolic link, are refused the same way. The
+refusal says to take the task out by hand, because deleting could not be made
+safe, and nothing is written. A task directory that is itself a symbolic
+link is deleted as the link alone, leaving what it points at, so git is
+asked about the link: it has to be committed and unchanged.
+
+**What it cannot see.** Some things read a task's directory where `remove`
+cannot look, and it does not refuse over them:
+
+- a `readme` or `license-file` pointing into it, because only `cargo
+  package` reads them, and the project still builds;
+- a `[source]` replacement `directory` in Cargo's configuration, because
+  Cargo reads it only when a build fetches a package through that source,
+  which depends on what was vendored there;
+- `--config` and `CARGO_*` overrides, because they are given to a later
+  build, and `remove` cannot see what that build will be given;
+- a `.cargo/config` or `.cargo/config.toml` that git ignores, or that sits
+  in a repository of its own inside the project, because git does not list
+  it with the project's files, and a file the project does not keep is not
+  one `remove` can tell from a stray one;
+- a configuration file git lists under another name: in a `.cargo` that is
+  itself a symbolic link, or in a `.Cargo` on a file system that ignores
+  case, because the listing matches the name git stores;
+- the configuration in or below the directory of a member that lies outside
+  the workspace root, because git lists only what is under the root;
+- a `build.rs`, `include_str!` or `#[path]` reaching into it, because what
+  code reads at build time is not knowable from the manifests;
+- line endings under `core.autocrlf`, because git gives back a file's
+  content, not the CRLF bytes it had on disk.
+
+The generated file's header says how to recover a command line that no longer
+compiles: put the dependency back, drop the entry, regenerate, then remove
+the dependency. `remove` cannot run there, because it runs as that command
+line, so the header stays as it is.
 
 ## Refusals
 

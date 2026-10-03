@@ -8,6 +8,7 @@ members = [
     "tasks/create",
     "tasks/new",
     "tasks/regenerate",
+    "tasks/remove",
     "xtask",
 ]
 resolver = "3"
@@ -25,6 +26,7 @@ add = { package = "rituals-core-add", path = "tasks/add", version = "0.1.2" }
 create = { package = "rituals-core-create", path = "tasks/create", version = "0.1.2" }
 new = { package = "rituals-core-new", path = "tasks/new", version = "0.1.2" }
 regenerate = { package = "rituals-core-regenerate", path = "tasks/regenerate", version = "0.1.2" }
+remove = { package = "rituals-core-remove", path = "tasks/remove", version = "0.1.2" }
 # `add` appends to manifests somebody wrote by hand. A whole-file round trip
 # through a plain TOML parser reformats them and drops their comments; this
 # crate edits in place. It is the same crate Cargo's own `add` uses.

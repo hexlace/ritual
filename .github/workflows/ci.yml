@@ -14,9 +14,9 @@
 #
 # The `test` job also builds temporary Cargo projects: the integration tests in
 # crates/rituals-cli/tests/ scaffold real projects with `ritual new`/`create`/
-# `add` and build them, each into a target directory of its own, so no test can
-# run a binary another test built. Those projects carry no lockfile and resolve
-# their dependencies from crates.io.
+# `add`, take tasks out with `remove`, and build them, each into a target
+# directory of its own, so no test can run a binary another test built. Those
+# projects carry no lockfile and resolve their dependencies from crates.io.
 
 name: CI
 
