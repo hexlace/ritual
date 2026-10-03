@@ -454,6 +454,21 @@ safe, and nothing is written. A task directory that is itself a symbolic
 link is deleted as the link alone, leaving what it points at, so git is
 asked about the link: it has to be committed and unchanged.
 
+**What it cannot see.** Some things read a task's directory where `remove`
+cannot look, and it does not refuse over them:
+
+- a `readme` or `license-file` pointing into it, because only `cargo
+  package` reads them, and the project still builds;
+- a `[source]` replacement `directory` in Cargo's configuration, because
+  Cargo reads it only when a build fetches a package through that source,
+  which depends on what was vendored there;
+- `--config` and `CARGO_*` overrides, because they are given to a later
+  build, and `remove` cannot see what that build will be given;
+- a `build.rs`, `include_str!` or `#[path]` reaching into it, because what
+  code reads at build time is not knowable from the manifests;
+- line endings under `core.autocrlf`, because git gives back a file's
+  content, not the CRLF bytes it had on disk.
+
 The generated file's header says how to recover a command line that no longer
 compiles: put the dependency back, drop the entry, regenerate, then remove
 the dependency. `remove` cannot run there, because it runs as that command
