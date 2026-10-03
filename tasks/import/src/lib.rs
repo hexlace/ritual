@@ -14,7 +14,7 @@ use arguments::ImportArguments;
 use import::Import;
 use rituals::{CommandLine, Failure, Name, Outcome, Task};
 use rituals_compose::rollback::{self, Changes};
-use rituals_compose::{metadata, top_level, workspace};
+use rituals_compose::{generated_file, metadata, top_level, workspace};
 
 /// This task, for a command line to mount under whatever name imports it.
 ///
@@ -39,8 +39,11 @@ fn run(command_line: &CommandLine, arguments: &ImportArguments) -> Outcome {
     let import_command = top_level::management_command(command_line, "import");
     // The key and the words that run this again come from what was typed and
     // run no subprocess, so a refusal of the key leaves nothing to put back
-    // and is not in the attempt.
+    // and is not in the attempt. That includes a key that would hide `std`
+    // or `core`, which the task check after `cargo add` refuses too, but only
+    // once Cargo has run.
     let key = arguments.key(&import_command, &current_dir)?;
+    generated_file::ensure_key_hides_no_crate(&key)?;
     let again = arguments.to_run_again(&current_dir);
 
     let import = rollback::attempt(&import::retry(&again), |changes| {
@@ -123,15 +126,17 @@ mod tests {
     use rituals::{CommandLine, Identity};
 
     use rituals::Failure;
-    use rituals_compose::rollback;
+    use rituals_compose::{generated_file, rollback};
 
     use super::{Import, prepare};
-    use crate::test_support::{ScratchDir, ScratchProject, TestOutcome, typed_arguments};
+    use crate::test_support::{
+        RITUALS_DEPENDENCY, ScratchDir, ScratchProject, TestOutcome, typed_arguments,
+    };
 
     /// What the rollback appends to a failure of the run `prepare` is in.
     const PUT_BACK: &str = "; ritual put the project back as it found it";
 
-    /// `prepare` as `run` calls it: the key resolved first, outside the
+    /// `prepare` as `run` calls it: the key decided first, outside the
     /// attempt, and the rest inside the attempt that begins at the first
     /// subprocess.
     fn prepared(
@@ -141,6 +146,7 @@ mod tests {
     ) -> Result<Import, Failure> {
         let arguments = typed_arguments(words);
         let key = arguments.key("cargo ritual import", current_dir)?;
+        generated_file::ensure_key_hides_no_crate(&key)?;
         let again = arguments.to_run_again(current_dir);
         rollback::attempt("running `import` again", |changes| {
             prepare(command_line, &arguments, current_dir, key, &again, changes)
@@ -194,7 +200,7 @@ mod tests {
             project.cli_manifest_path(),
             format!(
                 "[package]\nname = \"demo-ritual\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
-                 [dependencies]\n{dependency} = {{ path = \"../{dependency}\" }}\n\n\
+                 [dependencies]\n{RITUALS_DEPENDENCY}\n{dependency} = {{ path = \"../{dependency}\" }}\n\n\
                  [package.metadata.ritual]\ntasks = [{}]\n",
                 list.join(", ")
             ),
@@ -305,6 +311,30 @@ mod tests {
                 .is_some_and(|message| message.starts_with("`my_crate` is not a usable name;")),
             "expected the key's refusal first; got: {message:?}"
         );
+        Ok(())
+    }
+
+    /// `std` and `core` are refused from what was typed alone, before the
+    /// project is looked at, since nothing about the project changes them.
+    #[test]
+    fn a_key_that_would_hide_std_or_core_is_refused_before_the_project_is_looked_at() -> TestOutcome
+    {
+        let empty = ScratchDir::new("prepare-hiding-key")?;
+        for key in ["std", "core"] {
+            let message = refusal(
+                &default_command_line(),
+                &["greeter", key, "--path", "../greeter"],
+                empty.path(),
+            );
+
+            assert_eq!(
+                message,
+                Some(format!(
+                    "`{key}` would hide Rust's own `{key}` crate, which the generated command \
+                     line is built on, and it would no longer compile; give this task another key"
+                ))
+            );
+        }
         Ok(())
     }
 

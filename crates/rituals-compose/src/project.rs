@@ -255,6 +255,8 @@ mod tests {
         Package {
             id: "demo-ritual 0.1.0".to_string(),
             name: "demo-ritual".to_string(),
+            version: "0.1.0".to_string(),
+            source: None,
             manifest_path: PathBuf::from("/workspace/ritual/Cargo.toml"),
             targets: Vec::new(),
             dependencies: dependency_names

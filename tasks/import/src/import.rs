@@ -163,7 +163,7 @@ mod tests {
         Import, LockfileChange, imported_but_not_regenerated, next_step, reported_lines, retry,
     };
     use crate::cargo_add;
-    use crate::test_support::{ScratchProject, TestOutcome, typed_arguments};
+    use crate::test_support::{RITUALS_DEPENDENCY, ScratchProject, TestOutcome, typed_arguments};
 
     fn valid_name(value: &str) -> Name {
         Name::new(value).expect("a test passes only names it knows are valid")
@@ -351,8 +351,10 @@ mod tests {
         project.write_crate("greeter", true)?;
         std::fs::write(
             project.cli_manifest_path(),
-            "[package]\nname = \"demo-ritual\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
-             [dependencies]\n\n[package.metadata.ritual]\ntask = true\n",
+            format!(
+                "[package]\nname = \"demo-ritual\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+                 [dependencies]\n{RITUALS_DEPENDENCY}\n\n[package.metadata.ritual]\ntask = true\n"
+            ),
         )?;
         let import = import_in(&project, "greeter", &["greeter", "--path", "../greeter"])?;
 

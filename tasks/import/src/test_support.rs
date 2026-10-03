@@ -98,11 +98,17 @@ fn parse_typed(words: &[&str]) -> Result<Typed, clap::Error> {
 /// sorted by path: a before and after to compare a run against.
 pub(crate) type Snapshot = Vec<(PathBuf, Vec<u8>)>;
 
+/// How the CLI crate and every crate written beside it depend on the
+/// project's `rituals`, from one directory below the workspace root.
+pub(crate) const RITUALS_DEPENDENCY: &str = "rituals = { path = \"../rituals\" }";
+
 /// A scratch project shaped like one `new` scaffolds, small enough that
 /// Cargo resolves it with nothing to download: a workspace whose one member
-/// is a composed CLI crate called `demo-ritual` with an empty task list.
-/// Task crates to import are written beside it, and need nothing beyond the
-/// manifest that marks them.
+/// is a composed CLI crate called `demo-ritual` with an empty task list,
+/// depending on a crate called `rituals` beside it. Task crates to import
+/// are written beside it too, and need nothing beyond the manifest that
+/// marks them and the same `rituals`, which a task and the command line
+/// mounting it must share.
 pub(crate) struct ScratchProject {
     root: ScratchDir,
 }
@@ -111,15 +117,23 @@ impl ScratchProject {
     pub(crate) fn new(tag: &str) -> Result<Self, Box<dyn Error>> {
         let root = ScratchDir::new(tag)?;
         std::fs::create_dir_all(root.path().join("cli/src"))?;
+        std::fs::create_dir_all(root.path().join("rituals/src"))?;
         std::fs::write(
             root.path().join("Cargo.toml"),
             "[workspace]\nmembers = [\"cli\"]\nresolver = \"3\"\n",
         )?;
         std::fs::write(
             root.path().join("cli/Cargo.toml"),
-            "[package]\nname = \"demo-ritual\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
-             [dependencies]\n\n[package.metadata.ritual]\ntasks = []\n",
+            format!(
+                "[package]\nname = \"demo-ritual\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+                 [dependencies]\n{RITUALS_DEPENDENCY}\n\n[package.metadata.ritual]\ntasks = []\n"
+            ),
         )?;
+        std::fs::write(
+            root.path().join("rituals/Cargo.toml"),
+            "[package]\nname = \"rituals\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )?;
+        std::fs::write(root.path().join("rituals/src/lib.rs"), "")?;
         std::fs::write(root.path().join("cli/src/main.rs"), "fn main() {}\n")?;
         Ok(Self { root })
     }
@@ -143,7 +157,8 @@ impl ScratchProject {
     }
 
     /// Writes a library crate called `name` in a directory of that name beside
-    /// the CLI, marked as a task when `is_a_task`, and returns its directory.
+    /// the CLI, depending on the project's `rituals`, marked as a task when
+    /// `is_a_task`, and returns its directory.
     pub(crate) fn write_crate(
         &self,
         name: &str,
@@ -159,7 +174,8 @@ impl ScratchProject {
         std::fs::write(
             directory.join("Cargo.toml"),
             format!(
-                "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n{mark}"
+                "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+                 [dependencies]\n{RITUALS_DEPENDENCY}\n{mark}"
             ),
         )?;
         std::fs::write(directory.join("src/lib.rs"), "")?;

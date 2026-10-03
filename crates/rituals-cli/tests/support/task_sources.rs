@@ -63,6 +63,34 @@ pub(crate) fn write_path_task(
     )
 }
 
+/// Writes a crate called `rituals` at `directory`, at `version`: a package
+/// of the same name as the checkout's own `rituals`, which Rust reads as a
+/// different crate whatever its version. Nothing builds it; a story that
+/// uses it is about what ritual refuses before anything is built.
+pub(crate) fn write_other_rituals(directory: &Path, version: &str) -> TestOutcome {
+    crates::write_crate(
+        directory,
+        &format!("[package]\nname = \"rituals\"\nversion = \"{version}\"\nedition = \"2024\"\n"),
+        "//! A crate called rituals that is not the checkout's.\n",
+    )
+}
+
+/// Writes a task crate at `directory` that depends by path on the
+/// `rituals` at `rituals_directory`, rather than on the checkout's own.
+pub(crate) fn write_path_task_built_on(
+    directory: &Path,
+    rituals_directory: &Path,
+    crate_name: &str,
+    version: &str,
+) -> TestOutcome {
+    let dependency = format!("{{ path = {:?} }}", path_to_str(rituals_directory)?);
+    crates::write_crate(
+        directory,
+        &task_manifest(crate_name, version, &dependency),
+        &task_lib(crate_name, version),
+    )
+}
+
 /// Writes a plain crate at `directory` that never declares itself a task:
 /// no `[package.metadata.ritual]` table, and no dependencies.
 pub(crate) fn write_unmarked_crate(directory: &Path, crate_name: &str) -> TestOutcome {
@@ -146,6 +174,27 @@ impl LocalRegistry {
         checkout: &Checkout,
         directory: &Path,
     ) -> Outcome<Self> {
+        let registry = Self::install_unpatched(project, directory)?;
+
+        let rituals = checkout.root().join("crates").join("rituals");
+        let manifest_path = project.workspace_manifest_path();
+        let manifest = read_text(&manifest_path)?;
+        write_text(
+            &manifest_path,
+            &format!(
+                "{manifest}\n[patch.crates-io]\nrituals = {{ path = {:?} }}\n",
+                path_to_str(&rituals)?
+            ),
+        )?;
+
+        Ok(registry)
+    }
+
+    /// [`Self::install`] without the patch: a registry crate that names
+    /// `rituals` by version resolves it from the registry, as a project
+    /// whose own `rituals` comes from a path would see a task from
+    /// crates.io do. The two are then two packages of one name.
+    pub(crate) fn install_unpatched(project: &Project, directory: &Path) -> Outcome<Self> {
         project
             .cargo(&["vendor", path_to_str(directory)?])?
             .expect_success("`cargo vendor` of the project's own dependencies");
@@ -161,17 +210,6 @@ impl LocalRegistry {
             ),
         )?;
 
-        let rituals = checkout.root().join("crates").join("rituals");
-        let manifest_path = project.workspace_manifest_path();
-        let manifest = read_text(&manifest_path)?;
-        write_text(
-            &manifest_path,
-            &format!(
-                "{manifest}\n[patch.crates-io]\nrituals = {{ path = {:?} }}\n",
-                path_to_str(&rituals)?
-            ),
-        )?;
-
         Ok(Self {
             directory: directory.to_path_buf(),
         })
@@ -179,12 +217,46 @@ impl LocalRegistry {
 
     /// Publishes one release of a task crate into the registry.
     pub(crate) fn publish_task(&self, crate_name: &str, version: &str) -> TestOutcome {
-        let crate_dir = self.directory.join(format!("{crate_name}-{version}"));
-        crates::write_crate(
-            &crate_dir,
+        self.publish(
+            crate_name,
+            version,
             &task_manifest(crate_name, version, &registry_dependency()),
             &task_lib(crate_name, version),
+        )
+    }
+
+    /// Publishes a release of `rituals` into the registry, and one release
+    /// of a task crate built for exactly that release. With the project's
+    /// patch to the checkout, a release other than the one this suite was
+    /// built against is one the patch does not reach; without it, any
+    /// release is the registry's own.
+    pub(crate) fn publish_task_built_for_rituals(
+        &self,
+        crate_name: &str,
+        version: &str,
+        rituals_version: &str,
+    ) -> TestOutcome {
+        self.publish(
+            "rituals",
+            rituals_version,
+            &format!(
+                "[package]\nname = \"rituals\"\nversion = \"{rituals_version}\"\n\
+                 edition = \"2024\"\n"
+            ),
+            "//! A release of rituals this suite was not built against.\n",
         )?;
+        self.publish(
+            crate_name,
+            version,
+            &task_manifest(crate_name, version, &format!("\"={rituals_version}\"")),
+            &task_lib(crate_name, version),
+        )
+    }
+
+    /// Writes one crate into the registry, as `cargo vendor` lays it out.
+    fn publish(&self, crate_name: &str, version: &str, manifest: &str, lib: &str) -> TestOutcome {
+        let crate_dir = self.directory.join(format!("{crate_name}-{version}"));
+        crates::write_crate(&crate_dir, manifest, lib)?;
         // A directory source reads this file to tell a vendored crate from a
         // hand-edited one; a null package checksum is what a crate with no
         // registry origin carries.

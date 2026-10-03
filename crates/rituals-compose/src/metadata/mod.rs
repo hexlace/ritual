@@ -328,17 +328,20 @@ impl Metadata {
     /// This is a pure read: nothing is written, and each check runs only
     /// once the one before it has succeeded — `package_name` found as a
     /// workspace member with one binary target, `tasks` present and a list of
-    /// strings, each name valid, no duplicates, a matching normal dependency
-    /// present on every target, that dependency resolved, and the resolved
-    /// crate marked `task = true`.
+    /// strings, each name valid and one the generated file compiles with, no
+    /// duplicates, a matching normal dependency present on every target, that
+    /// dependency resolved, the resolved crate marked `task = true`, and that
+    /// crate built on the very `rituals` package `package_name` uses.
     ///
     /// # Errors
     ///
     /// Returns a [`Failure`] naming the specific problem: a project that
     /// cannot be located, an absent or wrongly-shaped `tasks` list, an invalid
-    /// or duplicated name, a name with no matching dependency, a dependency
-    /// declared only under a `cfg(...)` target, or a dependency that resolves
-    /// to a crate whose `task` value is missing, `false`, or not a boolean.
+    /// or duplicated name, a name that would hide `std` or `core`, a name with
+    /// no matching dependency, a dependency declared only under a `cfg(...)`
+    /// target, a dependency that resolves to a crate whose `task` value is
+    /// missing, `false`, or not a boolean, or one built on another `rituals`
+    /// than `package_name`'s, or on none.
     ///
     /// # Examples
     ///
@@ -360,7 +363,10 @@ impl Metadata {
 
     /// Refuses unless the dependency `package_name` declares under `key` is a
     /// task: a normal dependency, present on every target, that resolves to
-    /// a crate declaring `[package.metadata.ritual] task = true`.
+    /// a crate declaring `[package.metadata.ritual] task = true` and built on
+    /// the very `rituals` package `package_name` uses. Two packages called
+    /// `rituals` are two crates to Rust, whatever their versions, and the
+    /// generated file hands one's `Task` to the other's `run`.
     ///
     /// This is the question an import asks of a dependency somebody else
     /// wrote, once Cargo has declared it and before it joins the task list.
@@ -378,8 +384,9 @@ impl Metadata {
     /// when `package_name` cannot be located, when it has no dependency
     /// under `key`, when that dependency is only a dev- or build-dependency
     /// or only present under a `cfg(...)` target, when the crate it
-    /// resolves to does not declare `task = true`, or when it declares
-    /// `task` as something other than a boolean.
+    /// resolves to does not declare `task = true`, when it declares `task` as
+    /// something other than a boolean, or when it is built on another
+    /// `rituals` than `package_name`'s, or on none.
     ///
     /// # Examples
     ///
