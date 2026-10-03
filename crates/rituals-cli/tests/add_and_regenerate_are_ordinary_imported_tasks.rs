@@ -1,9 +1,9 @@
 //! `add` and `regenerate` are ordinary imported tasks, not framework
 //! built-ins. A scaffolded project imports ritual's management bundle —
-//! `rituals-core`, whose children are `add`, `regenerate`, `new`, `create` and
-//! `import` — the way it imports any task: a Cargo dependency, sourced from
-//! the same `--path` checkout as `rituals`, plus one entry, `ritual`, in
-//! `[package.metadata.ritual] tasks`. Nothing is reserved for those tasks at
+//! `rituals-core`, whose children are `add`, `regenerate`, `new`, `create`,
+//! `import` and `remove` — the way it imports any task: a Cargo dependency,
+//! sourced from the same `--path` checkout as `rituals`, plus one entry,
+//! `ritual`, in `[package.metadata.ritual] tasks`. Nothing is reserved for those tasks at
 //! the assembly step: dropping the bundle the way any import is dropped
 //! drops all of them from the command line.
 //!
@@ -59,7 +59,15 @@ fn assert_help_lists_the_bundles_children_in_order(project: &Project) -> TestOut
 
     assert_eq!(
         help::command_names(&help.stdout),
-        ["add", "regenerate", "new", "create", "import", "help"],
+        [
+            "add",
+            "regenerate",
+            "new",
+            "create",
+            "import",
+            "remove",
+            "help"
+        ],
         "stdout was:\n{}",
         help.stdout
     );
@@ -100,6 +108,7 @@ fn assert_a_later_task_follows_the_bundle(project: &Project) -> TestOutcome {
             "new",
             "create",
             "import",
+            "remove",
             "greet",
             "help"
         ],
@@ -153,7 +162,7 @@ fn verify_naming_a_task_add_is_refused(project: &Project) -> TestOutcome {
 /// while the dependency still resolves and rewrites the file without it,
 /// and only then does the dependency go. That order is Cargo's, and removing
 /// any task, `greet` included, takes the same three steps.
-fn verify_removing_the_bundle_drops_all_four_children(project: &Project) -> TestOutcome {
+fn verify_removing_the_bundle_drops_all_its_children(project: &Project) -> TestOutcome {
     manifest::edit(&project.cli_manifest_path(), |document| {
         manifest::remove_task(document, "ritual")
     })?;
@@ -184,8 +193,8 @@ fn regenerate_and_verify_the_bundle_is_dropped_from_the_generated_file(
 
 /// Phase 5, third step — with nothing left naming the bundle, its
 /// dependency goes, and the command line still builds: `--help` lists only
-/// `greet` and clap's `help`, and `add` is no longer a command at all —
-/// clap, not ritual, refuses it.
+/// `greet` and clap's `help`, and `add` and `remove` are no longer commands
+/// at all — clap, not ritual, refuses them.
 fn remove_the_bundle_dependency_and_verify_the_command_line(project: &Project) -> TestOutcome {
     manifest::edit(&project.cli_manifest_path(), |document| {
         manifest::remove_dependency(document, "ritual")
@@ -207,6 +216,7 @@ fn remove_the_bundle_dependency_and_verify_the_command_line(project: &Project) -
         &project.run_cli(&["add", "another-task"])?,
         "add",
     );
+    help::assert_refuses_unrecognized_subcommand(&project.run_cli(&["remove", "greet"])?, "remove");
 
     Ok(())
 }
@@ -221,7 +231,7 @@ fn add_and_regenerate_behave_as_ordinary_imported_tasks() -> TestOutcome {
         assert_help_lists_the_bundles_children_in_order(&project)?;
         assert_a_later_task_follows_the_bundle(&project)?;
         verify_naming_a_task_add_is_refused(&project)?;
-        verify_removing_the_bundle_drops_all_four_children(&project)?;
+        verify_removing_the_bundle_drops_all_its_children(&project)?;
 
         Ok(())
     })

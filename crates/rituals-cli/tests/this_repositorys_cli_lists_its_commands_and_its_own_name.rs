@@ -1,9 +1,9 @@
 //! This repository's own composed CLI — the `ritual` binary — lists exactly
-//! its management commands, `add`, `regenerate`, `new`, `create` and `import`,
-//! in that order, and reports its own bin name for `--version`, never its package
-//! name, `rituals-cli`.
+//! its commands, `add`, `regenerate`, `new`, `create`, `import` and
+//! `remove`, in that order, and reports its own bin name for `--version`,
+//! never its package name, `rituals-cli`.
 //!
-//! The management commands are the children of ritual's management bundle,
+//! The commands are the children of ritual's management bundle,
 //! mounted under the key `ritual` and flattened onto the top level because
 //! the bin is named `ritual` too; the key itself is never a command. Runs
 //! the `ritual` binary this suite was built with, so it needs no build of
@@ -14,14 +14,22 @@ mod support;
 use support::{TempDir, TestOutcome, help, run_ritual};
 
 #[test]
-fn this_repositorys_own_cli_lists_its_management_commands_in_order() -> TestOutcome {
+fn this_repositorys_own_cli_lists_its_commands_in_order() -> TestOutcome {
     let working_dir = TempDir::new("own-cli-help")?;
     let help = run_ritual(working_dir.path(), &["--help"])?;
     help.expect_success("`ritual --help`");
 
     assert_eq!(
         help::command_names(&help.stdout),
-        ["add", "regenerate", "new", "create", "import", "help"],
+        [
+            "add",
+            "regenerate",
+            "new",
+            "create",
+            "import",
+            "remove",
+            "help"
+        ],
         "stdout was:\n{}",
         help.stdout
     );

@@ -38,15 +38,16 @@ command line, so `cargo ritual hello` already runs. Edit
 | `cargo ritual add <name>` | inside a project | scaffold a task crate in this project, import it, and regenerate |
 | `cargo ritual import <crate>[@<version>] [<key>]` | inside a project | import a task crate from a registry, git or a path, and regenerate |
 | `cargo ritual regenerate` | inside a project | rewrite src/main.rs from the imported tasks |
+| `cargo ritual remove <key\|crate>` | inside a project | take a task out, in the order that keeps the project building |
 
 `new` and `create` take ritual's crates from crates.io at the version of
 the `ritual` you ran. `--path <checkout>` or `--git <url>` takes them
 from a ritual checkout or a git repository instead. `new --cli <name>` names
 the project's binary and cargo alias `<name>` instead of `ritual`.
 
-A project's own command line carries all of them, and so does the global
-`ritual`. `new` and `create` refuse inside a project, and the global
-`ritual`'s `add`, `import` and `regenerate` refuse in one: use
+A project's own command line carries all of these commands, and so does the
+global `ritual`. `new` and `create` refuse inside a project, and the global
+`ritual`'s `add`, `import`, `regenerate` and `remove` refuse in one: use
 `cargo ritual add`.
 
 See [the ritual readme](https://github.com/hexlace/ritual#readme) for concepts and everyday operations, and

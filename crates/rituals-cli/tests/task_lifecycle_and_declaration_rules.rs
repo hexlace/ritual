@@ -73,13 +73,13 @@ fn assert_new_writes_exactly_the_specified_things(project: &Project) -> TestOutc
 }
 
 /// Phase 2 — a project produced by `new` builds and runs its composed CLI
-/// with plain Cargo, and that CLI carries ritual's management tasks at
-/// its top level.
+/// with plain Cargo, and that CLI carries ritual's management tasks at its
+/// top level.
 fn assert_fresh_project_builds_and_lists_management_tasks(project: &Project) -> TestOutcome {
     let help = project.cargo(&["run", "--", "--help"])?;
     help.expect_success("`cargo run -- --help` on a freshly scaffolded project");
 
-    for command in ["add", "regenerate", "new", "create", "import"] {
+    for command in ["add", "regenerate", "new", "create", "import", "remove"] {
         assert!(
             help::lists_command(&help.stdout, command),
             "expected --help to list the `{command}` task; stdout was:\n{}",

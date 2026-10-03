@@ -1,8 +1,9 @@
 //! A project scaffolded with no `--cli` carries ritual's management bundle —
-//! `add`, `regenerate`, `new`, `create`, `import` — as one import under the key
-//! `ritual`, flattened into its top level because the project's own bin is
-//! named `ritual` too. Hand-renaming that `[[bin]]` and rebuilding nests the
-//! bundle under `ritual` on the next build, with no other file touched.
+//! `add`, `regenerate`, `new`, `create`, `import` and `remove` — as one import
+//! under the key `ritual`, flattened into its top level because the project's
+//! own bin is named `ritual` too. Hand-renaming that `[[bin]]` and rebuilding
+//! nests the bundle under `ritual` on the next build, with no other file
+//! touched.
 //!
 //! Also: the workspace's dependency table names only `rituals`, and
 //! `regenerate` run immediately after `new`, or immediately after `add`,
@@ -137,6 +138,7 @@ fn assert_an_added_task_sits_flat_beside_the_bundle(project: &Project) -> TestOu
             "new",
             "create",
             "import",
+            "remove",
             "my-task",
             "help"
         ],
@@ -171,7 +173,15 @@ fn assert_renaming_the_bin_nests_the_bundle(project: &Project) -> TestOutcome {
     nested_help.expect_success("the renamed binary with `ritual --help`");
     assert_eq!(
         help::command_names(&nested_help.stdout),
-        ["add", "regenerate", "new", "create", "import", "help"],
+        [
+            "add",
+            "regenerate",
+            "new",
+            "create",
+            "import",
+            "remove",
+            "help"
+        ],
         "stdout was:\n{}",
         nested_help.stdout
     );

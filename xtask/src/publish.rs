@@ -272,7 +272,7 @@ mod tests {
         names
     }
 
-    const RELEASED: [&str; 9] = [
+    const RELEASED: [&str; 10] = [
         "rituals",
         "rituals-cli",
         "rituals-compose",
@@ -282,6 +282,7 @@ mod tests {
         "rituals-core-import",
         "rituals-core-new",
         "rituals-core-regenerate",
+        "rituals-core-remove",
     ];
 
     #[test]
@@ -366,6 +367,7 @@ mod tests {
                 "rituals-core-create",
                 "rituals-core-import",
                 "rituals-core-regenerate",
+                "rituals-core-remove",
                 "xtask",
             ]
         );

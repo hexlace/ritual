@@ -48,6 +48,7 @@ fn the_management_bundle_and_its_tasks_declare_themselves_tasks() -> TestOutcome
             ("tasks/new", "rituals-core-new"),
             ("tasks/create", "rituals-core-create"),
             ("tasks/import", "rituals-core-import"),
+            ("tasks/remove", "rituals-core-remove"),
         ] {
             assert_declares_itself_a_task(checkout, directory, package_name)?;
         }

@@ -1,6 +1,6 @@
-//! Editing a manifest in place with `toml_edit`, so a scaffolding task can
-//! append to a manifest a human wrote without disturbing its comments or
-//! formatting.
+//! Editing a manifest in place with `toml_edit`, so a task can append to a
+//! manifest a human wrote, or take an entry out of it, without disturbing
+//! its comments or formatting.
 
 use std::path::{Path, PathBuf};
 
@@ -9,7 +9,10 @@ use toml_edit::{Array, DocumentMut, InlineTable, Item, RawString, Value};
 
 use crate::rollback::Changes;
 
-/// A manifest a scaffolding task is about to edit.
+mod entry_removal;
+mod removal;
+
+/// A manifest a task is about to edit.
 ///
 /// It is written only through a run's [`Changes`], which records the bytes
 /// on disk before the first write, so a failed run puts exactly those bytes
@@ -73,7 +76,7 @@ impl Manifest {
     ///
     /// This writes the whole file from the in-memory document, with no
     /// check that the file on disk still matches what [`Manifest::read`]
-    /// saw: two scaffolding tasks running at once in the same checkout, or
+    /// saw: two tasks running at once in the same checkout, or
     /// a hand edit landing between the read and this write, can be
     /// overwritten by it. This is deliberate: it carries the same
     /// property `cargo add` itself has — one person runs this by hand, in
@@ -657,13 +660,14 @@ pub fn dependency_path(manifest_path: &Path, crate_dir: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     use rituals::Name;
 
     use super::{
         Manifest, declares_a_task_crate, declares_a_workspace, dependency_path, push_matching_style,
     };
+    use crate::paths::normalize;
     use crate::test_support::{ScratchDir, TestOutcome};
 
     fn assert_send<T: Send>() {}
@@ -1124,23 +1128,6 @@ mod tests {
             );
         }
         Ok(())
-    }
-
-    /// Removes `..` and `.` components lexically, the way joining a
-    /// relative path onto a base directory needs before comparing it
-    /// against a target — `Path` never does this on its own.
-    fn normalize(path: &Path) -> PathBuf {
-        let mut result = PathBuf::new();
-        for component in path.components() {
-            match component {
-                std::path::Component::ParentDir => {
-                    result.pop();
-                }
-                std::path::Component::CurDir => {}
-                other => result.push(other.as_os_str()),
-            }
-        }
-        result
     }
 
     #[test]

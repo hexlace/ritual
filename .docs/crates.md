@@ -9,7 +9,7 @@ principles themselves are in [design.md](design.md).
 |---|---|---|
 | `rituals` | what a task needs | — |
 | `rituals-compose` | the composition library | `rituals` |
-| `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import` | the management tasks | `rituals`, `rituals-compose` |
+| `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import`, `-remove` | the management tasks | `rituals`, `rituals-compose` |
 | `rituals-core` | the bundle of those tasks | `rituals`, the leaves |
 | `rituals-cli` | the `ritual` binary | `rituals`, `rituals-core` |
 | `xtask` | release tooling, never published | — |
@@ -73,14 +73,14 @@ Beyond `rituals`, its dependencies are here because of what the job is:
   their comments; `toml_edit` edits in place. It is the crate Cargo's own
   `cargo add` uses.
 
-## `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import` — the leaves
+## `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import`, `-remove` — the leaves
 
 Ordinary task crates, one per management task. Each depends on
 `rituals` like any task, and on `rituals-compose` for the work. Each is
-marked `task = true` and exposes `task()`. None depends on another. `add`
-and `import` finish by calling the same regenerate path `regenerate` does.
-That path lives in `rituals-compose`, so all three can reach it without
-depending on each other.
+marked `task = true` and exposes `task()`. None depends on another. `add`,
+`import` and `remove` finish by regenerating through the same rendering
+`regenerate` uses, `remove` inside its rollback. That rendering lives in
+`rituals-compose`, so each can reach it without depending on another.
 
 ## `rituals-core` — a pure bundle
 

@@ -9,6 +9,6 @@ copy, and rendering a task crate's files and a command line's generated file.
 **You do not need this crate to write a task.** A task depends on
 [`rituals`](https://crates.io/crates/rituals) alone. This crate is for
 scaffolders, meaning tasks that write or rewrite a project's command line.
-Ritual's own `add`, `regenerate`, `new`, `create` and `import` are built on it.
+Ritual's own management tasks, such as `add` and `regenerate`, are built on it.
 
 License: MIT.

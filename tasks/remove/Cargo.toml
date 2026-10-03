@@ -1,5 +1,5 @@
 [package]
-name = "rituals-core"
+name = "rituals-core-remove"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,20 +7,16 @@ license.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories = ["command-line-interface", "development-tools"]
-description = "Ritual — the management tasks ritual ships, grouped as one bundle."
+description = "Ritual — take a task out of this project, in the order that keeps it building."
 readme = "readme.md"
 
 [dependencies]
 rituals.workspace = true
-add.workspace = true
-regenerate.workspace = true
-new.workspace = true
-create.workspace = true
-import.workspace = true
-remove.workspace = true
+rituals-compose.workspace = true
 
 [package.metadata.ritual]
 task = true
 
+# See the note on this table in tasks/add/Cargo.toml.
 [lints]
 workspace = true

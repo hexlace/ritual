@@ -1,17 +1,16 @@
 //! How a composed command line's generated file and manifests are
 //! maintained.
 //!
-//! This is what a scaffolding task links against — `add`, `create`, `import`,
-//! `new` and `regenerate`, the task crates ritual's own bundle groups — for the
-//! renderers that produce a task crate's own files and a composed command
-//! line's generated file, for the metadata and manifest operations `add`,
-//! `import` and `regenerate` need, for the [`cargo`] a task that runs Cargo
-//! uses and the [`shell`] that renders a command for a person to copy, and for
-//! the [`rollback`] that puts a project back when a task's run does not
-//! finish. Nothing here runs on a composed command line's
-//! own path: assembling a command line from a project's imports and
-//! dispatching to one of them live in `rituals`, which a composed CLI crate
-//! depends on directly.
+//! This is what a scaffolding task links against — such as `add`, `create`,
+//! `import`, `new`, `regenerate` and `remove`, the task crates ritual's own
+//! bundle groups — for the renderers that produce a task crate's own files and
+//! a composed command line's generated file, for the metadata and manifest
+//! operations those tasks need, for the [`cargo`] a task that runs Cargo uses
+//! and the [`shell`] that renders a command for a person to copy, and for the
+//! [`rollback`] that puts a project back when a task's run does not finish.
+//! Nothing here runs on a composed command line's own path: assembling a
+//! command line from a project's imports and dispatching to one of them live
+//! in `rituals`, which a composed CLI crate depends on directly.
 //!
 //! Nothing from `rituals` is re-exported here. Every crate that needs
 //! [`rituals::Task`], [`rituals::CommandLine`] or [`rituals::run`] already
@@ -21,8 +20,10 @@
 //!
 //! This crate reads the resolved dependency graph via `cargo metadata` and
 //! writes manifests in place with `toml_edit`, so that a scaffolding task
-//! can append to a manifest a human wrote without disturbing its comments
-//! or formatting.
+//! can append to or remove from a manifest a human wrote without disturbing
+//! its comments or formatting. It also reads Cargo's own configuration
+//! files, through [`cargo_config`], for the paths a build reads that no
+//! manifest names.
 //!
 //! # Examples
 //!
@@ -46,9 +47,11 @@
 //! ```
 
 pub mod cargo;
+pub mod cargo_config;
 pub mod generated_file;
 pub mod manifest;
 pub mod metadata;
+mod paths;
 mod project;
 pub mod rollback;
 pub mod rust_name;
@@ -56,6 +59,7 @@ pub mod sentence;
 pub mod shell;
 pub mod source;
 pub mod task_crate;
+mod task_imports;
 mod task_list;
 #[cfg(test)]
 mod test_support;
