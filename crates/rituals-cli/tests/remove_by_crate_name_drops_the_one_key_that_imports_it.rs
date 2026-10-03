@@ -49,6 +49,7 @@ fn removing_a_task_by_its_crate_name_drops_the_key_that_imports_it() -> TestOutc
                 "regenerate",
                 "new",
                 "create",
+                "import",
                 "remove",
                 "greet",
                 "help",
