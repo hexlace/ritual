@@ -27,13 +27,30 @@ use rituals::{CommandLine, Failure, Outcome, Task, clap, report};
 use rituals_compose::metadata;
 use rituals_compose::rollback::{self, Changes};
 use rituals_compose::{top_level, workspace};
-use step::{Context, Step};
+use step::{Migrating, Step};
 use tidy::Vacated;
 
 /// `migrate` takes no arguments: the layout a project is brought up to is the
 /// one of the ritual running it.
 #[derive(clap::Args)]
 struct MigrateArguments {}
+
+/// What a run that applied at least one step did, for the report that
+/// follows once the changes are kept.
+struct Done<'a> {
+    /// The repository the project is in, which was clean.
+    repository: &'a Repository,
+    lines: Vec<String>,
+    vacated: Vec<Vacated>,
+}
+
+/// What this invocation of `migrate` was started with, which every step of it
+/// shares.
+struct Invocation<'a> {
+    root: &'a Path,
+    work_tree: &'a WorkTree,
+    migrate_command: &'a str,
+}
 
 /// This task, for a command line to mount under whatever name imports it.
 //
@@ -48,15 +65,10 @@ pub fn task() -> Task {
     )
 }
 
-/// What a run that applied at least one step did, for the report that
-/// follows once the changes are kept.
-struct Done<'a> {
-    /// The repository the project is in, which was clean.
-    repository: &'a Repository,
-    lines: Vec<String>,
-    vacated: Vec<Vacated>,
-}
-
+// TS-PRECISE-NAMES: `run` is the name every task crate here (`add`, `create`,
+// `import`, `new`, `remove`) gives the body its `task()` mounts, and one name
+// for that role across the tasks is worth more than a more precise verb in one
+// of them.
 fn run(command_line: &CommandLine) -> Outcome {
     let current_dir = std::env::current_dir()
         .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
@@ -76,7 +88,7 @@ fn run(command_line: &CommandLine) -> Outcome {
             changes,
             command_line.identity().package_name(),
             &current_dir,
-            &Run {
+            &Invocation {
                 root: &root,
                 work_tree: &work_tree,
                 migrate_command: &migrate_command,
@@ -105,13 +117,6 @@ fn run(command_line: &CommandLine) -> Outcome {
     Ok(())
 }
 
-/// What every step of one run shares.
-struct Run<'a> {
-    root: &'a Path,
-    work_tree: &'a WorkTree,
-    migrate_command: &'a str,
-}
-
 /// Runs each step that applies, in release order, each reading the project
 /// the one before left, and returns what they did, or `None` when no step
 /// applied.
@@ -122,7 +127,7 @@ fn run_every_step_that_applies<'a>(
     changes: &mut Changes,
     package: &str,
     current_dir: &Path,
-    run: &Run<'a>,
+    invocation: &Invocation<'a>,
 ) -> Result<Option<Done<'a>>, Failure> {
     // `cargo metadata` creates or rewrites a missing or stale lockfile,
     // which this records first, so a refusal puts it back.
@@ -130,15 +135,17 @@ fn run_every_step_that_applies<'a>(
         metadata::fetch_in_its_own_project(changes, current_dir, package, "migrate", "")?;
     let mut done: Option<Done<'a>> = None;
     for step in Step::IN_RELEASE_ORDER {
-        let Some(migration) = step.applies(&document, run.root) else {
+        let Some(migration) = step.applies(&document, invocation.root) else {
             continue;
         };
-        let repository = run.work_tree.ensure_clean(run.migrate_command)?;
+        let repository = invocation
+            .work_tree
+            .ensure_clean(invocation.migrate_command)?;
         let applied = migration.apply(
-            &Context {
-                root: run.root,
+            &Migrating {
+                root: invocation.root,
                 package,
-                migrate_command: run.migrate_command,
+                migrate_command: invocation.migrate_command,
                 repository,
             },
             &document,

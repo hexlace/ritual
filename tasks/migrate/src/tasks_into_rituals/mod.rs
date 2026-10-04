@@ -9,7 +9,7 @@ use rituals::Failure;
 use rituals_compose::metadata::{self, Metadata};
 use rituals_compose::rollback::Changes;
 
-use crate::step::{Applied, Context};
+use crate::step::{Applied, Migrating};
 use crate::tidy::Vacated;
 
 // This step owns both ends literally, and so will every step after it:
@@ -68,14 +68,14 @@ pub(crate) fn find(document: &Metadata, root: &Path) -> Option<Candidates> {
 /// is a failure the rollback undoes.
 pub(crate) fn apply(
     candidates: &Candidates,
-    context: &Context<'_>,
+    migrating: &Migrating<'_>,
     before: &Metadata,
     changes: &mut Changes,
 ) -> Result<Applied, Failure> {
-    let planned = plan::plan(candidates, context, before)?;
+    let planned = plan::plan(candidates, migrating, before)?;
     planned.write(changes)?;
-    let after = metadata::fetch_recording(changes, context.root)?;
-    planned.verify(before, &after, context.package)?;
+    let after = metadata::fetch_recording(changes, migrating.root)?;
+    planned.verify(before, &after, migrating.package)?;
     Ok(Applied {
         lines: planned.lines(),
         vacated: vec![Vacated {
@@ -95,7 +95,7 @@ mod tests {
 
     use super::{apply, find};
     use crate::precondition::WorkTree;
-    use crate::step::Context;
+    use crate::step::Migrating;
     use crate::test_support::{
         ScratchDir, TestOutcome, init_and_commit, package, workspace, write_files,
     };
@@ -198,8 +198,11 @@ mod tests {
         Ok(())
     }
 
-    fn context<'a>(root: &'a Path, repository: &'a crate::precondition::Repository) -> Context<'a> {
-        Context {
+    fn migrating<'a>(
+        root: &'a Path,
+        repository: &'a crate::precondition::Repository,
+    ) -> Migrating<'a> {
+        Migrating {
             root,
             package: "ritual",
             migrate_command: MIGRATE,
@@ -215,13 +218,13 @@ mod tests {
         let repository = work_tree
             .ensure_clean(MIGRATE)
             .map_err(|failure| failure.to_string())?;
-        let context = context(root, repository);
+        let migrating = migrating(root, repository);
         let before = metadata::fetch(root)?;
         let Some(candidates) = find(&before, root) else {
             return Err("fixture precondition: the project must have tasks to move".into());
         };
         let outcome = rollback::attempt("running `migrate` again", |changes| {
-            apply(&candidates, &context, &before, changes)
+            apply(&candidates, &migrating, &before, changes)
         });
         Ok(outcome
             .map(|applied| applied.lines)

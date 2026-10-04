@@ -15,7 +15,7 @@ use super::Candidates;
 use super::refusals::{self, Member};
 use crate::places::from_the_root;
 use crate::report;
-use crate::step::Context;
+use crate::step::Migrating;
 
 /// A manifest with the edits `repoint` made to it in memory, in the order
 /// they will be written.
@@ -30,105 +30,6 @@ pub(super) struct Planned {
     relocation: Relocation,
     edited: Vec<Edited>,
     moves: Vec<(PathBuf, PathBuf)>,
-}
-
-/// Reads the project and decides what the step would write, refusing when
-/// that would be unsafe. Everything here only reads.
-///
-/// The refusals come in the order of how much each one rules out: a task
-/// that holds other members, a destination that is taken, a submodule, and
-/// last a manifest that reaches a task in a way that cannot be repointed.
-pub(super) fn plan(
-    candidates: &Candidates,
-    context: &Context<'_>,
-    before: &Metadata,
-) -> Result<Planned, Failure> {
-    let Candidates {
-        from_directory,
-        to_directory,
-        directories,
-    } = candidates;
-    let relocation = Relocation::new(from_directory, to_directory, directories.iter().cloned());
-    let moves: Vec<(PathBuf, PathBuf)> = directories
-        .iter()
-        .map(|directory| {
-            let Some(destination) = relocation.destination(directory) else {
-                unreachable!(
-                    "{} was given to the relocation as a directory that moves",
-                    directory.display()
-                )
-            };
-            (directory.clone(), destination)
-        })
-        .collect();
-
-    let members: Vec<Member> = before
-        .workspace_members()
-        .iter()
-        .map(|member| Member {
-            directory: member.directory().to_path_buf(),
-            package: member.package_name().to_string(),
-        })
-        .collect();
-    refusals::ensure_none_holds_other_members(
-        directories,
-        &members,
-        context.root,
-        context.migrate_command,
-    )?;
-    refusals::ensure_destinations_are_free(
-        &moves,
-        to_directory,
-        context.root,
-        context.migrate_command,
-    )?;
-    refusals::ensure_none_holds_a_submodule(
-        directories,
-        context.repository,
-        context.root,
-        context.migrate_command,
-    )?;
-
-    Ok(Planned {
-        root: context.root.to_path_buf(),
-        edited: repointed_manifests(before, context.root, &relocation)?,
-        relocation,
-        moves,
-    })
-}
-
-/// Every manifest of the project, each read once and repointed in memory:
-/// the workspace's own first, then every other package at a path under the
-/// root, in path order, so the order they are written and reported in is
-/// the same on every run. A manifest with nothing to change is left out.
-///
-/// A task can depend on another and any member can depend on a task, so the
-/// command line crate's manifest is not the only one that names a moved
-/// directory.
-fn repointed_manifests(
-    before: &Metadata,
-    root: &Path,
-    relocation: &Relocation,
-) -> Result<Vec<Edited>, Failure> {
-    let workspace_manifest = root.join("Cargo.toml");
-    let mut paths = vec![workspace_manifest.clone()];
-    paths.extend(
-        before
-            .path_package_manifests_under(root)
-            .into_iter()
-            .filter(|path| *path != workspace_manifest)
-            .map(Path::to_path_buf),
-    );
-
-    let mut edited = Vec::new();
-    for path in paths {
-        let mut manifest = Manifest::read(&path)?;
-        let changes = manifest.repoint(relocation)?;
-        if !changes.is_empty() {
-            edited.push(Edited { manifest, changes });
-        }
-    }
-    Ok(edited)
 }
 
 impl Planned {
@@ -208,6 +109,105 @@ impl Planned {
         )
         .map_or(Ok(()), Err)
     }
+}
+
+/// Reads the project and decides what the step would write, refusing when
+/// that would be unsafe. Everything here only reads.
+///
+/// The refusals come in the order of how much each one rules out: a task
+/// that holds other members, a destination that is taken, a submodule, and
+/// last a manifest that reaches a task in a way that cannot be repointed.
+pub(super) fn plan(
+    candidates: &Candidates,
+    migrating: &Migrating<'_>,
+    before: &Metadata,
+) -> Result<Planned, Failure> {
+    let Candidates {
+        from_directory,
+        to_directory,
+        directories,
+    } = candidates;
+    let relocation = Relocation::new(from_directory, to_directory, directories.iter().cloned());
+    let moves: Vec<(PathBuf, PathBuf)> = directories
+        .iter()
+        .map(|directory| {
+            let Some(destination) = relocation.destination(directory) else {
+                unreachable!(
+                    "{} was given to the relocation as a directory that moves",
+                    directory.display()
+                )
+            };
+            (directory.clone(), destination)
+        })
+        .collect();
+
+    let members: Vec<Member> = before
+        .workspace_members()
+        .iter()
+        .map(|member| Member {
+            directory: member.directory().to_path_buf(),
+            package: member.package_name().to_string(),
+        })
+        .collect();
+    refusals::ensure_none_holds_other_members(
+        directories,
+        &members,
+        migrating.root,
+        migrating.migrate_command,
+    )?;
+    refusals::ensure_destinations_are_free(
+        &moves,
+        to_directory,
+        migrating.root,
+        migrating.migrate_command,
+    )?;
+    refusals::ensure_none_holds_a_submodule(
+        directories,
+        migrating.repository,
+        migrating.root,
+        migrating.migrate_command,
+    )?;
+
+    Ok(Planned {
+        root: migrating.root.to_path_buf(),
+        edited: repointed_manifests(before, migrating.root, &relocation)?,
+        relocation,
+        moves,
+    })
+}
+
+/// Every manifest of the project, each read once and repointed in memory:
+/// the workspace's own first, then every other package at a path under the
+/// root, in path order, so the order they are written and reported in is
+/// the same on every run. A manifest with nothing to change is left out.
+///
+/// A task can depend on another and any member can depend on a task, so the
+/// command line crate's manifest is not the only one that names a moved
+/// directory.
+fn repointed_manifests(
+    before: &Metadata,
+    root: &Path,
+    relocation: &Relocation,
+) -> Result<Vec<Edited>, Failure> {
+    let workspace_manifest = root.join("Cargo.toml");
+    let mut paths = vec![workspace_manifest.clone()];
+    paths.extend(
+        before
+            .path_package_manifests_under(root)
+            .into_iter()
+            .filter(|path| *path != workspace_manifest)
+            .map(Path::to_path_buf),
+    );
+
+    let mut edited = Vec::new();
+    for path in paths {
+        let mut manifest = Manifest::read(&path)?;
+        let changes = manifest.repoint(relocation)?;
+        if !changes.is_empty() {
+            edited.push(Edited { manifest, changes });
+        }
+    }
+    Ok(edited)
 }
 
 /// The failure for members Cargo lost or gained in the move, each spelled

@@ -44,8 +44,9 @@ pub(crate) enum Migration {
     TasksIntoRituals(Candidates),
 }
 
-/// What a step needs to know about the run it is part of.
-pub(crate) struct Context<'a> {
+/// The project a step is migrating, and what the invocation it is part of was
+/// started with.
+pub(crate) struct Migrating<'a> {
     /// The workspace's root directory, as Cargo reports it.
     pub(crate) root: &'a Path,
     /// The package whose command line is running `migrate`.
@@ -72,13 +73,13 @@ impl Migration {
     /// point is put back.
     pub(crate) fn apply(
         self,
-        context: &Context<'_>,
+        migrating: &Migrating<'_>,
         before: &Metadata,
         changes: &mut Changes,
     ) -> Result<Applied, Failure> {
         match self {
             Self::TasksIntoRituals(candidates) => {
-                tasks_into_rituals::apply(&candidates, context, before, changes)
+                tasks_into_rituals::apply(&candidates, migrating, before, changes)
             }
         }
     }
