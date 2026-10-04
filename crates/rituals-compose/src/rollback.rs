@@ -434,9 +434,13 @@ impl Changes {
     /// which cannot be moved into itself.
     pub fn rename(&mut self, from: &Path, to: &Path) -> Result<(), Failure> {
         assert!(
-            from.is_absolute() && to.is_absolute(),
-            "a rename is between absolute paths, got {} and {}",
-            from.display(),
+            from.is_absolute(),
+            "a rename moves from an absolute path, got {}",
+            from.display()
+        );
+        assert!(
+            to.is_absolute(),
+            "a rename moves to an absolute path, got {}",
             to.display()
         );
         assert!(
@@ -1810,10 +1814,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "a rename is between absolute paths")]
+    #[should_panic(expected = "a rename moves from an absolute path")]
     fn a_rename_between_relative_paths_is_a_bug() {
         let _ = attempt(RETRY, |changes| {
             changes.rename(Path::new("tasks/lint"), Path::new(".rituals/lint"))
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "a rename moves to an absolute path")]
+    fn a_rename_to_a_relative_path_is_a_bug() {
+        let _ = attempt(RETRY, |changes| {
+            changes.rename(Path::new("/project/tasks/lint"), Path::new(".rituals/lint"))
         });
     }
 

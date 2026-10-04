@@ -231,9 +231,13 @@ impl Relocation {
         base_after: &Path,
     ) -> Option<String> {
         assert!(
-            base_before.is_absolute() && base_after.is_absolute(),
-            "a manifest's directories must be absolute, got {} and {}",
-            base_before.display(),
+            base_before.is_absolute(),
+            "base_before must be absolute, got {}",
+            base_before.display()
+        );
+        assert!(
+            base_after.is_absolute(),
+            "base_after must be absolute, got {}",
             base_after.display()
         );
         let written = Path::new(written);
@@ -517,8 +521,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "a manifest's directories must be absolute")]
+    #[should_panic(expected = "base_before must be absolute")]
     fn a_relative_manifest_directory_is_a_bug() {
-        let _ = relocation().repointed("../tasks/greet", Path::new("ritual"), Path::new("ritual"));
+        let _ = relocation().repointed("../tasks/greet", Path::new("ritual"), Path::new("/ritual"));
+    }
+
+    #[test]
+    #[should_panic(expected = "base_after must be absolute")]
+    fn a_relative_base_after_is_a_bug() {
+        let _ = relocation().repointed("../tasks/greet", Path::new("/ritual"), Path::new("ritual"));
     }
 }

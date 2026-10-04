@@ -89,8 +89,13 @@ pub fn place_for(workspace_root: &Path, name: &Name) -> TaskPlace {
     // there is; it is checked because the member entry and the dependency
     // path both rely on the directory being inside `tasks`.
     assert!(
-        directory.starts_with(&tasks) && directory != tasks,
-        "joining a validated Name under {} must stay strictly under it",
+        directory.starts_with(&tasks),
+        "joining a validated Name under {} must stay under it",
+        tasks.display()
+    );
+    assert!(
+        directory != tasks,
+        "joining a validated Name under {} must not name it itself",
         tasks.display()
     );
     TaskPlace {
