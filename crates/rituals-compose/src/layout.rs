@@ -35,6 +35,26 @@ use rituals::Name;
 const TASKS_DIRECTORY: &str = ".rituals";
 
 /// Where a task crate is written, spelled the two ways a task needs it.
+///
+/// # Examples
+///
+/// The one place a scaffolder writes the task crate, and the one spelling
+/// of it a `[workspace] members` entry and a report line share:
+///
+/// ```
+/// use std::path::Path;
+///
+/// use rituals::Name;
+/// use rituals_compose::layout;
+///
+/// let place = layout::place_for(Path::new("/work/demo"), &Name::new("lint")?);
+///
+/// let written_to = place.directory().join("Cargo.toml");
+/// let member = format!("members = [\"{}\"]", place.from_the_root());
+/// assert_eq!(written_to, Path::new("/work/demo/.rituals/lint/Cargo.toml"));
+/// assert_eq!(member, "members = [\".rituals/lint\"]");
+/// # Ok::<(), rituals::InvalidName>(())
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TaskPlace {
     directory: PathBuf,
@@ -43,6 +63,23 @@ pub struct TaskPlace {
 
 impl TaskPlace {
     /// Returns the task crate's directory, absolute.
+    ///
+    /// # Examples
+    ///
+    /// The directory a scaffolder creates, before it writes any file in it:
+    ///
+    /// ```
+    /// use std::path::Path;
+    ///
+    /// use rituals::Name;
+    /// use rituals_compose::layout;
+    ///
+    /// let place = layout::place_for(Path::new("/work/demo"), &Name::new("lint")?);
+    ///
+    /// assert_eq!(place.directory(), Path::new("/work/demo/.rituals/lint"));
+    /// assert!(place.directory().is_absolute());
+    /// # Ok::<(), rituals::InvalidName>(())
+    /// ```
     #[must_use]
     pub fn directory(&self) -> &Path {
         &self.directory
@@ -51,6 +88,26 @@ impl TaskPlace {
     /// Returns the task crate's directory as a path from the workspace root,
     /// always spelled with `/`: the form a `[workspace] members` entry and a
     /// report line use.
+    ///
+    /// # Examples
+    ///
+    /// The line a task reports for the crate it wrote, spelled the way a
+    /// person reads it from the project's root:
+    ///
+    /// ```
+    /// use std::path::Path;
+    ///
+    /// use rituals::Name;
+    /// use rituals_compose::layout;
+    ///
+    /// let place = layout::place_for(Path::new("/work/demo"), &Name::new("lint")?);
+    ///
+    /// assert_eq!(
+    ///     format!("added {}", place.from_the_root()),
+    ///     "added .rituals/lint"
+    /// );
+    /// # Ok::<(), rituals::InvalidName>(())
+    /// ```
     #[must_use]
     pub fn from_the_root(&self) -> &str {
         &self.from_the_root
@@ -58,6 +115,26 @@ impl TaskPlace {
 }
 
 /// Returns the directory every task the layout places lives under.
+///
+/// # Examples
+///
+/// Whether a directory is one of the project's own tasks, as a task that
+/// lists them asks:
+///
+/// ```
+/// use std::path::Path;
+///
+/// use rituals::Name;
+/// use rituals_compose::layout;
+///
+/// let root = Path::new("/work/demo");
+/// let tasks = layout::tasks_directory(root);
+///
+/// assert_eq!(tasks, Path::new("/work/demo/.rituals"));
+/// assert!(layout::place_for(root, &Name::new("lint")?).directory().starts_with(&tasks));
+/// assert!(!Path::new("/work/demo/src").starts_with(&tasks));
+/// # Ok::<(), rituals::InvalidName>(())
+/// ```
 ///
 /// # Panics
 ///
@@ -77,6 +154,24 @@ pub fn tasks_directory(workspace_root: &Path) -> PathBuf {
 /// `workspace_root`.
 ///
 /// Nothing is created: this only says where the task crate belongs.
+///
+/// # Examples
+///
+/// Scaffolding `lint` into the project at `/work/demo`: the directory to
+/// create and the entry to add to `[workspace] members`:
+///
+/// ```
+/// use std::path::Path;
+///
+/// use rituals::Name;
+/// use rituals_compose::layout;
+///
+/// let place = layout::place_for(Path::new("/work/demo"), &Name::new("lint")?);
+///
+/// assert_eq!(place.directory(), Path::new("/work/demo/.rituals/lint"));
+/// assert_eq!(place.from_the_root(), ".rituals/lint");
+/// # Ok::<(), rituals::InvalidName>(())
+/// ```
 ///
 /// # Panics
 ///
