@@ -138,6 +138,13 @@ does not stop the command line from starting. That mount is dropped with a
 line telling the person to run `regenerate`. The command line stays up so
 that `regenerate` stays reachable to fix it.
 
+**The generated file sets no global allocator.** A command line runs one task
+and exits, so allocator throughput is not what bounds it, and an allocator
+such as mimalloc would add a C build dependency to every project. Since the
+file is generated, a project cannot add one by hand either. This is the
+answer for a project whose conventions ask application binaries to set one:
+the command line deliberately doesn't.
+
 ## One kind of CLI
 
 A new project needs a command line to scaffold its command line. That looks
