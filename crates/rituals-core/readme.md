@@ -1,8 +1,8 @@
 # rituals-core
 
 The bundle of ritual's management tasks: `add`, `regenerate`, `new`, `create`,
-`import` and `remove`, grouped as one task that every composed command line imports
-under the key `ritual`.
+`import`, `remove` and `migrate`, grouped as one task that every composed command
+line imports under the key `ritual`.
 
 You do not depend on it by hand: `ritual new`, from
 [`rituals-cli`](https://crates.io/crates/rituals-cli), imports this bundle

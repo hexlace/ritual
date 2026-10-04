@@ -9,7 +9,7 @@ principles themselves are in [design.md](design.md).
 |---|---|---|
 | `rituals` | what a task needs | — |
 | `rituals-compose` | the composition library | `rituals` |
-| `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import`, `-remove` | the management tasks | `rituals`, `rituals-compose` |
+| `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import`, `-remove`, `-migrate` | the management tasks | `rituals`, `rituals-compose` |
 | `rituals-core` | the bundle of those tasks | `rituals`, the leaves |
 | `rituals-cli` | the `ritual` binary | `rituals`, `rituals-core` |
 | `xtask` | release tooling, never published | — |
@@ -55,8 +55,8 @@ crate asks it for the directory, the member entry and the path to report, so
 **Git is asked in one place.** `git` answers whether git can give back every
 file in a directory about to be deleted, whether the work tree is clean, which
 directories hold Cargo configuration, which entries are submodules and which
-files mention a pattern. `remove` and the tasks that move directories ask the
-same code, and each words its own refusal from the `Obstacle` it gets back.
+files mention a pattern. `remove` and `migrate` ask the same code, and each
+words its own refusal from the `Obstacle` it gets back.
 
 **A move is worked out in one place.** A `relocation::Relocation` is built once
 from the directories that move and says where any path at or under one of them
@@ -93,7 +93,7 @@ Beyond `rituals`, its dependencies are here because of what the job is:
   their comments; `toml_edit` edits in place. It is the crate Cargo's own
   `cargo add` uses.
 
-## `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import`, `-remove` — the leaves
+## `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import`, `-remove`, `-migrate` — the leaves
 
 Ordinary task crates, one per management task. Each depends on
 `rituals` like any task, and on `rituals-compose` for the work. Each is
@@ -101,6 +101,9 @@ marked `task = true` and exposes `task()`. None depends on another. `add`,
 `import` and `remove` finish by regenerating through the same rendering
 `regenerate` uses, `remove` inside its rollback. That rendering lives in
 `rituals-compose`, so each can reach it without depending on another.
+`migrate` regenerates nothing: it moves directories and repoints manifests,
+through the rollback, git and relocation code in `rituals-compose`, and
+keeps its steps in its own crate.
 
 ## `rituals-core` — a pure bundle
 
