@@ -403,7 +403,9 @@ The steps, in order:
    nothing to put back. So is a key the generated file could not compile
    with: `std` or `core` would stand in for Rust's own crates, which the
    file reaches by those names, and a command line that does not compile
-   cannot run the `remove` that would take the key back out. Then
+   cannot run the `remove` that would take the key back out. The rule is a
+   type, `TaskKey`: the manifest writers take only a key that has been
+   through it, so a writer that skips it does not compile. Then
    `cargo locate-project`, which writes nothing, says whether there is a
    project here at all, and where there is none the refusal hands back the
    command to run inside one.
