@@ -279,6 +279,47 @@ fn places_holding(snapshot: &support::tree::Snapshot, name: &str) -> Vec<PathBuf
         .collect()
 }
 
+/// A committed 0.1 project with the task `greet`, holding a file git
+/// ignores, `tasks/greet/notes.log`, so a clean work tree does not show it
+/// and git cannot give it back.
+fn project_with_an_ignored_file_in_greet(
+    checkout: &support::Checkout,
+    working_dir: &TempDir,
+) -> Outcome<Project> {
+    let project = legacy::project_with_tasks(checkout, working_dir, &["greet"])?;
+    let gitignore = project.root().join(".gitignore");
+    write_text(&gitignore, &format!("{}*.log\n", read_text(&gitignore)?))?;
+    let ignored = project.root().join("tasks/greet/notes.log");
+    write_text(&ignored, "a log only this machine has\n")?;
+    project.build()?;
+    git::init_and_commit_everything(project.root())?;
+    Ok(project)
+}
+
+/// Holds the ignored file to its own promise once a run has failed: the file
+/// is somewhere in the project, in exactly one place, with the bytes it had.
+/// Reads the project as it is now, and returns where the file is, relative to
+/// the project's root.
+fn the_ignored_file_survives_in_one_place(project: &Project) -> Outcome<PathBuf> {
+    let after = snapshot_tree(project.root())?;
+    let kept = places_holding(&after, "notes.log");
+    assert_eq!(
+        kept.len(),
+        1,
+        "expected the ignored file to be kept in exactly one place, found {kept:?}"
+    );
+    let entry = after.get(&kept[0]);
+    assert_eq!(
+        entry,
+        Some(&support::tree::Entry::File(
+            b"a log only this machine has\n".to_vec()
+        )),
+        "expected the ignored file's bytes to survive intact at {}",
+        kept[0].display()
+    );
+    Ok(kept[0].clone())
+}
+
 /// A task's ignored file is the one thing git cannot give back, and a clean
 /// work tree does not show it. When `migrate` fails, it has to be where the
 /// project says it is: put back where it was, or, if it is left in the new
@@ -288,13 +329,7 @@ fn places_holding(snapshot: &support::tree::Snapshot, name: &str) -> Vec<PathBuf
 fn a_failed_migrate_does_not_lose_a_files_git_ignores() -> TestOutcome {
     in_checkout(|checkout| {
         let working_dir = TempDir::new("migrate-fails-with-ignored-file")?;
-        let project = legacy::project_with_tasks(checkout, &working_dir, &["greet"])?;
-        let gitignore = project.root().join(".gitignore");
-        write_text(&gitignore, &format!("{}*.log\n", read_text(&gitignore)?))?;
-        let ignored = project.root().join("tasks/greet/notes.log");
-        write_text(&ignored, "a log only this machine has\n")?;
-        project.build()?;
-        git::init_and_commit_everything(project.root())?;
+        let project = project_with_an_ignored_file_in_greet(checkout, &working_dir)?;
 
         let manifest_path = project.workspace_manifest_path();
         if !made_file_read_only(&manifest_path)? {
@@ -325,23 +360,8 @@ fn a_failed_migrate_does_not_lose_a_files_git_ignores() -> TestOutcome {
             tree_without_the_file,
         )?;
 
-        let after = snapshot_tree(project.root())?;
-        let kept = places_holding(&after, "notes.log");
-        assert_eq!(
-            kept.len(),
-            1,
-            "expected the ignored file to be kept in exactly one place, found {kept:?}"
-        );
-        let entry = after.get(&kept[0]);
-        assert_eq!(
-            entry,
-            Some(&support::tree::Entry::File(
-                b"a log only this machine has\n".to_vec()
-            )),
-            "expected the ignored file's bytes to survive intact at {:?}",
-            kept[0]
-        );
-        if let Some(place) = kept[0]
+        let kept = the_ignored_file_survives_in_one_place(&project)?;
+        if let Some(place) = kept
             .parent()
             .filter(|place| !place.starts_with("tasks/greet"))
         {

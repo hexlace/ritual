@@ -14,9 +14,10 @@ use support::migration::{
     assert_nothing_to_migrate, committed_project_where_shout_depends_on_greet, exists,
     fill_in_checkout, moved,
 };
+use support::tree::Snapshot;
 use support::{
-    TempDir, TestOutcome, assert_trees_identical, crates, git, in_checkout, manifest, read_text,
-    snapshot_tree, tree,
+    Checkout, Project, TempDir, TestOutcome, assert_trees_identical, crates, git, in_checkout,
+    manifest, read_text, snapshot_tree, tree,
 };
 
 /// The workspace manifest of that project once migrated: both tasks are
@@ -69,6 +70,91 @@ greet = { path = "../greet" }
 task = true
 "#;
 
+/// Holds both migrated tasks to their move: each is at `.rituals/<name>`
+/// byte for byte as it was at `tasks/<name>`, and `tasks/` is gone with
+/// nothing left in it. Compares the project's tree before and after the run.
+fn assert_both_tasks_moved_whole(project: &Project, before: &Snapshot, after: &Snapshot) {
+    for task in ["greet", "shout"] {
+        assert_trees_identical(
+            &format!("the {task} task, moved from tasks/{task} to .rituals/{task}"),
+            &moved(
+                before,
+                &format!("tasks/{task}"),
+                &format!(".rituals/{task}"),
+            ),
+            &moved(
+                after,
+                &format!(".rituals/{task}"),
+                &format!(".rituals/{task}"),
+            ),
+        );
+    }
+    assert!(
+        !exists(&project.root().join("tasks")),
+        "expected tasks/ to be removed once nothing was left in it"
+    );
+}
+
+/// Holds the run to touching only what it should: the two tasks' directories
+/// and the two manifests that name them, in the tree before and after it.
+fn assert_only_the_tasks_and_two_manifests_changed(before: &Snapshot, after: &Snapshot) {
+    let mut expected: Vec<std::path::PathBuf> = before
+        .keys()
+        .filter(|path| path.starts_with("tasks"))
+        .chain(after.keys().filter(|path| path.starts_with(".rituals")))
+        .cloned()
+        .collect();
+    expected.extend(["Cargo.toml".into(), "ritual/Cargo.toml".into()]);
+    expected.sort();
+    expected.dedup();
+    assert_eq!(
+        tree::changed_paths(before, after),
+        expected,
+        "expected only the tasks' directories and the two manifests to change"
+    );
+}
+
+/// Reads the three manifests the run edited and compares each with its
+/// pinned text, so only the paths changed and the person's layout stayed.
+fn assert_the_manifests_are_pinned(project: &Project, checkout: &Checkout) -> TestOutcome {
+    assert_eq!(
+        read_text(&project.workspace_manifest_path())?,
+        fill_in_checkout(MIGRATED_WORKSPACE, checkout)?
+    );
+    assert_eq!(
+        read_text(&project.cli_manifest_path())?,
+        fill_in_checkout(MIGRATED_COMMAND_LINE_MANIFEST, checkout)?
+    );
+    assert_eq!(
+        read_text(&project.root().join(".rituals/shout/Cargo.toml"))?,
+        MIGRATED_DEPENDENT_TASK_MANIFEST
+    );
+    support::migration::assert_dependency_leads_to(
+        &project.root().join(".rituals/shout/Cargo.toml"),
+        &["dependencies"],
+        "greet",
+        &project.root().join(".rituals/greet"),
+    )?;
+    Ok(())
+}
+
+/// Runs each migrated task through the project's own command line, which has
+/// to build and print the task's own line.
+fn assert_both_tasks_run(project: &Project) -> TestOutcome {
+    for task in ["greet", "shout"] {
+        let ran = project.run_cli(&[task])?;
+        ran.expect_success(&format!("`{task}` after `migrate`"));
+        assert!(
+            ran.stderr.contains(&crates::ran_line(task))
+                || ran.stdout.contains(&crates::ran_line(task)),
+            "expected `{task}` to run its own code; stdout was:\n{}\nstderr was:\n{}",
+            ran.stdout,
+            ran.stderr
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn migrate_moves_both_tasks_and_the_command_line_builds_and_runs_them() -> TestOutcome {
     in_checkout(|checkout| {
@@ -80,64 +166,9 @@ fn migrate_moves_both_tasks_and_the_command_line_builds_and_runs_them() -> TestO
         migrated.expect_success("`cargo ritual migrate` on a 0.1 project with two tasks");
         let after = snapshot_tree(project.root())?;
 
-        // Both tasks are at their new place, unchanged in every file, and
-        // `tasks/` is gone with nothing left in it.
-        for task in ["greet", "shout"] {
-            assert_trees_identical(
-                &format!("the {task} task, moved from tasks/{task} to .rituals/{task}"),
-                &moved(
-                    &before,
-                    &format!("tasks/{task}"),
-                    &format!(".rituals/{task}"),
-                ),
-                &moved(
-                    &after,
-                    &format!(".rituals/{task}"),
-                    &format!(".rituals/{task}"),
-                ),
-            );
-        }
-        assert!(
-            !exists(&project.root().join("tasks")),
-            "expected tasks/ to be removed once nothing was left in it"
-        );
-
-        // Nothing else in the project changed but the two manifests that
-        // name the tasks' directories.
-        let mut expected: Vec<std::path::PathBuf> = before
-            .keys()
-            .filter(|path| path.starts_with("tasks"))
-            .chain(after.keys().filter(|path| path.starts_with(".rituals")))
-            .cloned()
-            .collect();
-        expected.extend(["Cargo.toml".into(), "ritual/Cargo.toml".into()]);
-        expected.sort();
-        expected.dedup();
-        assert_eq!(
-            tree::changed_paths(&before, &after),
-            expected,
-            "expected only the tasks' directories and the two manifests to change"
-        );
-
-        // The manifests, pinned.
-        assert_eq!(
-            read_text(&project.workspace_manifest_path())?,
-            fill_in_checkout(MIGRATED_WORKSPACE, checkout)?
-        );
-        assert_eq!(
-            read_text(&project.cli_manifest_path())?,
-            fill_in_checkout(MIGRATED_COMMAND_LINE_MANIFEST, checkout)?
-        );
-        assert_eq!(
-            read_text(&project.root().join(".rituals/shout/Cargo.toml"))?,
-            MIGRATED_DEPENDENT_TASK_MANIFEST
-        );
-        support::migration::assert_dependency_leads_to(
-            &project.root().join(".rituals/shout/Cargo.toml"),
-            &["dependencies"],
-            "greet",
-            &project.root().join(".rituals/greet"),
-        )?;
+        assert_both_tasks_moved_whole(&project, &before, &after);
+        assert_only_the_tasks_and_two_manifests_changed(&before, &after);
+        assert_the_manifests_are_pinned(&project, checkout)?;
 
         // It names what it moved and which manifest it edited.
         support::migration::assert_names(
@@ -152,18 +183,7 @@ fn migrate_moves_both_tasks_and_the_command_line_builds_and_runs_them() -> TestO
             ],
         );
 
-        // And the project works: the command line builds and runs both.
-        for task in ["greet", "shout"] {
-            let ran = project.run_cli(&[task])?;
-            ran.expect_success(&format!("`{task}` after `migrate`"));
-            assert!(
-                ran.stderr.contains(&crates::ran_line(task))
-                    || ran.stdout.contains(&crates::ran_line(task)),
-                "expected `{task}` to run its own code; stdout was:\n{}\nstderr was:\n{}",
-                ran.stdout,
-                ran.stderr
-            );
-        }
+        assert_both_tasks_run(&project)?;
         Ok(())
     })
 }

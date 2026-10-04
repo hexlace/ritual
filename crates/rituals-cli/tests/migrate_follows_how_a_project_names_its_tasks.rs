@@ -105,6 +105,35 @@ fn an_explicit_members_list_stays_explicit_and_keeps_its_order() -> TestOutcome 
     })
 }
 
+/// Holds a project that kept `tasks/helper`, which is not a task, to what
+/// `migrate` leaves alone: the task `greet` is at `.rituals/greet` and gone
+/// from `tasks/greet`, `tasks/helper` is where it was, and the workspace's
+/// members changed only in the task's own entry.
+fn assert_only_the_task_moved(project: &Project) -> TestOutcome {
+    assert!(
+        exists(&project.root().join(".rituals/greet/Cargo.toml")),
+        "expected the task to move to .rituals/greet"
+    );
+    assert!(
+        !exists(&project.root().join("tasks/greet")),
+        "expected the task to leave tasks/greet"
+    );
+    assert!(
+        exists(&project.root().join("tasks/helper/Cargo.toml")),
+        "expected tasks/helper, which is not a task, to stay where it is"
+    );
+    assert_eq!(
+        manifest::workspace_members(&project.workspace_manifest()?),
+        Some(
+            ["ritual", ".rituals/greet", "tasks/helper"]
+                .map(str::to_string)
+                .to_vec()
+        ),
+        "expected only the task's member entry to change"
+    );
+    Ok(())
+}
+
 #[test]
 fn something_in_tasks_that_is_not_a_task_stays_and_is_named() -> TestOutcome {
     in_checkout(|checkout| {
@@ -125,28 +154,7 @@ fn something_in_tasks_that_is_not_a_task_stays_and_is_named() -> TestOutcome {
 
         let migrated = migrate_and_assert_the_workspace_builds(&project)?;
 
-        // The task moved; the non-task and the directory holding it did not.
-        assert!(
-            exists(&project.root().join(".rituals/greet/Cargo.toml")),
-            "expected the task to move to .rituals/greet"
-        );
-        assert!(
-            !exists(&project.root().join("tasks/greet")),
-            "expected the task to leave tasks/greet"
-        );
-        assert!(
-            exists(&project.root().join("tasks/helper/Cargo.toml")),
-            "expected tasks/helper, which is not a task, to stay where it is"
-        );
-        assert_eq!(
-            manifest::workspace_members(&project.workspace_manifest()?),
-            Some(
-                ["ritual", ".rituals/greet", "tasks/helper"]
-                    .map(str::to_string)
-                    .to_vec()
-            ),
-            "expected only the task's member entry to change"
-        );
+        assert_only_the_task_moved(&project)?;
 
         // What stayed still reaches the task where it went.
         assert_dependency_leads_to(

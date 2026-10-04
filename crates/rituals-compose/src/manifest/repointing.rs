@@ -581,80 +581,83 @@ mod tests {
         Ok(())
     }
 
+    /// A manifest with a path under `tasks/` in every other key Cargo reads
+    /// one from.
+    const EVERY_OTHER_PATH_KEY: &str = "bench = [{ name = \"speed\", \
+        path = \"tasks/shout/benches/speed.rs\" }]\n\
+        \n\
+        [package]\n\
+        name = \"ritual\"\n\
+        build = \"tasks/greet/build.rs\"\n\
+        readme = \"tasks/greet/readme.md\"\n\
+        license-file = \"./tasks/shout/LICENSE\"\n\
+        workspace = \"tasks/greet\"\n\
+        \n\
+        [lib]\n\
+        path = \"tasks/greet/src/lib.rs\"\n\
+        \n\
+        [[bin]]\n\
+        name = \"tool\"\n\
+        path = \"tasks/shout/src/main.rs\"\n\
+        \n\
+        [[example]]\n\
+        path = \"tasks/greet/examples/hello.rs\"\n\
+        \n\
+        [[test]]\n\
+        name = \"flow\"\n\
+        path = \"tasks/greet/tests/flow.rs\"\n\
+        \n\
+        [workspace.package]\n\
+        readme = \"tasks/greet/readme.md\"\n\
+        license-file = \"tasks/shout/LICENSE\"\n\
+        \n\
+        [workspace.dependencies]\n\
+        greet = { path = \"tasks/greet\" }\n\
+        \n\
+        [patch.crates-io]\n\
+        shout = { path = \"tasks/shout\" }\n\
+        \n\
+        [patch.\"https://example.com/index\"]\n\
+        greet = { path = \"tasks/greet\" }\n\
+        \n\
+        [replace]\n\
+        \"greet:0.1.0\" = { path = \"tasks/greet\" }\n";
+
+    /// What repointing [`EVERY_OTHER_PATH_KEY`] reports, in the order it
+    /// reports it.
+    const EVERY_OTHER_PATH_KEY_REPOINTED: [&str; 15] = [
+        "[package] build `tasks/greet/build.rs` is now `.rituals/greet/build.rs`",
+        "[package] readme `tasks/greet/readme.md` is now `.rituals/greet/readme.md`",
+        "[package] license-file `./tasks/shout/LICENSE` is now `.rituals/shout/LICENSE`",
+        "[package] workspace `tasks/greet` is now `.rituals/greet`",
+        "[lib] path `tasks/greet/src/lib.rs` is now `.rituals/greet/src/lib.rs`",
+        "[[bin]] tool path `tasks/shout/src/main.rs` is now `.rituals/shout/src/main.rs`",
+        "[[example]] path `tasks/greet/examples/hello.rs` is now \
+            `.rituals/greet/examples/hello.rs`",
+        "[[test]] flow path `tasks/greet/tests/flow.rs` is now \
+            `.rituals/greet/tests/flow.rs`",
+        "[[bench]] speed path `tasks/shout/benches/speed.rs` is now \
+            `.rituals/shout/benches/speed.rs`",
+        "[workspace.package] readme `tasks/greet/readme.md` is now \
+            `.rituals/greet/readme.md`",
+        "[workspace.package] license-file `tasks/shout/LICENSE` is now \
+            `.rituals/shout/LICENSE`",
+        "[workspace.dependencies] greet path `tasks/greet` is now `.rituals/greet`",
+        "[patch.crates-io] shout path `tasks/shout` is now `.rituals/shout`",
+        "[patch.https://example.com/index] greet path `tasks/greet` is now \
+            `.rituals/greet`",
+        "[replace] `greet:0.1.0` path `tasks/greet` is now `.rituals/greet`",
+    ];
+
     /// Every other key Cargo reads a path from.
     #[test]
     fn the_package_target_and_workspace_paths_are_rewritten_too() -> TestOutcome {
-        let (scratch, mut manifest) = project_with_manifest(
-            "repoint-other-keys",
-            "Cargo.toml",
-            "bench = [{ name = \"speed\", path = \"tasks/shout/benches/speed.rs\" }]\n\
-             \n\
-             [package]\n\
-             name = \"ritual\"\n\
-             build = \"tasks/greet/build.rs\"\n\
-             readme = \"tasks/greet/readme.md\"\n\
-             license-file = \"./tasks/shout/LICENSE\"\n\
-             workspace = \"tasks/greet\"\n\
-             \n\
-             [lib]\n\
-             path = \"tasks/greet/src/lib.rs\"\n\
-             \n\
-             [[bin]]\n\
-             name = \"tool\"\n\
-             path = \"tasks/shout/src/main.rs\"\n\
-             \n\
-             [[example]]\n\
-             path = \"tasks/greet/examples/hello.rs\"\n\
-             \n\
-             [[test]]\n\
-             name = \"flow\"\n\
-             path = \"tasks/greet/tests/flow.rs\"\n\
-             \n\
-             [workspace.package]\n\
-             readme = \"tasks/greet/readme.md\"\n\
-             license-file = \"tasks/shout/LICENSE\"\n\
-             \n\
-             [workspace.dependencies]\n\
-             greet = { path = \"tasks/greet\" }\n\
-             \n\
-             [patch.crates-io]\n\
-             shout = { path = \"tasks/shout\" }\n\
-             \n\
-             [patch.\"https://example.com/index\"]\n\
-             greet = { path = \"tasks/greet\" }\n\
-             \n\
-             [replace]\n\
-             \"greet:0.1.0\" = { path = \"tasks/greet\" }\n",
-        )?;
+        let (scratch, mut manifest) =
+            project_with_manifest("repoint-other-keys", "Cargo.toml", EVERY_OTHER_PATH_KEY)?;
 
         let changes = reported(&mut manifest, &relocation(scratch.path()))?;
 
-        assert_eq!(
-            changes,
-            [
-                "[package] build `tasks/greet/build.rs` is now `.rituals/greet/build.rs`",
-                "[package] readme `tasks/greet/readme.md` is now `.rituals/greet/readme.md`",
-                "[package] license-file `./tasks/shout/LICENSE` is now `.rituals/shout/LICENSE`",
-                "[package] workspace `tasks/greet` is now `.rituals/greet`",
-                "[lib] path `tasks/greet/src/lib.rs` is now `.rituals/greet/src/lib.rs`",
-                "[[bin]] tool path `tasks/shout/src/main.rs` is now `.rituals/shout/src/main.rs`",
-                "[[example]] path `tasks/greet/examples/hello.rs` is now \
-                    `.rituals/greet/examples/hello.rs`",
-                "[[test]] flow path `tasks/greet/tests/flow.rs` is now \
-                    `.rituals/greet/tests/flow.rs`",
-                "[[bench]] speed path `tasks/shout/benches/speed.rs` is now \
-                    `.rituals/shout/benches/speed.rs`",
-                "[workspace.package] readme `tasks/greet/readme.md` is now \
-                    `.rituals/greet/readme.md`",
-                "[workspace.package] license-file `tasks/shout/LICENSE` is now \
-                    `.rituals/shout/LICENSE`",
-                "[workspace.dependencies] greet path `tasks/greet` is now `.rituals/greet`",
-                "[patch.crates-io] shout path `tasks/shout` is now `.rituals/shout`",
-                "[patch.https://example.com/index] greet path `tasks/greet` is now \
-                    `.rituals/greet`",
-                "[replace] `greet:0.1.0` path `tasks/greet` is now `.rituals/greet`",
-            ]
-        );
+        assert_eq!(changes, EVERY_OTHER_PATH_KEY_REPOINTED);
         let document = manifest.document.to_string();
         assert!(
             !document.contains("\"tasks/"),
