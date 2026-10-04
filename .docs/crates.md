@@ -56,7 +56,9 @@ crate asks it for the directory, the member entry and the path to report, so
 file in a directory about to be deleted, whether the work tree is clean, which
 directories hold Cargo configuration, which entries are submodules and which
 files mention a pattern. `remove` and `migrate` ask the same code, and each
-words its own refusal from the `Obstacle` it gets back.
+words its own refusal from what it gets back: `Unanswered` when git could not
+answer at all, `NotClean` for the clean-tree question, and `CannotGiveBack` for
+the give-back one.
 
 **A move is worked out in one place.** A `relocation::Relocation` is built once
 from the directories that move and says where any path at or under one of them

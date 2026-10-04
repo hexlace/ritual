@@ -1,16 +1,123 @@
 //! Whether git can give back every file in a directory that is about to be
 //! deleted.
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::index::{Flag, Unwatched, parse_attributes, parse_index};
-use super::status::{IgnoredFiles, ensure_nothing_dirty};
-use super::{Obstacle, canonical, from_the_top_level, run_git, run_git_with_input, top_level_of};
+use super::index::{Flag, IndexEntry, Unwatched, parse_attributes, parse_index};
+use super::status::{IgnoredFiles, uncommitted};
+use super::{
+    Unanswered, canonical, counted, counted_with_verb, from_the_top_level, run_git,
+    run_git_with_input, top_level_of,
+};
 
 /// The one `filter` driver whose files git gives back byte for byte: Git
 /// LFS stores the file itself and puts it back on checkout.
 const GIVES_BACK_ITS_BYTES: &str = "lfs";
+
+/// Why git cannot give back what is in a directory.
+///
+/// Holds [`Unanswered`] for the three facts every question here can fail on,
+/// and the facts of its own for the ones that stop git giving a directory
+/// back. Every path a variant holds is spelled from git's top level, the form
+/// the `:/` pathspec takes, so a person can hand it to git from any directory
+/// of the project — except [`CannotGiveBack::OwnRepository`]'s, which is the
+/// directory's own. The variants state git's facts and no remedy: a caller
+/// builds its own refusal from the one it receives, in its own words. See
+/// [`Unanswered`] for why the variants are public and the enum is exhaustive.
+///
+/// # Examples
+///
+/// ```
+/// use rituals_compose::git::CannotGiveBack;
+///
+/// assert_eq!(
+///     CannotGiveBack::OwnRepository("vendor/upstream".into()).to_string(),
+///     "vendor/upstream is a git repository of its own"
+/// );
+/// assert_eq!(
+///     CannotGiveBack::Dirty(vec!["a.txt".into(), "b.txt".into()]).to_string(),
+///     "2 files are untracked, ignored or changed since the last commit"
+/// );
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CannotGiveBack {
+    /// Git could not answer at all.
+    Unanswered(Unanswered),
+    /// The directory is, or contains, a git repository of its own, so the
+    /// project's git has no record of what is in it. The path is that
+    /// repository's, relative to the directory, and empty when it is the
+    /// directory itself.
+    ///
+    /// A submodule is one: the project records only the commit it points
+    /// at, so a clean one shows nothing in `git status`, and `git checkout`
+    /// gives back that record, not the submodule's files.
+    OwnRepository(PathBuf),
+    /// The directory is inside a git repository that is not the project's,
+    /// such as one a symbolic link leads into: the path is that repository's
+    /// top level. Whatever that repository vouches for, the project's git
+    /// cannot give it back.
+    OtherRepository(PathBuf),
+    /// Tracked files git has been told not to look at, so `git status`
+    /// calls them clean whatever is on disk.
+    Unwatched(Vec<Unwatched>),
+    /// Tracked files a `filter` driver other than Git LFS cleans on the way
+    /// in, with the driver's name: what git stores can differ from what is
+    /// on disk, and `git checkout` gives back what it stored.
+    Filtered(Vec<(PathBuf, String)>),
+    /// Files git could not give back once they are deleted: untracked,
+    /// ignored or changed since the last commit.
+    Dirty(Vec<PathBuf>),
+}
+
+impl From<Unanswered> for CannotGiveBack {
+    fn from(unanswered: Unanswered) -> Self {
+        Self::Unanswered(unanswered)
+    }
+}
+
+impl fmt::Display for CannotGiveBack {
+    /// Says git's fact in lowercase, with no remedy and no trailing
+    /// punctuation, so a caller can put it inside a sentence of its own.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unanswered(unanswered) => fmt::Display::fmt(unanswered, formatter),
+            Self::OwnRepository(repository) if repository.as_os_str().is_empty() => {
+                formatter.write_str("the directory is a git repository of its own")
+            }
+            Self::OwnRepository(repository) => {
+                write!(
+                    formatter,
+                    "{} is a git repository of its own",
+                    repository.display()
+                )
+            }
+            Self::OtherRepository(top_level) => write!(
+                formatter,
+                "the directory is in the git repository at {}, which is not the project's",
+                top_level.display()
+            ),
+            Self::Unwatched(files) => write!(
+                formatter,
+                "git has been told not to look at {}",
+                counted(files.len(), "tracked file")
+            ),
+            Self::Filtered(files) => write!(
+                formatter,
+                "git stores {} through a filter",
+                counted(files.len(), "tracked file")
+            ),
+            Self::Dirty(files) => write!(
+                formatter,
+                "{} untracked, ignored or changed since the last commit",
+                counted_with_verb(files.len())
+            ),
+        }
+    }
+}
+
+impl std::error::Error for CannotGiveBack {}
 
 /// Checks, with the `git` on `PATH`, that every file in `directory` is one
 /// git can give back.
@@ -36,29 +143,29 @@ const GIVES_BACK_ITS_BYTES: &str = "lfs";
 /// ```no_run
 /// use std::path::Path;
 ///
-/// use rituals_compose::git::{self, Obstacle};
+/// use rituals_compose::git::{self, CannotGiveBack};
 ///
 /// // Needs a real repository on disk and runs `git`, so this example is
 /// // `no_run`.
 /// let workspace_root = Path::new(".");
 /// match git::ensure_git_can_give_back(Path::new(".rituals/lint"), workspace_root) {
 ///     Ok(from_the_top_level) => println!("git can give back {}", from_the_top_level.display()),
-///     Err(Obstacle::Dirty(files)) => println!("{} files git cannot give back", files.len()),
+///     Err(CannotGiveBack::Dirty(files)) => println!("{} files git cannot give back", files.len()),
 ///     Err(other) => println!("git cannot vouch for it: {other}"),
 /// }
 /// ```
 ///
 /// # Errors
 ///
-/// Returns an [`Obstacle`] naming why git cannot vouch for the directory:
-/// any of its variants, [`Obstacle::GitMissing`], [`Obstacle::NotARepository`],
-/// [`Obstacle::OwnRepository`], [`Obstacle::OtherRepository`],
-/// [`Obstacle::Failed`], [`Obstacle::Unwatched`], [`Obstacle::Filtered`] and
-/// [`Obstacle::Dirty`], the last one naming every file git cannot give back.
+/// Returns a [`CannotGiveBack`] naming why git cannot vouch for the
+/// directory: [`CannotGiveBack::Unanswered`] when git could not answer, one
+/// of the variants for a repository, a flag or a filter git cannot see
+/// through, or [`CannotGiveBack::Dirty`], which names every file git cannot
+/// give back.
 pub fn ensure_git_can_give_back(
     directory: &Path,
     workspace_root: &Path,
-) -> Result<PathBuf, Obstacle> {
+) -> Result<PathBuf, CannotGiveBack> {
     check_with(|| Command::new("git"), directory, workspace_root)
 }
 
@@ -72,11 +179,11 @@ fn check_with(
     new_git: impl Fn() -> Command,
     directory: &Path,
     workspace_root: &Path,
-) -> Result<PathBuf, Obstacle> {
+) -> Result<PathBuf, CannotGiveBack> {
     let is_a_link = directory
         .symlink_metadata()
         .map_err(|error| {
-            Obstacle::Failed(format!("reading {} failed: {error}", directory.display()))
+            Unanswered::Failed(format!("reading {} failed: {error}", directory.display()))
         })?
         .file_type()
         .is_symlink();
@@ -90,7 +197,7 @@ fn check_with(
     // Git's top level is the directory or lies inside it: what it tracks is
     // that repository's own business, not the project's.
     if top_level.starts_with(&directory_itself) {
-        return Err(Obstacle::OwnRepository(PathBuf::new()));
+        return Err(CannotGiveBack::OwnRepository(PathBuf::new()));
     }
     ensure_the_projects(&new_git, &top_level, workspace_root)?;
     let from_top_level = from_the_top_level(&directory_itself, &top_level)?;
@@ -107,9 +214,22 @@ fn check_with(
         &["ls-files", "--stage", "-v", "-z", "--", "."],
     )?)?;
     if let Some(submodule) = index.iter().find(|entry| entry.is_gitlink) {
-        return Err(Obstacle::OwnRepository(submodule.path.clone()));
+        return Err(CannotGiveBack::OwnRepository(submodule.path.clone()));
     }
+    ensure_none_unwatched(&index, directory, &from_top_level)?;
+    ensure_none_filtered(&new_git, directory, &index, &from_top_level)?;
+    ensure_nothing_uncommitted(&new_git, directory, &["."])?;
+    Ok(from_top_level)
+}
 
+/// Refuses when any entry of `index`, read from `directory`, carries a flag
+/// that stops `git status` looking at it, naming each from `from_top_level`,
+/// the directory's own spelling.
+fn ensure_none_unwatched(
+    index: &[IndexEntry],
+    directory: &Path,
+    from_top_level: &Path,
+) -> Result<(), CannotGiveBack> {
     let unwatched: Vec<Unwatched> = index
         .iter()
         .filter_map(|entry| {
@@ -122,17 +242,29 @@ fn check_with(
                 .then(|| Unwatched::new(from_top_level.join(&entry.path), flag))
         })
         .collect();
-    if !unwatched.is_empty() {
-        return Err(Obstacle::Unwatched(unwatched));
+    if unwatched.is_empty() {
+        Ok(())
+    } else {
+        Err(CannotGiveBack::Unwatched(unwatched))
     }
+}
 
+/// Refuses when a filter driver other than Git LFS applies to any entry of
+/// `index`, asked about from `directory`, naming each from `from_top_level`,
+/// the directory's own spelling.
+fn ensure_none_filtered(
+    new_git: &impl Fn() -> Command,
+    directory: &Path,
+    index: &[IndexEntry],
+    from_top_level: &Path,
+) -> Result<(), CannotGiveBack> {
     let mut paths = Vec::new();
-    for entry in &index {
+    for entry in index {
         paths.extend_from_slice(entry.path.as_os_str().as_encoded_bytes());
         paths.push(0);
     }
     let filters = parse_attributes(&run_git_with_input(
-        &new_git,
+        new_git,
         directory,
         &["check-attr", "-z", "--stdin", "filter"],
         &paths,
@@ -147,12 +279,26 @@ fn check_with(
         })
         .map(|(path, value)| (from_top_level.join(path), value))
         .collect();
-    if !filtered.is_empty() {
-        return Err(Obstacle::Filtered(filtered));
+    if filtered.is_empty() {
+        Ok(())
+    } else {
+        Err(CannotGiveBack::Filtered(filtered))
     }
+}
 
-    ensure_nothing_dirty(&new_git, directory, &["."], IgnoredFiles::Count)?;
-    Ok(from_top_level)
+/// Refuses when anything `pathspecs` match, asked from `asked_in`, is
+/// untracked, ignored or changed since the last commit, naming each.
+fn ensure_nothing_uncommitted(
+    new_git: &impl Fn() -> Command,
+    asked_in: &Path,
+    pathspecs: &[&str],
+) -> Result<(), CannotGiveBack> {
+    let dirty = uncommitted(new_git, asked_in, pathspecs, IgnoredFiles::Count)?;
+    if dirty.is_empty() {
+        Ok(())
+    } else {
+        Err(CannotGiveBack::Dirty(dirty))
+    }
 }
 
 /// [`check_with`] for a `link`, a symbolic link standing where the directory
@@ -167,12 +313,13 @@ fn check_link_with(
     new_git: &impl Fn() -> Command,
     link: &Path,
     workspace_root: &Path,
-) -> Result<PathBuf, Obstacle> {
+) -> Result<PathBuf, CannotGiveBack> {
     let (Some(holder), Some(name)) = (link.parent(), link.file_name()) else {
-        return Err(Obstacle::Failed(format!(
+        return Err(Unanswered::Failed(format!(
             "{} has no directory holding it to ask git from",
             link.display()
-        )));
+        ))
+        .into());
     };
     let top_level = top_level_of(new_git, holder)?;
     ensure_the_projects(new_git, &top_level, workspace_root)?;
@@ -195,10 +342,10 @@ fn check_link_with(
         })
         .collect();
     if !unwatched.is_empty() {
-        return Err(Obstacle::Unwatched(unwatched));
+        return Err(CannotGiveBack::Unwatched(unwatched));
     }
 
-    ensure_nothing_dirty(new_git, holder, &[&pathspec], IgnoredFiles::Count)?;
+    ensure_nothing_uncommitted(new_git, holder, &[&pathspec])?;
     Ok(from_top_level)
 }
 
@@ -209,13 +356,13 @@ fn ensure_the_projects(
     new_git: &impl Fn() -> Command,
     top_level: &Path,
     workspace_root: &Path,
-) -> Result<(), Obstacle> {
+) -> Result<(), CannotGiveBack> {
     match top_level_of(new_git, workspace_root) {
         Ok(projects) if projects == top_level => Ok(()),
-        Ok(_) | Err(Obstacle::NotARepository) => {
-            Err(Obstacle::OtherRepository(top_level.to_path_buf()))
+        Ok(_) | Err(Unanswered::NotARepository) => {
+            Err(CannotGiveBack::OtherRepository(top_level.to_path_buf()))
         }
-        Err(obstacle) => Err(obstacle),
+        Err(unanswered) => Err(unanswered.into()),
     }
 }
 
@@ -228,12 +375,67 @@ mod tests {
     use crate::git::test_support::{
         add_a_submodule, commit_everything, committed_task, contained_in, git,
     };
-    use crate::git::{Flag, Obstacle, Unwatched};
+    use crate::git::{CannotGiveBack, Flag, Unanswered, Unwatched};
     use crate::test_support::{ScratchDir, TestOutcome};
+
+    /// Every variant renders as git's fact, in lowercase, with no remedy and
+    /// no trailing full stop, so a caller can build a sentence around it.
+    #[test]
+    fn every_cannot_give_back_says_git_s_fact_in_lowercase_with_no_remedy() {
+        let unwatched = |flag| Unwatched::new(PathBuf::from("a.txt"), flag);
+        let cases = [
+            (
+                CannotGiveBack::Unanswered(Unanswered::GitMissing),
+                "`git` could not be run",
+            ),
+            (
+                CannotGiveBack::OwnRepository(PathBuf::new()),
+                "the directory is a git repository of its own",
+            ),
+            (
+                CannotGiveBack::OwnRepository(PathBuf::from("vendor/upstream")),
+                "vendor/upstream is a git repository of its own",
+            ),
+            (
+                CannotGiveBack::OtherRepository(PathBuf::from("/elsewhere")),
+                "the directory is in the git repository at /elsewhere, which is not the project's",
+            ),
+            (
+                CannotGiveBack::Unwatched(vec![unwatched(Flag::AssumeUnchanged)]),
+                "git has been told not to look at 1 tracked file",
+            ),
+            (
+                CannotGiveBack::Unwatched(vec![
+                    unwatched(Flag::AssumeUnchanged),
+                    unwatched(Flag::SkipWorktree),
+                ]),
+                "git has been told not to look at 2 tracked files",
+            ),
+            (
+                CannotGiveBack::Filtered(vec![(PathBuf::from("a.cfg"), "strip".to_string())]),
+                "git stores 1 tracked file through a filter",
+            ),
+            (
+                CannotGiveBack::Dirty(vec![PathBuf::from("a.txt")]),
+                "1 file is untracked, ignored or changed since the last commit",
+            ),
+            (
+                CannotGiveBack::Dirty(vec![PathBuf::from("a.txt"), PathBuf::from("b.txt")]),
+                "2 files are untracked, ignored or changed since the last commit",
+            ),
+        ];
+        for (cannot_give_back, expected) in cases {
+            assert_eq!(cannot_give_back.to_string(), expected);
+            assert!(
+                !expected.ends_with('.'),
+                "{expected:?} must not end in a full stop"
+            );
+        }
+    }
 
     /// [`check_with`] on `task`, with the scratch directory as the project's
     /// workspace root.
-    fn check(scratch: &Path, task: &Path) -> Result<PathBuf, Obstacle> {
+    fn check(scratch: &Path, task: &Path) -> Result<PathBuf, CannotGiveBack> {
         check_with(contained_in(scratch), task, scratch)
     }
 
@@ -257,7 +459,7 @@ mod tests {
 
         let result = check(scratch.path(), &task);
 
-        let Err(Obstacle::Dirty(mut files)) = result else {
+        let Err(CannotGiveBack::Dirty(mut files)) = result else {
             return Err(format!("expected the directory to be dirty, got {result:?}").into());
         };
         files.sort();
@@ -296,7 +498,7 @@ mod tests {
         let (scratch, link) = a_link_to_a_committed_task("git-link-untracked")?;
         assert_eq!(
             check(scratch.path(), &link),
-            Err(Obstacle::Dirty(vec![PathBuf::from("tasks/task")]))
+            Err(CannotGiveBack::Dirty(vec![PathBuf::from("tasks/task")]))
         );
 
         std::fs::write(scratch.path().join("tasks/.gitignore"), "task\n")?;
@@ -304,7 +506,7 @@ mod tests {
         git(scratch.path(), &["commit", "--message", "ignore the link"])?;
         assert_eq!(
             check(scratch.path(), &link),
-            Err(Obstacle::Dirty(vec![PathBuf::from("tasks/task")]))
+            Err(CannotGiveBack::Dirty(vec![PathBuf::from("tasks/task")]))
         );
         Ok(())
     }
@@ -328,7 +530,7 @@ mod tests {
         )?;
         assert_eq!(
             check(scratch.path(), &link),
-            Err(Obstacle::Unwatched(vec![Unwatched::new(
+            Err(CannotGiveBack::Unwatched(vec![Unwatched::new(
                 PathBuf::from("tasks/task"),
                 Flag::AssumeUnchanged
             )]))
@@ -342,7 +544,7 @@ mod tests {
         std::os::unix::fs::symlink("../vendor", &link)?;
         assert_eq!(
             check(scratch.path(), &link),
-            Err(Obstacle::Dirty(vec![PathBuf::from("tasks/task")]))
+            Err(CannotGiveBack::Dirty(vec![PathBuf::from("tasks/task")]))
         );
         Ok(())
     }
@@ -353,7 +555,10 @@ mod tests {
         let task = scratch.path().join("task");
         std::fs::create_dir_all(&task)?;
 
-        assert_eq!(check(scratch.path(), &task), Err(Obstacle::NotARepository));
+        assert_eq!(
+            check(scratch.path(), &task),
+            Err(CannotGiveBack::Unanswered(Unanswered::NotARepository))
+        );
         Ok(())
     }
 
@@ -368,7 +573,7 @@ mod tests {
                 scratch.path(),
                 scratch.path()
             ),
-            Err(Obstacle::GitMissing)
+            Err(CannotGiveBack::Unanswered(Unanswered::GitMissing))
         );
         Ok(())
     }
@@ -380,7 +585,7 @@ mod tests {
 
         assert_eq!(
             check(scratch.path(), &task),
-            Err(Obstacle::OwnRepository(PathBuf::new()))
+            Err(CannotGiveBack::OwnRepository(PathBuf::new()))
         );
         Ok(())
     }
@@ -403,7 +608,9 @@ mod tests {
 
         assert_eq!(
             check(scratch.path(), &tasks.join("lint")),
-            Err(Obstacle::OtherRepository(std::fs::canonicalize(&tasks)?))
+            Err(CannotGiveBack::OtherRepository(std::fs::canonicalize(
+                &tasks
+            )?))
         );
         Ok(())
     }
@@ -417,7 +624,9 @@ mod tests {
 
         assert_eq!(
             check(scratch.path(), &task),
-            Err(Obstacle::OwnRepository(PathBuf::from("vendor/upstream")))
+            Err(CannotGiveBack::OwnRepository(PathBuf::from(
+                "vendor/upstream"
+            )))
         );
         Ok(())
     }
@@ -443,7 +652,7 @@ mod tests {
 
         assert_eq!(
             check(scratch.path(), &task),
-            Err(Obstacle::Unwatched(vec![
+            Err(CannotGiveBack::Unwatched(vec![
                 Unwatched::new(PathBuf::from("task/assumed.txt"), Flag::AssumeUnchanged),
                 Unwatched::new(PathBuf::from("task/skipped.txt"), Flag::SkipWorktree),
             ]))
@@ -489,7 +698,7 @@ mod tests {
 
         assert_eq!(
             check(scratch.path(), &task),
-            Err(Obstacle::Filtered(vec![(
+            Err(CannotGiveBack::Filtered(vec![(
                 PathBuf::from("task/local.cfg"),
                 "strip".to_string()
             )]))
@@ -511,7 +720,8 @@ mod tests {
         assert!(
             matches!(
                 &result,
-                Err(Obstacle::Failed(message)) if message.contains("no-such-directory")
+                Err(CannotGiveBack::Unanswered(Unanswered::Failed(message)))
+                    if message.contains("no-such-directory")
             ),
             "expected git's own message naming the directory, got {result:?}"
         );

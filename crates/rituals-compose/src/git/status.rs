@@ -1,9 +1,60 @@
 //! What `git status` says is untracked, ignored or changed.
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{Obstacle, run_git, top_level_of};
+use super::{Unanswered, counted_with_verb, run_git, top_level_of};
+
+/// Why the work tree could not be called clean.
+///
+/// Holds [`Unanswered`] for the three facts every question here can fail on,
+/// and the files a commit would have to carry for the one this question adds.
+/// It states git's facts and no remedy, so a caller words its own refusal from
+/// the variant it receives. See [`Unanswered`] for why the variants are public
+/// and the enum is exhaustive.
+///
+/// # Examples
+///
+/// ```
+/// use rituals_compose::git::NotClean;
+///
+/// assert_eq!(
+///     NotClean::Dirty(vec!["a.txt".into(), "b.txt".into()]).to_string(),
+///     "2 files are untracked, ignored or changed since the last commit"
+/// );
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotClean {
+    /// Git could not answer at all.
+    Unanswered(Unanswered),
+    /// Files a commit would have to carry: untracked, or changed since the
+    /// last commit, spelled from git's top level.
+    Dirty(Vec<PathBuf>),
+}
+
+impl From<Unanswered> for NotClean {
+    fn from(unanswered: Unanswered) -> Self {
+        Self::Unanswered(unanswered)
+    }
+}
+
+impl fmt::Display for NotClean {
+    /// Says git's fact in lowercase, with no remedy and no trailing
+    /// punctuation, so a caller can put it inside a sentence of its own.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unanswered(unanswered) => fmt::Display::fmt(unanswered, formatter),
+            Self::Dirty(files) => write!(
+                formatter,
+                "{} untracked, ignored or changed since the last commit",
+                counted_with_verb(files.len())
+            ),
+        }
+    }
+}
+
+impl std::error::Error for NotClean {}
 
 /// Checks that the work tree of the repository `directory` is in has nothing
 /// that is not committed, and returns the repository's top level.
@@ -22,25 +73,23 @@ use super::{Obstacle, run_git, top_level_of};
 /// ```no_run
 /// use std::path::Path;
 ///
-/// use rituals_compose::git::{self, Obstacle};
+/// use rituals_compose::git::{self, NotClean};
 ///
 /// // Needs a real repository on disk and runs `git`, so this example is
 /// // `no_run`.
 /// match git::ensure_work_tree_is_clean(Path::new(".")) {
 ///     Ok(top_level) => println!("everything in {} is committed", top_level.display()),
-///     Err(Obstacle::Dirty(files)) => println!("{} paths are not committed", files.len()),
+///     Err(NotClean::Dirty(files)) => println!("{} paths are not committed", files.len()),
 ///     Err(other) => println!("git could not say: {other}"),
 /// }
 /// ```
 ///
 /// # Errors
 ///
-/// Returns [`Obstacle::GitMissing`] when `git` cannot be run,
-/// [`Obstacle::NotARepository`] when `directory` is not in a git repository,
-/// [`Obstacle::Failed`] for anything else git reports or prints that cannot
-/// be read, and [`Obstacle::Dirty`] naming every path that is not committed,
-/// from the top level. It returns no other variant.
-pub fn ensure_work_tree_is_clean(directory: &Path) -> Result<PathBuf, Obstacle> {
+/// Returns [`NotClean::Unanswered`] when git could not answer, and
+/// [`NotClean::Dirty`] naming every path that is not committed, from the top
+/// level.
+pub fn ensure_work_tree_is_clean(directory: &Path) -> Result<PathBuf, NotClean> {
     ensure_work_tree_is_clean_with(|| Command::new("git"), directory)
 }
 
@@ -48,10 +97,14 @@ pub fn ensure_work_tree_is_clean(directory: &Path) -> Result<PathBuf, Obstacle> 
 fn ensure_work_tree_is_clean_with(
     new_git: impl Fn() -> Command,
     directory: &Path,
-) -> Result<PathBuf, Obstacle> {
+) -> Result<PathBuf, NotClean> {
     let top_level = top_level_of(&new_git, directory)?;
-    ensure_nothing_dirty(&new_git, directory, &[], IgnoredFiles::Skip)?;
-    Ok(top_level)
+    let dirty = uncommitted(&new_git, directory, &[], IgnoredFiles::Skip)?;
+    if dirty.is_empty() {
+        Ok(top_level)
+    } else {
+        Err(NotClean::Dirty(dirty))
+    }
 }
 
 /// Whether the files git ignores are among the ones that count.
@@ -63,15 +116,16 @@ pub(super) enum IgnoredFiles {
     Skip,
 }
 
-/// Refuses when anything `pathspecs` match, asked from `asked_in`, is
-/// untracked, changed since the last commit, or, when `ignored` says so,
-/// ignored, naming each. No pathspec at all is the whole work tree.
-pub(super) fn ensure_nothing_dirty(
+/// Every path `pathspecs` match, asked from `asked_in`, that is untracked,
+/// changed since the last commit, or, when `ignored` says so, ignored, from
+/// git's top level. No pathspec at all is the whole work tree, and nothing
+/// dirty is an empty list.
+pub(super) fn uncommitted(
     new_git: &impl Fn() -> Command,
     asked_in: &Path,
     pathspecs: &[&str],
     ignored: IgnoredFiles,
-) -> Result<(), Obstacle> {
+) -> Result<Vec<PathBuf>, Unanswered> {
     let mut arguments = vec![
         "--no-optional-locks",
         "status",
@@ -88,15 +142,10 @@ pub(super) fn ensure_nothing_dirty(
     let status = run_git(new_git, asked_in, &arguments)?;
     // Git names each path in the status from the top level, whichever
     // directory it was asked from.
-    let dirty: Vec<PathBuf> = parse_porcelain(&status)?
+    Ok(parse_porcelain(&status)?
         .into_iter()
         .map(PathBuf::from)
-        .collect();
-    if dirty.is_empty() {
-        Ok(())
-    } else {
-        Err(Obstacle::Dirty(dirty))
-    }
+        .collect())
 }
 
 /// The path of every entry in `git status --porcelain=v1 -z` output.
@@ -106,7 +155,7 @@ pub(super) fn ensure_nothing_dirty(
 /// came from, which is not an entry of its own. An entry too short to hold
 /// its status is a failure rather than something to skip, since skipping it
 /// could hide a file git cannot give back.
-pub(super) fn parse_porcelain(output: &[u8]) -> Result<Vec<String>, Obstacle> {
+pub(super) fn parse_porcelain(output: &[u8]) -> Result<Vec<String>, Unanswered> {
     let text = String::from_utf8_lossy(output);
     let mut fields = text.split('\0');
     let mut paths = Vec::new();
@@ -116,7 +165,7 @@ pub(super) fn parse_porcelain(output: &[u8]) -> Result<Vec<String>, Obstacle> {
             continue;
         }
         let Some((status, path)) = field.split_at_checked(3) else {
-            return Err(Obstacle::Failed(format!(
+            return Err(Unanswered::Failed(format!(
                 "git status printed an entry this check cannot read: {field:?}"
             )));
         };
@@ -134,9 +183,36 @@ mod tests {
     use std::process::Command;
 
     use super::{ensure_work_tree_is_clean_with, parse_porcelain};
-    use crate::git::Obstacle;
     use crate::git::test_support::{commit_everything, contained_in, git};
+    use crate::git::{NotClean, Unanswered};
     use crate::test_support::{ScratchDir, TestOutcome};
+
+    /// Every variant renders as git's fact, in lowercase, with no remedy and
+    /// no trailing full stop, so a caller can build a sentence around it.
+    #[test]
+    fn every_not_clean_says_git_s_fact_in_lowercase_with_no_remedy() {
+        let cases = [
+            (
+                NotClean::Unanswered(Unanswered::NotARepository),
+                "the directory is not in a git repository",
+            ),
+            (
+                NotClean::Dirty(vec![PathBuf::from("a.txt")]),
+                "1 file is untracked, ignored or changed since the last commit",
+            ),
+            (
+                NotClean::Dirty(vec![PathBuf::from("a.txt"), PathBuf::from("b.txt")]),
+                "2 files are untracked, ignored or changed since the last commit",
+            ),
+        ];
+        for (not_clean, expected) in cases {
+            assert_eq!(not_clean.to_string(), expected);
+            assert!(
+                !expected.ends_with('.'),
+                "{expected:?} must not end in a full stop"
+            );
+        }
+    }
 
     /// Exercises the parser on one entry of each kind `--porcelain=v1 -z`
     /// prints that `remove` has to refuse over: untracked, ignored, modified
@@ -149,7 +225,7 @@ mod tests {
         let output = b"?? untracked.txt\0!! target/\0 M worktree.rs\0M  staged.rs\0A  added.rs\0\
             \x20D gone.rs\0";
         assert_eq!(
-            parse_porcelain(output).map_err(|obstacle| format!("{obstacle:?}"))?,
+            parse_porcelain(output).map_err(|error| format!("{error:?}"))?,
             [
                 "untracked.txt",
                 "target/",
@@ -169,7 +245,7 @@ mod tests {
     fn a_rename_entry_consumes_its_original_path() -> TestOutcome {
         let output = b"R  new.rs\0old.rs\0C  copy.rs\0source.rs\0?? other.txt\0";
         assert_eq!(
-            parse_porcelain(output).map_err(|obstacle| format!("{obstacle:?}"))?,
+            parse_porcelain(output).map_err(|error| format!("{error:?}"))?,
             ["new.rs", "copy.rs", "other.txt"]
         );
         Ok(())
@@ -179,7 +255,7 @@ mod tests {
     fn an_entry_too_short_to_hold_a_status_is_a_failure_not_a_skip() {
         let result = parse_porcelain(b"?? fine.txt\0x\0");
         assert!(
-            matches!(&result, Err(Obstacle::Failed(message)) if message.contains("\"x\"")),
+            matches!(&result, Err(Unanswered::Failed(message)) if message.contains("\"x\"")),
             "expected the unreadable entry to be named, got {result:?}"
         );
     }
@@ -199,7 +275,7 @@ mod tests {
         Ok(scratch)
     }
 
-    fn clean(scratch: &Path, directory: &Path) -> Result<PathBuf, Obstacle> {
+    fn clean(scratch: &Path, directory: &Path) -> Result<PathBuf, NotClean> {
         ensure_work_tree_is_clean_with(contained_in(scratch), directory)
     }
 
@@ -227,7 +303,7 @@ mod tests {
 
         let result = clean(scratch.path(), scratch.path());
 
-        let Err(Obstacle::Dirty(mut files)) = result else {
+        let Err(NotClean::Dirty(mut files)) = result else {
             return Err(format!("expected the work tree to be dirty, got {result:?}").into());
         };
         files.sort();
@@ -268,7 +344,7 @@ mod tests {
 
         assert_eq!(
             clean(scratch.path(), &subdirectory),
-            Err(Obstacle::Dirty(vec![PathBuf::from("outside.txt")]))
+            Err(NotClean::Dirty(vec![PathBuf::from("outside.txt")]))
         );
 
         std::fs::remove_file(scratch.path().join("outside.txt"))?;
@@ -286,7 +362,7 @@ mod tests {
 
         assert_eq!(
             clean(scratch.path(), scratch.path()),
-            Err(Obstacle::NotARepository)
+            Err(NotClean::Unanswered(Unanswered::NotARepository))
         );
         Ok(())
     }
@@ -300,7 +376,7 @@ mod tests {
                 || Command::new("ritual-test-no-such-git"),
                 scratch.path()
             ),
-            Err(Obstacle::GitMissing)
+            Err(NotClean::Unanswered(Unanswered::GitMissing))
         );
         Ok(())
     }

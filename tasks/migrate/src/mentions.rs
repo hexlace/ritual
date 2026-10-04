@@ -34,7 +34,7 @@ pub(crate) fn lines(root: &Path, repository: &Repository) -> Vec<String> {
                 .map(|file| report::still_mentions(file))
                 .collect()
         }
-        Err(obstacle) => vec![report::listing_failed(&obstacle)],
+        Err(unanswered) => vec![report::listing_failed(&unanswered)],
     }
 }
 

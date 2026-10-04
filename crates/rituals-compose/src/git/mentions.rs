@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{Obstacle, failure_of, run_git_for_output, top_level_of};
+use super::{Unanswered, failure_of, run_git_for_output, top_level_of};
 
 /// Lists every file of the repository `directory` is in whose text matches
 /// `extended_regex`, for a person to look at.
@@ -34,21 +34,24 @@ use super::{Obstacle, failure_of, run_git_for_output, top_level_of};
 /// for file in git::files_mentioning(Path::new("."), regex)? {
 ///     println!("{} still mentions tasks/", file.display());
 /// }
-/// # Ok::<(), rituals_compose::git::Obstacle>(())
+/// # Ok::<(), rituals_compose::git::Unanswered>(())
 /// ```
 ///
 /// # Errors
 ///
-/// Returns [`Obstacle::GitMissing`] when `git` cannot be run,
-/// [`Obstacle::NotARepository`] when `directory` is not in a git repository,
-/// and [`Obstacle::Failed`] in git's own words when it cannot read the
-/// expression or anything else goes wrong. It returns no other variant.
+/// Returns [`Unanswered::GitMissing`] when `git` cannot be run,
+/// [`Unanswered::NotARepository`] when `directory` is not in a git repository,
+/// and [`Unanswered::Failed`] in git's own words when it cannot read the
+/// expression or anything else goes wrong.
 ///
 /// # Panics
 ///
 /// Panics if `extended_regex` is empty, which matches every file and so
 /// answers nothing.
-pub fn files_mentioning(directory: &Path, extended_regex: &str) -> Result<Vec<PathBuf>, Obstacle> {
+pub fn files_mentioning(
+    directory: &Path,
+    extended_regex: &str,
+) -> Result<Vec<PathBuf>, Unanswered> {
     files_mentioning_with(|| Command::new("git"), directory, extended_regex)
 }
 
@@ -57,7 +60,7 @@ fn files_mentioning_with(
     new_git: impl Fn() -> Command,
     directory: &Path,
     extended_regex: &str,
-) -> Result<Vec<PathBuf>, Obstacle> {
+) -> Result<Vec<PathBuf>, Unanswered> {
     assert!(
         !extended_regex.is_empty(),
         "an empty expression matches every file, so it answers nothing"
@@ -110,7 +113,7 @@ mod tests {
     use std::process::Command;
 
     use super::files_mentioning_with;
-    use crate::git::Obstacle;
+    use crate::git::Unanswered;
     use crate::git::test_support::{commit_everything, contained_in, git};
     use crate::test_support::{ScratchDir, TestOutcome};
 
@@ -146,7 +149,11 @@ mod tests {
         Ok(scratch)
     }
 
-    fn mentioning(scratch: &Path, directory: &Path, regex: &str) -> Result<Vec<PathBuf>, Obstacle> {
+    fn mentioning(
+        scratch: &Path,
+        directory: &Path,
+        regex: &str,
+    ) -> Result<Vec<PathBuf>, Unanswered> {
         files_mentioning_with(contained_in(scratch), directory, regex)
     }
 
@@ -212,7 +219,7 @@ mod tests {
         let result = mentioning(scratch.path(), scratch.path(), "(unclosed");
 
         assert!(
-            matches!(&result, Err(Obstacle::Failed(message)) if !message.is_empty()),
+            matches!(&result, Err(Unanswered::Failed(message)) if !message.is_empty()),
             "expected git's own message, got {result:?}"
         );
         Ok(())
@@ -225,7 +232,7 @@ mod tests {
 
         assert_eq!(
             mentioning(scratch.path(), scratch.path(), TASKS),
-            Err(Obstacle::NotARepository)
+            Err(Unanswered::NotARepository)
         );
         Ok(())
     }
@@ -240,7 +247,7 @@ mod tests {
                 scratch.path(),
                 TASKS
             ),
-            Err(Obstacle::GitMissing)
+            Err(Unanswered::GitMissing)
         );
         Ok(())
     }

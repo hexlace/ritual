@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{Obstacle, run_git};
+use super::{Unanswered, run_git};
 
 /// The names Cargo reads a configuration file under in a `.cargo`
 /// directory.
@@ -31,18 +31,17 @@ const CARGO_CONFIGURATION_FILE_NAMES: [&str; 2] = ["config", "config.toml"];
 /// for directory in git::directories_holding_cargo_configuration(Path::new("."))? {
 ///     println!("a build in {} reads Cargo configuration", directory.display());
 /// }
-/// # Ok::<(), rituals_compose::git::Obstacle>(())
+/// # Ok::<(), rituals_compose::git::Unanswered>(())
 /// ```
 ///
 /// # Errors
 ///
-/// Returns [`Obstacle::GitMissing`] when `git` cannot be run,
-/// [`Obstacle::NotARepository`] when `workspace_root` is not in a git
-/// repository, and [`Obstacle::Failed`] for anything else git reports. It
-/// returns no other variant.
+/// Returns [`Unanswered::GitMissing`] when `git` cannot be run,
+/// [`Unanswered::NotARepository`] when `workspace_root` is not in a git
+/// repository, and [`Unanswered::Failed`] for anything else git reports.
 pub fn directories_holding_cargo_configuration(
     workspace_root: &Path,
-) -> Result<Vec<PathBuf>, Obstacle> {
+) -> Result<Vec<PathBuf>, Unanswered> {
     directories_holding_cargo_configuration_with(|| Command::new("git"), workspace_root)
 }
 
@@ -51,7 +50,7 @@ pub fn directories_holding_cargo_configuration(
 fn directories_holding_cargo_configuration_with(
     new_git: impl Fn() -> Command,
     workspace_root: &Path,
-) -> Result<Vec<PathBuf>, Obstacle> {
+) -> Result<Vec<PathBuf>, Unanswered> {
     let listed = run_git(
         &new_git,
         workspace_root,
@@ -100,7 +99,7 @@ fn directories_holding_cargo_configuration_with(
 #[cfg(test)]
 mod tests {
     use super::directories_holding_cargo_configuration_with;
-    use crate::git::Obstacle;
+    use crate::git::Unanswered;
     use crate::git::test_support::{commit_everything, contained_in, git};
     use crate::test_support::{ScratchDir, TestOutcome};
 
@@ -132,7 +131,7 @@ mod tests {
 
         let mut directories =
             directories_holding_cargo_configuration_with(contained_in(root), root)
-                .map_err(|obstacle| format!("{obstacle:?}"))?;
+                .map_err(|error| format!("{error:?}"))?;
         directories.sort();
 
         assert_eq!(
@@ -157,7 +156,7 @@ mod tests {
             scratch.path(),
         );
 
-        assert_eq!(listed, Err(Obstacle::NotARepository));
+        assert_eq!(listed, Err(Unanswered::NotARepository));
         Ok(())
     }
 }

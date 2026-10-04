@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{Obstacle, canonical, from_the_top_level, run_git, top_level_of};
+use super::{Unanswered, canonical, from_the_top_level, run_git, top_level_of};
 
 /// A tracked file git has been told not to look at, and which flag says so.
 ///
@@ -29,11 +29,11 @@ impl Unwatched {
     /// ```no_run
     /// use std::path::Path;
     ///
-    /// use rituals_compose::git::{self, Obstacle};
+    /// use rituals_compose::git::{self, CannotGiveBack};
     ///
     /// // Needs a real repository on disk and runs `git`, so this example is
     /// // `no_run`.
-    /// if let Err(Obstacle::Unwatched(files)) =
+    /// if let Err(CannotGiveBack::Unwatched(files)) =
     ///     git::ensure_git_can_give_back(Path::new(".rituals/lint"), Path::new("."))
     /// {
     ///     for file in &files {
@@ -53,11 +53,11 @@ impl Unwatched {
     /// ```no_run
     /// use std::path::Path;
     ///
-    /// use rituals_compose::git::{self, Flag, Obstacle};
+    /// use rituals_compose::git::{self, CannotGiveBack, Flag};
     ///
     /// // Needs a real repository on disk and runs `git`, so this example is
     /// // `no_run`.
-    /// if let Err(Obstacle::Unwatched(files)) =
+    /// if let Err(CannotGiveBack::Unwatched(files)) =
     ///     git::ensure_git_can_give_back(Path::new(".rituals/lint"), Path::new("."))
     /// {
     ///     let skipped = files.iter().filter(|file| file.flag() == Flag::SkipWorktree);
@@ -117,16 +117,16 @@ pub enum Flag {
 /// for submodule in git::submodules_under(Path::new(".rituals/lint"))? {
 ///     println!("{} is a git submodule", submodule.display());
 /// }
-/// # Ok::<(), rituals_compose::git::Obstacle>(())
+/// # Ok::<(), rituals_compose::git::Unanswered>(())
 /// ```
 ///
 /// # Errors
 ///
-/// Returns [`Obstacle::GitMissing`] when `git` cannot be run,
-/// [`Obstacle::NotARepository`] when `directory` is not in a git repository,
-/// and [`Obstacle::Failed`] for anything else git reports or prints that
-/// cannot be read. It returns no other variant.
-pub fn submodules_under(directory: &Path) -> Result<Vec<PathBuf>, Obstacle> {
+/// Returns [`Unanswered::GitMissing`] when `git` cannot be run,
+/// [`Unanswered::NotARepository`] when `directory` is not in a git repository,
+/// and [`Unanswered::Failed`] for anything else git reports or prints that
+/// cannot be read.
+pub fn submodules_under(directory: &Path) -> Result<Vec<PathBuf>, Unanswered> {
     submodules_under_with(|| Command::new("git"), directory)
 }
 
@@ -134,9 +134,9 @@ pub fn submodules_under(directory: &Path) -> Result<Vec<PathBuf>, Obstacle> {
 fn submodules_under_with(
     new_git: impl Fn() -> Command,
     directory: &Path,
-) -> Result<Vec<PathBuf>, Obstacle> {
+) -> Result<Vec<PathBuf>, Unanswered> {
     let Some(holder) = directory.parent() else {
-        return Err(Obstacle::Failed(format!(
+        return Err(Unanswered::Failed(format!(
             "{} has no directory holding it to ask git from",
             directory.display()
         )));
@@ -144,7 +144,7 @@ fn submodules_under_with(
     let top_level = top_level_of(&new_git, holder)?;
     let from_top_level = from_the_top_level(&canonical(holder)?, &top_level)?;
     let Some(name) = directory.file_name() else {
-        return Err(Obstacle::Failed(format!(
+        return Err(Unanswered::Failed(format!(
             "{} has no name to ask git about",
             directory.display()
         )));
@@ -183,12 +183,12 @@ pub(super) struct IndexEntry {
 /// for one marked skip-worktree. An entry this cannot read is a failure
 /// rather than something to skip, since skipping it could hide a submodule
 /// or a flag.
-pub(super) fn parse_index(output: &[u8]) -> Result<Vec<IndexEntry>, Obstacle> {
+pub(super) fn parse_index(output: &[u8]) -> Result<Vec<IndexEntry>, Unanswered> {
     let text = String::from_utf8_lossy(output);
     let mut entries = Vec::new();
     for entry in text.split('\0').filter(|entry| !entry.is_empty()) {
         let unreadable = || {
-            Obstacle::Failed(format!(
+            Unanswered::Failed(format!(
                 "git ls-files printed an entry this check cannot read: {entry:?}"
             ))
         };
@@ -220,12 +220,12 @@ pub(super) fn parse_index(output: &[u8]) -> Result<Vec<IndexEntry>, Obstacle> {
 /// and its value — `unspecified`, `unset`, `set`, or the value it was given.
 /// Output that does not come in threes is a failure, since misreading it
 /// could pair a file with the wrong filter.
-pub(super) fn parse_attributes(output: &[u8]) -> Result<Vec<(PathBuf, String)>, Obstacle> {
+pub(super) fn parse_attributes(output: &[u8]) -> Result<Vec<(PathBuf, String)>, Unanswered> {
     let text = String::from_utf8_lossy(output);
     let fields: Vec<&str> = text.split_terminator('\0').collect();
     let answers = fields.chunks_exact(3);
     if !answers.remainder().is_empty() {
-        return Err(Obstacle::Failed(format!(
+        return Err(Unanswered::Failed(format!(
             "git check-attr printed output this check cannot read: {text:?}"
         )));
     }
@@ -240,7 +240,7 @@ mod tests {
     use std::process::Command;
 
     use super::{Flag, IndexEntry, parse_attributes, parse_index, submodules_under_with};
-    use crate::git::Obstacle;
+    use crate::git::Unanswered;
     use crate::git::test_support::{add_a_submodule, commit_everything, contained_in, git};
     use crate::test_support::{ScratchDir, TestOutcome};
 
@@ -256,7 +256,7 @@ mod tests {
             flag,
         };
         assert_eq!(
-            parse_index(output).map_err(|obstacle| format!("{obstacle:?}"))?,
+            parse_index(output).map_err(|error| format!("{error:?}"))?,
             [
                 entry("src/lib.rs", false, None),
                 entry("vendor/upstream", true, None),
@@ -278,7 +278,7 @@ mod tests {
             assert!(
                 matches!(
                     &result,
-                    Err(Obstacle::Failed(message)) if message.contains("cannot read")
+                    Err(Unanswered::Failed(message)) if message.contains("cannot read")
                 ),
                 "expected {output:?} to be refused, got {result:?}"
             );
@@ -289,7 +289,7 @@ mod tests {
     fn attributes_are_read_in_threes() -> TestOutcome {
         let output = b"a.cfg\0filter\0strip\0b.rs\0filter\0unspecified\0";
         assert_eq!(
-            parse_attributes(output).map_err(|obstacle| format!("{obstacle:?}"))?,
+            parse_attributes(output).map_err(|error| format!("{error:?}"))?,
             [
                 (PathBuf::from("a.cfg"), "strip".to_string()),
                 (PathBuf::from("b.rs"), "unspecified".to_string()),
@@ -297,7 +297,7 @@ mod tests {
         );
         let result = parse_attributes(b"a.cfg\0filter\0");
         assert!(
-            matches!(&result, Err(Obstacle::Failed(message)) if message.contains("cannot read")),
+            matches!(&result, Err(Unanswered::Failed(message)) if message.contains("cannot read")),
             "expected output not in threes to be refused, got {result:?}"
         );
         Ok(())
@@ -319,7 +319,7 @@ mod tests {
         Ok(scratch)
     }
 
-    fn submodules(scratch: &Path, directory: &Path) -> Result<Vec<PathBuf>, Obstacle> {
+    fn submodules(scratch: &Path, directory: &Path) -> Result<Vec<PathBuf>, Unanswered> {
         submodules_under_with(contained_in(scratch), directory)
     }
 
@@ -375,7 +375,7 @@ mod tests {
 
         assert_eq!(
             submodules(scratch.path(), &scratch.path().join("tasks")),
-            Err(Obstacle::NotARepository)
+            Err(Unanswered::NotARepository)
         );
         Ok(())
     }
@@ -386,7 +386,7 @@ mod tests {
 
         assert_eq!(
             submodules_under_with(|| Command::new("ritual-test-no-such-git"), scratch.path()),
-            Err(Obstacle::GitMissing)
+            Err(Unanswered::GitMissing)
         );
         Ok(())
     }

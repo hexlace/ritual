@@ -9,7 +9,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use rituals::{Failure, Outcome};
-use rituals_compose::git::{self, Obstacle};
+use rituals_compose::git::{self, Unanswered};
 use rituals_compose::sentence::join_with_and;
 
 use crate::places::from_the_root;
@@ -104,8 +104,9 @@ pub(super) fn ensure_none_holds_a_submodule(
 ) -> Outcome {
     for directory in directories {
         let shown = from_the_root(directory, root);
-        let submodules = git::submodules_under(directory)
-            .map_err(|obstacle| submodule_question_refusal(&obstacle, &shown, migrate_command))?;
+        let submodules = git::submodules_under(directory).map_err(|unanswered| {
+            submodule_question_refusal(&unanswered, &shown, migrate_command)
+        })?;
         if let Some(gitlink) = submodules.first() {
             return Err(holds_a_submodule(
                 &shown,
@@ -120,24 +121,13 @@ pub(super) fn ensure_none_holds_a_submodule(
 /// The refusal for a git that could not say whether a directory holds a
 /// submodule.
 fn submodule_question_refusal(
-    obstacle: &Obstacle,
+    unanswered: &Unanswered,
     directory: &str,
     migrate_command: &str,
 ) -> Failure {
-    match obstacle {
-        Obstacle::GitMissing | Obstacle::NotARepository => {
-            precondition::refusal(obstacle, migrate_command)
-        }
-        Obstacle::Failed(message) => submodule_unknown(directory, message),
-        Obstacle::OwnRepository(_)
-        | Obstacle::OtherRepository(_)
-        | Obstacle::Unwatched(_)
-        | Obstacle::Filtered(_)
-        | Obstacle::Dirty(_) => unreachable!(
-            "git::submodules_under returns only GitMissing, NotARepository and Failed, got \
-             {obstacle:?}"
-        ),
-    }
+    precondition::unanswered_refusal(unanswered, migrate_command, |message| {
+        submodule_unknown(directory, message)
+    })
 }
 
 fn unreadable(path: &Path, error: std::io::Error) -> Failure {

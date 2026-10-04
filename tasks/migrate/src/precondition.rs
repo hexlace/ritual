@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use rituals::Failure;
-use rituals_compose::git::{self, Obstacle};
+use rituals_compose::git::{self, NotClean, Unanswered};
 
 use crate::places::spelled_from;
 
@@ -25,7 +25,7 @@ impl Repository {
 }
 
 /// What git said about the work tree before anything was read or written.
-pub(crate) struct WorkTree(Result<Repository, Obstacle>);
+pub(crate) struct WorkTree(Result<Repository, NotClean>);
 
 impl WorkTree {
     /// Asks git whether everything in the work tree `workspace_root` is in is
@@ -39,31 +39,31 @@ impl WorkTree {
     pub(crate) fn ensure_clean(&self, migrate_command: &str) -> Result<&Repository, Failure> {
         self.0
             .as_ref()
-            .map_err(|obstacle| refusal(obstacle, migrate_command))
+            .map_err(|not_clean| refusal(not_clean, migrate_command))
     }
 }
 
 /// Asks git about the work tree `workspace_root` is in, and where the root is
 /// in it.
-fn located(workspace_root: &Path) -> Result<Repository, Obstacle> {
+fn located(workspace_root: &Path) -> Result<Repository, NotClean> {
     let top_level = git::ensure_work_tree_is_clean(workspace_root)?;
     // Git spells paths from a top level that is resolved through symbolic
     // links, so the root is too before the two are compared.
     let resolved_root = std::fs::canonicalize(workspace_root).map_err(|error| {
-        Obstacle::Failed(format!(
+        NotClean::Unanswered(Unanswered::Failed(format!(
             "reading {} failed: {error}",
             workspace_root.display()
-        ))
+        )))
     })?;
     let root_from_top_level = resolved_root
         .strip_prefix(&top_level)
         .map(Path::to_path_buf)
         .map_err(|_| {
-            Obstacle::Failed(format!(
+            NotClean::Unanswered(Unanswered::Failed(format!(
                 "{} is not inside the repository at {}",
                 resolved_root.display(),
                 top_level.display()
-            ))
+            )))
         })?;
     Ok(Repository {
         root_from_top_level,
@@ -71,33 +71,44 @@ fn located(workspace_root: &Path) -> Result<Repository, Obstacle> {
 }
 
 /// The refusal for what git said about the work tree.
-pub(crate) fn refusal(obstacle: &Obstacle, migrate_command: &str) -> Failure {
-    match obstacle {
-        Obstacle::NotARepository => Failure::new(format!(
-            "refusing to migrate: this project is not in a git repository, so nothing could \
-             give back what migrate moves and edits; make it one and commit everything in it, \
-             then run `{migrate_command}` again"
-        )),
-        Obstacle::GitMissing => Failure::new(format!(
-            "refusing to migrate: `git` could not be run, and migrate needs it to check that \
-             git can give back everything migrate moves and edits; make `git` available on \
-             PATH, then run `{migrate_command}` again"
-        )),
-        Obstacle::Dirty(files) => Failure::new(format!(
+pub(crate) fn refusal(not_clean: &NotClean, migrate_command: &str) -> Failure {
+    match not_clean {
+        NotClean::Unanswered(unanswered) => {
+            unanswered_refusal(unanswered, migrate_command, |message| {
+                Failure::new(format!(
+                    "refusing to migrate: git could not say whether the work tree is clean: \
+                     {message}"
+                ))
+            })
+        }
+        NotClean::Dirty(files) => Failure::new(format!(
             "refusing to migrate: the work tree has changes that are not committed — {}; \
              commit or discard them, then run `{migrate_command}` again",
             dirty_paths(files)
         )),
-        Obstacle::Failed(message) => Failure::new(format!(
-            "refusing to migrate: git could not say whether the work tree is clean: {message}"
+    }
+}
+
+/// The refusal for a git that could not answer: the same words whatever it
+/// was asked when there is no repository or no `git`, and `failed`'s own when
+/// git ran and said something else, since what it said is about the question.
+pub(crate) fn unanswered_refusal(
+    unanswered: &Unanswered,
+    migrate_command: &str,
+    failed: impl FnOnce(&str) -> Failure,
+) -> Failure {
+    match unanswered {
+        Unanswered::NotARepository => Failure::new(format!(
+            "refusing to migrate: this project is not in a git repository, so nothing could \
+             give back what migrate moves and edits; make it one and commit everything in it, \
+             then run `{migrate_command}` again"
         )),
-        Obstacle::OwnRepository(_)
-        | Obstacle::OtherRepository(_)
-        | Obstacle::Unwatched(_)
-        | Obstacle::Filtered(_) => unreachable!(
-            "git::ensure_work_tree_is_clean returns only GitMissing, NotARepository, Failed and \
-             Dirty, got {obstacle:?}"
-        ),
+        Unanswered::GitMissing => Failure::new(format!(
+            "refusing to migrate: `git` could not be run, and migrate needs it to check that \
+             git can give back everything migrate moves and edits; make `git` available on \
+             PATH, then run `{migrate_command}` again"
+        )),
+        Unanswered::Failed(message) => failed(message),
     }
 }
 
@@ -121,7 +132,7 @@ fn dirty_paths(files: &[PathBuf]) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use rituals_compose::git::Obstacle;
+    use rituals_compose::git::{NotClean, Unanswered};
 
     use super::{WorkTree, refusal};
     use crate::test_support::{ScratchDir, TestOutcome, init_and_commit};
@@ -131,7 +142,7 @@ mod tests {
     #[test]
     fn a_project_outside_a_repository_is_refused_with_how_to_make_one() {
         assert_eq!(
-            refusal(&Obstacle::NotARepository, MIGRATE).to_string(),
+            refusal(&Unanswered::NotARepository.into(), MIGRATE).to_string(),
             "refusing to migrate: this project is not in a git repository, so nothing could \
              give back what migrate moves and edits; make it one and commit everything in it, \
              then run `cargo ritual migrate` again"
@@ -141,7 +152,7 @@ mod tests {
     #[test]
     fn a_missing_git_is_refused_with_what_to_do_about_it() {
         assert_eq!(
-            refusal(&Obstacle::GitMissing, MIGRATE).to_string(),
+            refusal(&Unanswered::GitMissing.into(), MIGRATE).to_string(),
             "refusing to migrate: `git` could not be run, and migrate needs it to check that \
              git can give back everything migrate moves and edits; make `git` available on \
              PATH, then run `cargo ritual migrate` again"
@@ -152,7 +163,7 @@ mod tests {
     fn uncommitted_files_are_named_from_the_top_level() {
         let files = vec![PathBuf::from("notes.txt"), PathBuf::from("src/a.rs")];
         assert_eq!(
-            refusal(&Obstacle::Dirty(files), MIGRATE).to_string(),
+            refusal(&NotClean::Dirty(files), MIGRATE).to_string(),
             "refusing to migrate: the work tree has changes that are not committed — \
              :/notes.txt, :/src/a.rs; commit or discard them, then run `cargo ritual migrate` \
              again"
@@ -162,7 +173,7 @@ mod tests {
     #[test]
     fn ten_uncommitted_files_are_all_named() {
         let files: Vec<PathBuf> = (1..=10).map(|n| PathBuf::from(format!("f{n}"))).collect();
-        let message = refusal(&Obstacle::Dirty(files), MIGRATE).to_string();
+        let message = refusal(&NotClean::Dirty(files), MIGRATE).to_string();
         assert!(message.contains(":/f1, "), "{message}");
         assert!(message.contains(":/f10;"), "{message}");
         assert!(!message.contains("more"), "{message}");
@@ -173,7 +184,7 @@ mod tests {
     #[test]
     fn past_ten_uncommitted_files_the_rest_are_counted() {
         let files: Vec<PathBuf> = (1..=13).map(|n| PathBuf::from(format!("f{n}"))).collect();
-        let message = refusal(&Obstacle::Dirty(files), MIGRATE).to_string();
+        let message = refusal(&NotClean::Dirty(files), MIGRATE).to_string();
         assert!(message.contains(":/f10 and 3 more;"), "{message}");
         assert!(!message.contains("f11"), "{message}");
     }
@@ -181,24 +192,26 @@ mod tests {
     #[test]
     fn a_git_failure_is_refused_in_git_s_own_words() {
         assert_eq!(
-            refusal(&Obstacle::Failed("bad object".to_string()), MIGRATE).to_string(),
+            refusal(
+                &Unanswered::Failed("bad object".to_string()).into(),
+                MIGRATE
+            )
+            .to_string(),
             "refusing to migrate: git could not say whether the work tree is clean: bad object"
         );
     }
 
     #[test]
     fn the_command_is_spelled_for_the_command_line_that_runs_it() {
-        let message = refusal(&Obstacle::NotARepository, "cargo acme ritual migrate").to_string();
+        let message = refusal(
+            &Unanswered::NotARepository.into(),
+            "cargo acme ritual migrate",
+        )
+        .to_string();
         assert!(
             message.ends_with("then run `cargo acme ritual migrate` again"),
             "{message}"
         );
-    }
-
-    #[test]
-    #[should_panic(expected = "ensure_work_tree_is_clean")]
-    fn a_variant_the_work_tree_question_cannot_give_is_a_bug() {
-        let _ = refusal(&Obstacle::OwnRepository(PathBuf::new()), MIGRATE);
     }
 
     #[test]

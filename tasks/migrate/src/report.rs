@@ -10,7 +10,7 @@
 use std::fmt::Display;
 
 use rituals::Failure;
-use rituals_compose::git::Obstacle;
+use rituals_compose::git::Unanswered;
 use rituals_compose::sentence::join_with_and;
 
 /// What a run says when no step applied, and nothing else.
@@ -70,9 +70,9 @@ pub(crate) fn deletion_failed(directory: &str, cause: std::io::Error) -> String 
 
 /// A search for the files that still mention the legacy directory that git
 /// could not make, after every task had moved.
-pub(crate) fn listing_failed(obstacle: &Obstacle) -> String {
+pub(crate) fn listing_failed(unanswered: &Unanswered) -> String {
     format!(
-        "git could not list the files that still mention tasks/: {obstacle}; every task has \
+        "git could not list the files that still mention tasks/: {unanswered}; every task has \
          already moved and the project builds, so look for them by hand"
     )
 }
@@ -81,7 +81,7 @@ pub(crate) fn listing_failed(obstacle: &Obstacle) -> String {
 mod tests {
     use std::io::{Error, ErrorKind};
 
-    use rituals_compose::git::Obstacle;
+    use rituals_compose::git::Unanswered;
 
     use super::{
         NEXT, NOTHING_TO_MIGRATE, deleted, deletion_failed, kept, kept_unlisted, listing_failed,
@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn a_failed_listing_says_what_failed_in_gits_words_and_what_to_do() {
         assert_eq!(
-            listing_failed(&Obstacle::Failed("bad pattern".to_string())),
+            listing_failed(&Unanswered::Failed("bad pattern".to_string())),
             "git could not list the files that still mention tasks/: bad pattern; every task \
              has already moved and the project builds, so look for them by hand"
         );
