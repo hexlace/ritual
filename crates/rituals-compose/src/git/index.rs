@@ -2,8 +2,9 @@
 //! stop looking at a file; and what `.gitattributes` says about each.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
-use super::Obstacle;
+use super::{Obstacle, canonical, from_the_top_level, run_git, top_level_of};
 
 /// A tracked file git has been told not to look at, and which flag says so.
 ///
@@ -92,6 +93,79 @@ pub enum Flag {
     SkipWorktree,
 }
 
+/// Lists every submodule at `directory` or inside it, spelled from git's top
+/// level.
+///
+/// A submodule is a gitlink in the project's index, so `directory` is one when
+/// the project records it as a commit rather than as files, and holds one when
+/// something under it is. The project's git is asked, from the directory
+/// above `directory`, which is how a `directory` that is itself a submodule
+/// is found: asked from inside it, git would be talking about the submodule's
+/// own repository.
+///
+/// Nothing found is an empty list and not a failure.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+///
+/// use rituals_compose::git;
+///
+/// // Needs a real repository on disk and runs `git`, so this example is
+/// // `no_run`.
+/// for submodule in git::submodules_under(Path::new(".rituals/lint"))? {
+///     println!("{} is a git submodule", submodule.display());
+/// }
+/// # Ok::<(), rituals_compose::git::Obstacle>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns [`Obstacle::GitMissing`] when `git` cannot be run,
+/// [`Obstacle::NotARepository`] when `directory` is not in a git repository,
+/// and [`Obstacle::Failed`] for anything else git reports or prints that
+/// cannot be read. It returns no other variant.
+pub fn submodules_under(directory: &Path) -> Result<Vec<PathBuf>, Obstacle> {
+    submodules_under_with(|| Command::new("git"), directory)
+}
+
+/// [`submodules_under`], with `git` started from `new_git`.
+fn submodules_under_with(
+    new_git: impl Fn() -> Command,
+    directory: &Path,
+) -> Result<Vec<PathBuf>, Obstacle> {
+    let Some(holder) = directory.parent() else {
+        return Err(Obstacle::Failed(format!(
+            "{} has no directory holding it to ask git from",
+            directory.display()
+        )));
+    };
+    let top_level = top_level_of(&new_git, holder)?;
+    let from_top_level = from_the_top_level(&canonical(holder)?, &top_level)?;
+    let Some(name) = directory.file_name() else {
+        return Err(Obstacle::Failed(format!(
+            "{} has no name to ask git about",
+            directory.display()
+        )));
+    };
+
+    // Literal, so a directory whose name holds `*` or `?` is not read as a
+    // pattern matching others. A directory name as a pathspec matches the
+    // directory itself, as a gitlink, and everything under it.
+    let pathspec = format!(":(literal){}", name.to_string_lossy());
+    let index = parse_index(&run_git(
+        &new_git,
+        holder,
+        &["ls-files", "--stage", "-v", "-z", "--", &pathspec],
+    )?)?;
+    Ok(index
+        .into_iter()
+        .filter(|entry| entry.is_gitlink)
+        .map(|entry| from_top_level.join(entry.path))
+        .collect())
+}
+
 /// One entry of `git ls-files --stage -v -z`, as far as this check reads
 /// it.
 #[derive(Debug, PartialEq, Eq)]
@@ -162,11 +236,13 @@ pub(super) fn parse_attributes(output: &[u8]) -> Result<Vec<(PathBuf, String)>, 
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
 
-    use super::{Flag, IndexEntry, parse_attributes, parse_index};
+    use super::{Flag, IndexEntry, parse_attributes, parse_index, submodules_under_with};
     use crate::git::Obstacle;
-    use crate::test_support::TestOutcome;
+    use crate::git::test_support::{add_a_submodule, commit_everything, contained_in, git};
+    use crate::test_support::{ScratchDir, TestOutcome};
 
     #[test]
     fn the_index_is_read_for_gitlinks_and_flags() -> TestOutcome {
@@ -223,6 +299,94 @@ mod tests {
         assert!(
             matches!(&result, Err(Obstacle::Failed(message)) if message.contains("cannot read")),
             "expected output not in threes to be refused, got {result:?}"
+        );
+        Ok(())
+    }
+
+    /// A repository with `tasks/greet` and `tasks/shout` committed, and the
+    /// scratch directory holding it.
+    fn committed_tasks(tag: &str) -> Result<ScratchDir, Box<dyn std::error::Error>> {
+        let scratch = ScratchDir::new(tag)?;
+        for task in ["greet", "shout"] {
+            std::fs::create_dir_all(scratch.path().join("tasks").join(task))?;
+            std::fs::write(
+                scratch.path().join("tasks").join(task).join("lib.rs"),
+                "// c\n",
+            )?;
+        }
+        git(scratch.path(), &["init"])?;
+        commit_everything(scratch.path())?;
+        Ok(scratch)
+    }
+
+    fn submodules(scratch: &Path, directory: &Path) -> Result<Vec<PathBuf>, Obstacle> {
+        submodules_under_with(contained_in(scratch), directory)
+    }
+
+    #[test]
+    fn a_directory_with_no_submodule_has_none() -> TestOutcome {
+        let scratch = committed_tasks("submodules-none")?;
+
+        assert_eq!(
+            submodules(scratch.path(), &scratch.path().join("tasks/greet")),
+            Ok(Vec::new())
+        );
+        Ok(())
+    }
+
+    /// A submodule inside the directory is named from the top level, and one
+    /// beside it, in a directory that is not asked about, is not.
+    #[test]
+    fn a_submodule_inside_the_directory_is_named_from_the_top_level() -> TestOutcome {
+        let scratch = committed_tasks("submodules-inside")?;
+        add_a_submodule(scratch.path(), "tasks/greet/vendor/upstream")?;
+
+        assert_eq!(
+            submodules(scratch.path(), &scratch.path().join("tasks/greet")),
+            Ok(vec![PathBuf::from("tasks/greet/vendor/upstream")])
+        );
+        assert_eq!(
+            submodules(scratch.path(), &scratch.path().join("tasks/shout")),
+            Ok(Vec::new())
+        );
+        Ok(())
+    }
+
+    /// The directory is itself the submodule: the project's git records only
+    /// the commit it points at, so that is the gitlink, named as the
+    /// directory, whether or not the submodule has been checked out.
+    #[test]
+    fn a_directory_that_is_itself_a_submodule_is_named() -> TestOutcome {
+        let scratch = committed_tasks("submodules-itself")?;
+        add_a_submodule(scratch.path(), "tasks/vendored")?;
+
+        assert_eq!(
+            submodules(scratch.path(), &scratch.path().join("tasks/vendored")),
+            Ok(vec![PathBuf::from("tasks/vendored")])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_directory_outside_any_repository_is_refused_as_no_repository_when_listing_submodules()
+    -> TestOutcome {
+        let scratch = ScratchDir::new("submodules-no-repository")?;
+        std::fs::create_dir(scratch.path().join("tasks"))?;
+
+        assert_eq!(
+            submodules(scratch.path(), &scratch.path().join("tasks")),
+            Err(Obstacle::NotARepository)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_missing_git_binary_is_refused_when_listing_submodules() -> TestOutcome {
+        let scratch = ScratchDir::new("submodules-git-missing")?;
+
+        assert_eq!(
+            submodules_under_with(|| Command::new("ritual-test-no-such-git"), scratch.path()),
+            Err(Obstacle::GitMissing)
         );
         Ok(())
     }

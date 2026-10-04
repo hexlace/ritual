@@ -39,18 +39,21 @@
 use std::fmt;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 
 mod configuration;
 mod give_back;
 mod index;
+mod mentions;
 mod status;
 #[cfg(test)]
 mod test_support;
 
 pub use configuration::directories_holding_cargo_configuration;
 pub use give_back::ensure_git_can_give_back;
-pub use index::{Flag, Unwatched};
+pub use index::{Flag, Unwatched, submodules_under};
+pub use mentions::files_mentioning;
+pub use status::ensure_work_tree_is_clean;
 
 /// Why git cannot vouch for a part of the work tree.
 ///
@@ -204,17 +207,36 @@ fn run_git(
 /// Runs `git -C <directory> <arguments>` with `input` on its standard input,
 /// and returns what it printed to standard output.
 ///
-/// Run with `LC_ALL=C`, because the one failure told apart from the rest —
-/// "not a git repository" — is told apart by git's own words, and those are
-/// translated otherwise. The input is written from a thread of its own, so a
-/// command that answers each line as it reads it cannot fill its output pipe
-/// while this process is still writing.
+/// A failure is read as [`failure_of`] reads it.
 fn run_git_with_input(
     new_git: &impl Fn() -> Command,
     directory: &Path,
     arguments: &[&str],
     input: &[u8],
 ) -> Result<Vec<u8>, Obstacle> {
+    let output = run_git_for_output(new_git, directory, arguments, input)?;
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(failure_of(&output))
+    }
+}
+
+/// Runs `git -C <directory> <arguments>` with `input` on its standard input,
+/// and returns everything it did, whether or not it succeeded, for a caller
+/// that reads an exit status other than zero as an answer.
+///
+/// Run with `LC_ALL=C`, because the one failure told apart from the rest —
+/// "not a git repository" — is told apart by git's own words, and those are
+/// translated otherwise. The input is written from a thread of its own, so a
+/// command that answers each line as it reads it cannot fill its output pipe
+/// while this process is still writing.
+fn run_git_for_output(
+    new_git: &impl Fn() -> Command,
+    directory: &Path,
+    arguments: &[&str],
+    input: &[u8],
+) -> Result<Output, Obstacle> {
     let spawn_failure = |error: std::io::Error| match error.kind() {
         ErrorKind::NotFound => Obstacle::GitMissing,
         _ => Obstacle::Failed(format!("running `git` failed: {error}")),
@@ -231,7 +253,7 @@ fn run_git_with_input(
         .map_err(spawn_failure)?;
 
     let stdin = child.stdin.take();
-    let output = std::thread::scope(|scope| {
+    std::thread::scope(|scope| {
         let writer = scope.spawn(move || stdin.map_or(Ok(()), |mut stdin| stdin.write_all(input)));
         let output = child.wait_with_output();
         // A git that exits without reading all of its input closes the pipe,
@@ -239,16 +261,18 @@ fn run_git_with_input(
         drop(writer.join());
         output
     })
-    .map_err(|error| Obstacle::Failed(format!("running `git` failed: {error}")))?;
+    .map_err(|error| Obstacle::Failed(format!("running `git` failed: {error}")))
+}
 
-    if output.status.success() {
-        return Ok(output.stdout);
-    }
+/// The obstacle a git that exited unsuccessfully stands for: "not a git
+/// repository" when it said so, and otherwise whatever it said, in its own
+/// words.
+fn failure_of(output: &Output) -> Obstacle {
     let stderr = String::from_utf8_lossy(&output.stderr);
     if stderr.contains("not a git repository") {
-        return Err(Obstacle::NotARepository);
+        return Obstacle::NotARepository;
     }
-    Err(Obstacle::Failed(stderr.trim_end().to_string()))
+    Obstacle::Failed(stderr.trim_end().to_string())
 }
 
 /// Resolves `path` through symbolic links, so two spellings of one

@@ -83,3 +83,31 @@ pub(super) fn contained_in(scratch: &Path) -> impl Fn() -> Command {
         command
     }
 }
+
+/// Adds a repository of its own, made beside `project` and holding one
+/// committed file, as a submodule of `project` at `at`, and commits it.
+///
+/// It is cloned from a local path, which git refuses as a submodule unless
+/// the file transport is allowed for that one command.
+pub(super) fn add_a_submodule(project: &Path, at: &str) -> TestOutcome {
+    let upstream = project.join("upstream");
+    std::fs::create_dir_all(&upstream)?;
+    std::fs::write(upstream.join("vendored.txt"), "a file of its own\n")?;
+    git(&upstream, &["init"])?;
+    commit_everything(&upstream)?;
+    let upstream = upstream
+        .to_str()
+        .ok_or("a scratch path that is not UTF-8")?;
+    git(
+        project,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            upstream,
+            at,
+        ],
+    )?;
+    git(project, &["commit", "--message", "add a submodule"])
+}

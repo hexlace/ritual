@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::index::{Flag, Unwatched, parse_attributes, parse_index};
-use super::status::ensure_nothing_dirty;
+use super::status::{IgnoredFiles, ensure_nothing_dirty};
 use super::{Obstacle, canonical, from_the_top_level, run_git, run_git_with_input, top_level_of};
 
 /// The one `filter` driver whose files git gives back byte for byte: Git
@@ -151,7 +151,7 @@ fn check_with(
         return Err(Obstacle::Filtered(filtered));
     }
 
-    ensure_nothing_dirty(&new_git, directory, ".")?;
+    ensure_nothing_dirty(&new_git, directory, &["."], IgnoredFiles::Count)?;
     Ok(from_top_level)
 }
 
@@ -198,7 +198,7 @@ fn check_link_with(
         return Err(Obstacle::Unwatched(unwatched));
     }
 
-    ensure_nothing_dirty(new_git, holder, &pathspec)?;
+    ensure_nothing_dirty(new_git, holder, &[&pathspec], IgnoredFiles::Count)?;
     Ok(from_top_level)
 }
 
@@ -225,7 +225,9 @@ mod tests {
     use std::process::Command;
 
     use super::check_with;
-    use crate::git::test_support::{commit_everything, committed_task, contained_in, git};
+    use crate::git::test_support::{
+        add_a_submodule, commit_everything, committed_task, contained_in, git,
+    };
     use crate::git::{Flag, Obstacle, Unwatched};
     use crate::test_support::{ScratchDir, TestOutcome};
 
@@ -407,32 +409,11 @@ mod tests {
     }
 
     /// A clean submodule leaves nothing in the parent's `git status`, so
-    /// only the gitlink in the index shows it. It is made from a local
-    /// repository, which git refuses to clone as a submodule unless the
-    /// file transport is allowed for that one command.
+    /// only the gitlink in the index shows it.
     #[test]
     fn a_directory_holding_a_clean_submodule_is_refused_naming_it() -> TestOutcome {
         let (scratch, task) = committed_task("git-submodule")?;
-        let upstream = scratch.path().join("upstream");
-        std::fs::create_dir_all(&upstream)?;
-        std::fs::write(upstream.join("vendored.txt"), "a file of its own\n")?;
-        git(&upstream, &["init"])?;
-        commit_everything(&upstream)?;
-        let upstream = upstream
-            .to_str()
-            .ok_or("a scratch path that is not UTF-8")?;
-        git(
-            &task,
-            &[
-                "-c",
-                "protocol.file.allow=always",
-                "submodule",
-                "add",
-                upstream,
-                "vendor/upstream",
-            ],
-        )?;
-        git(scratch.path(), &["commit", "--message", "add a submodule"])?;
+        add_a_submodule(scratch.path(), "task/vendor/upstream")?;
 
         assert_eq!(
             check(scratch.path(), &task),
