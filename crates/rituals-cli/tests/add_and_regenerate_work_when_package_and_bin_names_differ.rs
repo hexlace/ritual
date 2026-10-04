@@ -35,9 +35,9 @@ fn assert_add_scaffolded_imported_and_regenerated(project: &Project) -> TestOutc
     assert!(
         project
             .root()
-            .join(format!("tasks/{TASK}/Cargo.toml"))
+            .join(format!(".rituals/{TASK}/Cargo.toml"))
             .is_file(),
-        "expected `add` to scaffold tasks/{TASK}/Cargo.toml"
+        "expected `add` to scaffold .rituals/{TASK}/Cargo.toml"
     );
 
     let cli_manifest = project.cli_manifest()?;

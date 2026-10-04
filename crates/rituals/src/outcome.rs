@@ -58,8 +58,8 @@ impl Failure {
     /// ```
     /// use rituals::Failure;
     ///
-    /// let failure = Failure::new("tasks/lint already exists");
-    /// assert_eq!(failure.to_string(), "tasks/lint already exists");
+    /// let failure = Failure::new(".rituals/lint already exists");
+    /// assert_eq!(failure.to_string(), ".rituals/lint already exists");
     /// ```
     pub fn new(message: impl Into<String>) -> Self {
         Self {
@@ -90,11 +90,11 @@ impl Failure {
     /// }
     /// impl std::error::Error for IoLike {}
     ///
-    /// let failure = Failure::new("writing tasks/lint/Cargo.toml failed").caused_by(IoLike);
+    /// let failure = Failure::new("writing .rituals/lint/Cargo.toml failed").caused_by(IoLike);
     /// assert!(std::error::Error::source(&failure).is_some());
     /// assert_eq!(
     ///     failure.to_string(),
-    ///     "writing tasks/lint/Cargo.toml failed: disk full"
+    ///     "writing .rituals/lint/Cargo.toml failed: disk full"
     /// );
     /// ```
     #[must_use]

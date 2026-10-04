@@ -48,12 +48,12 @@ fn a_default_project_reports_each_step_and_names_the_next_one() -> TestOutcome {
         assert_eq!(
             lines(&added.stdout),
             [
-                "created tasks/hello/Cargo.toml",
-                "created tasks/hello/src/lib.rs",
+                "created .rituals/hello/Cargo.toml",
+                "created .rituals/hello/src/lib.rs",
                 "updated Cargo.toml",
                 "updated ritual/Cargo.toml",
                 "updated ritual/src/main.rs (tasks: ritual, hello)",
-                "next: edit tasks/hello/src/lib.rs, then run cargo ritual hello",
+                "next: edit .rituals/hello/src/lib.rs, then run cargo ritual hello",
             ]
         );
 
@@ -114,7 +114,7 @@ fn a_named_command_line_spells_its_hints_with_its_own_name() -> TestOutcome {
         added.expect_success("`acme ritual add lint`");
         assert_eq!(
             lines(&added.stdout).last().copied(),
-            Some("next: edit tasks/lint/src/lib.rs, then run cargo acme lint")
+            Some("next: edit .rituals/lint/src/lib.rs, then run cargo acme lint")
         );
 
         let repeated = support::run_binary(&binary, project.root(), &["ritual", "add", "lint"])?;

@@ -83,7 +83,7 @@ fn assert_a_later_task_follows_the_bundle(project: &Project) -> TestOutcome {
         .alias(&["add", "greet"])?
         .expect_success("`cargo ritual add greet`");
 
-    let task_manifest = manifest::read(&project.root().join("tasks/greet/Cargo.toml"))?;
+    let task_manifest = manifest::read(&project.root().join(".rituals/greet/Cargo.toml"))?;
     assert_eq!(
         manifest::keys_of(&task_manifest, &["dependencies"]),
         ["rituals"],

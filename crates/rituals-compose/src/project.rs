@@ -50,7 +50,7 @@ impl Project<'_> {
     /// // `no_run`.
     /// let document = metadata::fetch(Path::new("."))?;
     /// let project = document.locate_project("demo-ritual")?;
-    /// let task_dir = project.workspace_root().join("tasks/lint");
+    /// let task_dir = project.workspace_root().join(".rituals/lint");
     /// println!("a new task would go in {}", task_dir.display());
     /// # Ok::<(), rituals::Failure>(())
     /// ```

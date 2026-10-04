@@ -539,7 +539,7 @@ impl Metadata {
     /// // Runs `cargo metadata` against a workspace on disk, so this example
     /// // is `no_run`.
     /// let document = metadata::fetch(Path::new("."))?;
-    /// let dependents = document.dependents_outside_the_graph(Path::new("tasks/lint"))?;
+    /// let dependents = document.dependents_outside_the_graph(Path::new(".rituals/lint"))?;
     /// if !dependents.is_empty() {
     ///     println!("still read by {}", dependents.join(", "));
     /// }

@@ -57,12 +57,12 @@ demo/
 ├── ritual/               the CLI crate (package demo-ritual)
 │   ├── Cargo.toml        says which of its dependencies are tasks
 │   └── src/main.rs       generated from that list, never edited by hand
-└── tasks/hello/          the task add scaffolded
+└── .rituals/hello/       the task add scaffolded
     ├── Cargo.toml
     └── src/lib.rs
 ```
 
-Now give `hello` something to do. Replace `tasks/hello/src/lib.rs` with:
+Now give `hello` something to do. Replace `.rituals/hello/src/lib.rs` with:
 
 ```rust
 use rituals::{Outcome, Task, clap, report};
@@ -132,7 +132,7 @@ The CLI crate says which of its dependencies are tasks, by dependency key:
 
 ```toml
 [dependencies]
-lint = { path = "../tasks/lint" }
+lint = { path = "../.rituals/lint" }
 
 [package.metadata.ritual]
 tasks = ["lint"]
@@ -187,9 +187,14 @@ Run this anywhere inside the project:
 cargo ritual add lint
 ```
 
-It scaffolds `tasks/lint`, adds it to the workspace and to the CLI crate's
-manifest, and regenerates. Edit `tasks/lint/src/lib.rs`, then run
+It scaffolds `.rituals/lint`, adds it to the workspace and to the CLI crate's
+manifest, and regenerates. Edit `.rituals/lint/src/lib.rs`, then run
 `cargo ritual lint`.
+
+A project's own tasks are tooling, not the project, so they live in
+`.rituals/`, next to `.github/`, rather than among the project's real
+directories. A project made by ritual 0.1 keeps its tasks in `tasks/`, and
+they keep working there.
 
 ### Import a task from somewhere else
 

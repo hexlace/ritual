@@ -60,7 +60,7 @@ fn assert_add_refuses_the_flatten_collision(project: &Project) -> TestOutcome {
 
     let after = snapshot_tree(project.root())?;
     support::assert_trees_identical(
-        "a refused `add wake` must leave every file and directory as it was — no tasks/wake, not even empty, and no manifest edit",
+        "a refused `add wake` must leave every file and directory as it was — no .rituals/wake, not even empty, and no manifest edit",
         &before,
         &after,
     );

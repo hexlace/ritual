@@ -18,10 +18,10 @@
 /// ```
 /// use rituals_compose::sentence::join_with_and;
 ///
-/// assert_eq!(join_with_and(&["tasks/lint".to_string()]), "tasks/lint");
+/// assert_eq!(join_with_and(&[".rituals/lint".to_string()]), ".rituals/lint");
 /// assert_eq!(
-///     join_with_and(&["tasks/lint".to_string(), "tasks/fmt".to_string()]),
-///     "tasks/lint and tasks/fmt"
+///     join_with_and(&[".rituals/lint".to_string(), ".rituals/fmt".to_string()]),
+///     ".rituals/lint and .rituals/fmt"
 /// );
 /// ```
 #[must_use]

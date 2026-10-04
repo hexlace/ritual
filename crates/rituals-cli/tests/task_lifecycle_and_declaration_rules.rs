@@ -90,7 +90,7 @@ fn assert_fresh_project_builds_and_lists_management_tasks(project: &Project) -> 
     Ok(())
 }
 
-/// Phase 3 — `add` scaffolds a new task crate under `tasks/`, appends it to
+/// Phase 3 — `add` scaffolds a new task crate under `.rituals/`, appends it to
 /// the workspace's explicit member list, and the new task builds and runs
 /// immediately, with no hand-editing.
 fn add_a_task_and_verify_it_builds_and_runs(project: &Project) -> TestOutcome {
@@ -99,16 +99,16 @@ fn add_a_task_and_verify_it_builds_and_runs(project: &Project) -> TestOutcome {
         .expect_success("`cargo ritual add greet`");
 
     assert!(
-        project.root().join("tasks/greet/Cargo.toml").is_file(),
-        "expected `add greet` to scaffold tasks/greet/Cargo.toml under {}",
+        project.root().join(".rituals/greet/Cargo.toml").is_file(),
+        "expected `add greet` to scaffold .rituals/greet/Cargo.toml under {}",
         project.root().display()
     );
 
     let members = manifest::workspace_members(&project.workspace_manifest()?)
         .context("expected the workspace manifest to carry a member list")?;
     assert!(
-        members.iter().any(|member| member == "tasks/greet"),
-        "expected `add` to append `tasks/greet` as an explicit workspace member; members \
+        members.iter().any(|member| member == ".rituals/greet"),
+        "expected `add` to append `.rituals/greet` as an explicit workspace member; members \
          were {members:?}"
     );
     assert!(
@@ -177,7 +177,7 @@ fn verify_regenerate_is_idempotent(project: &Project) -> TestOutcome {
 /// moved crate's own files are unchanged byte for byte, and the task still
 /// builds and runs.
 fn move_task_crate_and_verify_still_works(project: &Project) -> TestOutcome {
-    let old_dir = project.root().join("tasks/greet");
+    let old_dir = project.root().join(".rituals/greet");
     let before_move = snapshot_tree(&old_dir)?;
 
     let new_dir = project.root().join("relocated-tasks/greet");
@@ -198,7 +198,7 @@ fn move_task_crate_and_verify_still_works(project: &Project) -> TestOutcome {
         manifest::set_dependency_path(document, "greet", "../relocated-tasks/greet")
     })?;
     manifest::edit(&project.workspace_manifest_path(), |document| {
-        manifest::replace_member(document, "tasks/greet", "relocated-tasks/greet")
+        manifest::replace_member(document, ".rituals/greet", "relocated-tasks/greet")
     })?;
 
     project.alias(&["greet"])?.expect_success(

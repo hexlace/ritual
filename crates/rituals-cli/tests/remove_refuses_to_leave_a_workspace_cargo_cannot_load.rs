@@ -40,11 +40,10 @@ fn assert_it_builds(project: &Project, when: &str) -> TestOutcome {
     Ok(())
 }
 
-/// Adds the task `name` with `add`, then commits everything.
+/// Adds the task `name` in `tasks/`, as 0.1's `add` did, then commits
+/// everything.
 fn add_and_commit(project: &Project, name: &str) -> TestOutcome {
-    project
-        .alias(&["add", name])?
-        .expect_success(&format!("`cargo ritual add {name}`"));
+    support::legacy::add_task(project, name)?;
     git::commit_everything(project.root())
 }
 

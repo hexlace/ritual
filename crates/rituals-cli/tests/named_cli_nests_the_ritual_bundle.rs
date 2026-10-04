@@ -31,8 +31,8 @@ fn add_through_the_nested_bundle_then_run_directly(project: &Project) -> TestOut
         .alias(&["ritual", "add", "my-task"])?
         .expect_success("`cargo mytool ritual add my-task`, through the nested bundle");
     assert!(
-        project.root().join("tasks/my-task/Cargo.toml").is_file(),
-        "expected `ritual add my-task` to scaffold tasks/my-task/Cargo.toml"
+        project.root().join(".rituals/my-task/Cargo.toml").is_file(),
+        "expected `ritual add my-task` to scaffold .rituals/my-task/Cargo.toml"
     );
 
     let run_result = project.alias(&["my-task"])?;

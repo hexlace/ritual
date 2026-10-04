@@ -248,3 +248,88 @@ fn dependency_package_follows_a_workspace_inherited_dependency() {
         None
     );
 }
+
+/// What ritual 0.1's own `add greet` wrote into a project `new demo` made,
+/// captured by running that `add` before `add` moved to `.rituals/`: the root
+/// manifest, the command line crate's manifest, the task's manifest and the
+/// regenerated command line. `@RITUALS@` and `@CORE@` stand for the
+/// checkout's `crates/rituals` and `crates/rituals-core`.
+const CAPTURED_0_1_WORKSPACE: &str = r#"[workspace]
+members = [
+    "ritual",
+    "tasks/greet",
+]
+resolver = "3"
+
+[workspace.dependencies]
+rituals = { path = "@RITUALS@" }
+"#;
+
+const CAPTURED_0_1_COMMAND_LINE_MANIFEST: &str = r#"[package]
+name = "demo-ritual"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "ritual"
+path = "src/main.rs"
+
+[dependencies]
+rituals.workspace = true
+ritual = { package = "rituals-core", path = "@CORE@" }
+greet = { path = "../tasks/greet" }
+
+[package.metadata.ritual]
+tasks = ["ritual", "greet"]
+"#;
+
+const CAPTURED_0_1_TASK_MANIFEST: &str = r#"[package]
+name = "greet"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rituals.workspace = true
+
+[package.metadata.ritual]
+task = true
+"#;
+
+/// The mounted tasks in the command line 0.1's `add greet` regenerated.
+const CAPTURED_0_1_MOUNTS: [(&str, &str); 2] = [("ritual", "ritual"), ("greet", "greet")];
+
+/// The 0.1-layout fixture is what 0.1's `add` wrote, byte for byte in every
+/// manifest, so a story that migrates it starts from a real 0.1 project and
+/// not from the fixture's own idea of one.
+#[test]
+fn the_0_1_layout_fixture_reproduces_what_0_1s_add_wrote() -> TestOutcome {
+    support::in_checkout(|checkout| {
+        let working_dir = TempDir::new("0-1-fixture-shape")?;
+        let project = support::legacy::project_with_tasks(checkout, &working_dir, &["greet"])?;
+        let rituals = support::path_to_str(&checkout.root().join("crates/rituals"))?.to_string();
+        let core = support::path_to_str(&checkout.root().join("crates/rituals-core"))?.to_string();
+        let filled = |captured: &str| {
+            captured
+                .replace("@RITUALS@", &rituals)
+                .replace("@CORE@", &core)
+        };
+
+        assert_eq!(
+            support::read_text(&project.workspace_manifest_path())?,
+            filled(CAPTURED_0_1_WORKSPACE)
+        );
+        assert_eq!(
+            support::read_text(&project.cli_manifest_path())?,
+            filled(CAPTURED_0_1_COMMAND_LINE_MANIFEST)
+        );
+        assert_eq!(
+            support::read_text(&project.root().join("tasks/greet/Cargo.toml"))?,
+            CAPTURED_0_1_TASK_MANIFEST
+        );
+        assert_eq!(
+            mounted_entries(&project.generated_file()?),
+            CAPTURED_0_1_MOUNTS.map(|(key, name)| (key.to_string(), name.to_string()))
+        );
+        Ok(())
+    })
+}

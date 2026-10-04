@@ -6,7 +6,8 @@
 //! bundle groups — for the renderers that produce a task crate's own files and
 //! a composed command line's generated file, for the metadata and manifest
 //! operations those tasks need, for the [`cargo`] a task that runs Cargo uses
-//! and the [`shell`] that renders a command for a person to copy, and for the
+//! and the [`shell`] that renders a command for a person to copy, for the
+//! [`layout`] that says where a project keeps its own tasks, and for the
 //! [`rollback`] that puts a project back when a task's run does not finish.
 //! Nothing here runs on a composed command line's own path: assembling a
 //! command line from a project's imports and dispatching to one of them live
@@ -49,6 +50,7 @@
 pub mod cargo;
 pub mod cargo_config;
 pub mod generated_file;
+pub mod layout;
 pub mod manifest;
 pub mod metadata;
 mod paths;

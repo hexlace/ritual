@@ -91,7 +91,7 @@ use rituals::Failure;
 /// # let directory = std::env::temp_dir()
 /// #     .join(format!("rituals-compose-doctest-rollback-attempt-{}", std::process::id()));
 /// # std::fs::create_dir_all(&directory)?;
-/// let task_directory = directory.join("tasks/lint");
+/// let task_directory = directory.join(".rituals/lint");
 ///
 /// let outcome = rollback::attempt("running `add lint` again", |changes| {
 ///     changes.reserve_directory(&task_directory)?;
@@ -317,7 +317,7 @@ impl Changes {
     /// # let directory = std::env::temp_dir()
     /// #     .join(format!("rituals-compose-doctest-rollback-reserve-{}", std::process::id()));
     /// # std::fs::create_dir_all(&directory)?;
-    /// let existing = directory.join("tasks/lint");
+    /// let existing = directory.join(".rituals/lint");
     /// std::fs::create_dir_all(&existing)?;
     ///
     /// // A directory that already exists is not the run's to remove.

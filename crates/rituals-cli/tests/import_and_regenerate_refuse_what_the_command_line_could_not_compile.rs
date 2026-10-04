@@ -250,7 +250,7 @@ fn add_refuses_the_names_std_and_core() -> TestOutcome {
             let message = refused_leaving_the_project_as_it_was(&project, &binary, &["add", name])?;
 
             assert_eq!(message, hides_a_crate(name));
-            let task_crate_dir = project.root().join("tasks").join(name);
+            let task_crate_dir = project.root().join(".rituals").join(name);
             assert!(
                 !task_crate_dir.exists(),
                 "a refused `add {name}` must not scaffold {}",

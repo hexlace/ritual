@@ -304,3 +304,66 @@ pub(crate) fn set_dependency_path(
     *path = Item::Value(Value::from(new_path));
     Ok(())
 }
+
+/// Replaces the array at `keys` with `entries`, in that order; an error if
+/// there is no array there. The array's formatting is not kept: a story that
+/// rewrites a list wholesale is not asking about how it is laid out.
+pub(crate) fn set_strings(
+    document: &mut DocumentMut,
+    keys: &[&str],
+    entries: &[&str],
+) -> TestOutcome {
+    let array = array_mut(document, keys)?;
+    array.clear();
+    for entry in entries {
+        array.push(*entry);
+    }
+    Ok(())
+}
+
+/// Declares the path dependency `key = { path = "<path>" }` in the table at
+/// `table_keys` — `["dependencies"]`, or `["workspace", "dependencies"]` —
+/// after whatever is already there, written the way Cargo writes one.
+pub(crate) fn add_path_dependency(
+    document: &mut DocumentMut,
+    table_keys: &[&str],
+    key: &str,
+    path: &str,
+) -> TestOutcome {
+    let table = lookup_mut(document, table_keys)
+        .and_then(Item::as_table_like_mut)
+        .context(&format!(
+            "no [{}] table in the manifest",
+            table_keys.join(".")
+        ))?;
+    let mut declaration = toml_edit::InlineTable::new();
+    declaration.insert("path", Value::from(path));
+    table.insert(key, Item::Value(Value::InlineTable(declaration)));
+    Ok(())
+}
+
+/// The `path` of the dependency `key` in the table at `table_keys`, if it is
+/// declared as a path dependency there.
+pub(crate) fn dependency_path<'document>(
+    document: &'document DocumentMut,
+    table_keys: &[&str],
+    key: &str,
+) -> Option<&'document str> {
+    let mut keys = table_keys.to_vec();
+    keys.extend([key, "path"]);
+    string_at(document, &keys)
+}
+
+/// Appends `member` to `[workspace] members` on a line of its own, indented
+/// four spaces, with a trailing comma — the layout `add` leaves a member
+/// list in, which [`push_member`] does not.
+pub(crate) fn push_member_on_its_own_line(document: &mut DocumentMut, member: &str) -> TestOutcome {
+    let array = array_mut(document, &MEMBERS)?;
+    let mut value = Value::from(member);
+    value.decor_mut().set_prefix("\n    ");
+    value.decor_mut().set_suffix("");
+    array.push_formatted(value);
+    array.set_trailing_comma(true);
+    array.set_trailing("\n");
+    Ok(())
+}

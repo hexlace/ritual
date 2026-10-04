@@ -373,13 +373,33 @@ an unreleased revision. Naming both is an argument error.
 
 ## What `add` writes
 
-`add <name>` scaffolds a task crate in `tasks/<name>`, appends it to the
+`add <name>` scaffolds a task crate in `.rituals/<name>`, appends it to the
 workspace's `members`, adds a path dependency and a `tasks` entry to the
 CLI crate's manifest, and then runs the same path `regenerate` runs. `add`
 keeps no task list of its own, so the two cannot drift apart. The new crate
 inherits `rituals.workspace = true`, so its dependency on `rituals` does not
 change when the crate moves. `add` therefore needs `rituals` in the
 workspace's `[workspace.dependencies]`, and refuses without it.
+
+**Why `.rituals/`.** A project's own tasks are tooling, not the project, so
+they sit with `.docs/` and `.github/` rather than among the project's real
+directories, where `tasks/` would sort into the middle of them. Where a task
+goes is decided in one place, `rituals_compose::layout`, which a scaffolder
+asks and does not answer for itself, so the member entry, the dependency path
+and the report all agree.
+
+**Why the member is explicit.** The entry written is `".rituals/<name>"`, one
+per task, and `new` writes no `.rituals/*` glob. Cargo reads a glob that
+matches nothing as a literal path and stops loading the workspace, so a glob
+written before the first task exists would break every new project, and
+`remove` would then refuse to take a project's last task out from under it.
+An explicit entry leaves `remove` nothing to special-case. A person's own
+glob is still theirs, and `remove` still refuses to delete it.
+
+A project laid out by 0.1, its tasks in `tasks/`, keeps working. A task is a
+workspace member and a path dependency, so nothing but `add` ever needed it
+to be in a particular directory: a task in `tasks/` builds, runs,
+regenerates and is removed exactly as one in `.rituals/` is.
 
 A scaffolded crate's manifest carries no `[lints]` table. An unknown
 project's lint table could fail a freshly scaffolded handler before its
@@ -469,7 +489,7 @@ and removes the `[workspace.dependencies]` entry the dependency inherited
 when no other package uses it. For a crate that is a member
 of the workspace it also removes the `members` entry, and the same directory
 from `default-members`. An entry names the directory when Cargo would read
-it as that directory, so `tasks/./lint` and the absolute path are taken out
+it as that directory, so `.rituals/./lint` and the absolute path are taken out
 too. A glob in `members` is left alone, because deleting the directory is
 enough, unless it would match nothing once the directory goes, which
 refuses. Which crate is a workspace member comes from `cargo metadata`, and
@@ -484,7 +504,7 @@ brings the lock up to date. The directory is deleted after that, outside the
 rollback and as the last step, because git is the way back for a deletion,
 not a rename aside. A deletion that fails partway says that the manifests are
 already updated and that git can give back what was deleted, with a `git
-checkout` that names the directory from git's top level (`:/tasks/lint`), so
+checkout` that names the directory from git's top level (`:/.rituals/lint`), so
 it works from any directory of the project.
 
 **Why it refuses first.** Before anything is written `remove` refuses:
@@ -531,10 +551,10 @@ configuration files a build could still read are outside it, and are listed
 under what `remove` cannot see.
 
 A path points into the directory when the filesystem says it does, not when
-its text matches. Cargo opens paths through the filesystem, so `Tasks/Lint`
-on a file system that folds case, `alias/lint` when `alias` links to `tasks`,
-and an absolute path through a link above the project all name `tasks/lint`
-to it. So each path is followed a component at a time, through symbolic
+its text matches. Cargo opens paths through the filesystem, so `.Rituals/Lint`
+on a file system that folds case, `alias/lint` when `alias` links to
+`.rituals`, and an absolute path through a link above the project all name
+`.rituals/lint` to it. So each path is followed a component at a time, through symbolic
 links, and compared with the directory by file identity. When the directory
 is itself a link, a path through the link points into it and a path to its
 target does not, because deleting the link leaves the target. Cargo removes

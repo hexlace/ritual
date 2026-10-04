@@ -42,8 +42,14 @@ The composition library: reading `cargo metadata`, resolving a `tasks` list,
 editing manifests in place, rendering a task crate's files and a command
 line's generated file, checking whether a directory can hold a standalone
 crate, running the `cargo` that launched the process, rendering a command for
-a person to copy, and putting a project back when a run does not finish. The
+a person to copy, putting a project back when a run does not finish, and
+saying where a project keeps its tasks. The
 management tasks depend on it because it is the library their job needs.
+
+**The layout is shared.** `layout` is the one place that says where a
+project's own tasks live, `.rituals/<name>`. A task that scaffolds a task
+crate asks it for the directory, the member entry and the path to report, so
+`add` and any scaffolder after it agree and a change of directory is one edit.
 
 **The rollback is shared.** A task that writes to a project promises that a
 run which fails partway leaves the project as it found it, and says so when

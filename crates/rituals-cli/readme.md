@@ -25,9 +25,9 @@ cargo ritual hello
 
 `ritual new demo` writes a Cargo workspace whose one member, `ritual/`, is
 the project's CLI crate, with `cargo ritual` aliased to run it. `add hello`
-scaffolds a task crate in `tasks/hello`, imports it and regenerates the
+scaffolds a task crate in `.rituals/hello`, imports it and regenerates the
 command line, so `cargo ritual hello` already runs. Edit
-`tasks/hello/src/lib.rs` to make it do something.
+`.rituals/hello/src/lib.rs` to make it do something.
 
 ## Commands
 
