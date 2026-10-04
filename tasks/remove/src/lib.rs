@@ -443,12 +443,12 @@ fn entries_refusal(directory: &str, entries: &[String]) -> Failure {
     ))
 }
 
-/// Each path spelled from git's top level with the `:/` pathspec magic,
-/// which git reads from there whatever directory it is run in.
+/// Each path spelled as [`git::top_level_pathspec`] spells it, joined for a
+/// sentence.
 fn from_the_top_level<P: AsRef<Path>>(paths: impl IntoIterator<Item = P>) -> String {
     paths
         .into_iter()
-        .map(|path| format!(":/{}", path.as_ref().display()))
+        .map(|path| git::top_level_pathspec(path.as_ref()))
         .collect::<Vec<_>>()
         .join(", ")
 }

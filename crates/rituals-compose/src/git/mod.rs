@@ -17,7 +17,7 @@
 //!
 //! Paths git reports are spelled from git's top level, the form the `:/`
 //! pathspec takes, so a person can hand one to git from any directory of
-//! the project.
+//! the project. [`top_level_pathspec`] spells one.
 //!
 //! # Examples
 //!
@@ -114,6 +114,29 @@ impl fmt::Display for Unanswered {
 }
 
 impl std::error::Error for Unanswered {}
+
+/// `path_from_top_level` as the `:/` pathspec, which git reads from the top
+/// level whatever directory it is run in.
+///
+/// # Examples
+///
+/// Naming a file git reported, so a person can hand it back to git from any
+/// directory of the project:
+///
+/// ```
+/// use std::path::Path;
+///
+/// use rituals_compose::git::top_level_pathspec;
+///
+/// assert_eq!(
+///     top_level_pathspec(Path::new(".rituals/lint/src/lib.rs")),
+///     ":/.rituals/lint/src/lib.rs"
+/// );
+/// ```
+#[must_use]
+pub fn top_level_pathspec(path_from_top_level: &Path) -> String {
+    format!(":/{}", path_from_top_level.display())
+}
 
 /// `count` of `noun`, pluralised with an `s`: `1 tracked file`, `3 tracked
 /// files`.
@@ -244,7 +267,9 @@ fn canonical(path: &Path) -> Result<PathBuf, Unanswered> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CannotGiveBack, NotClean, Unanswered};
+    use std::path::Path;
+
+    use super::{CannotGiveBack, NotClean, Unanswered, top_level_pathspec};
 
     /// Every variant renders as git's fact, in lowercase, with no remedy and
     /// no trailing full stop, so a caller can build a sentence around it.
@@ -268,6 +293,11 @@ mod tests {
                 "{expected:?} must not end in a full stop"
             );
         }
+    }
+
+    #[test]
+    fn a_path_from_the_top_level_is_spelled_with_the_slash_colon_magic() {
+        assert_eq!(top_level_pathspec(Path::new("a/b.rs")), ":/a/b.rs");
     }
 
     fn assert_send_sync_error<T: Send + Sync + std::error::Error>() {}

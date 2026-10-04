@@ -112,14 +112,13 @@ pub(crate) fn unanswered_refusal(
     }
 }
 
-/// The first few of `files`, each from the top level with the `:/` pathspec
-/// magic, which git reads from there whatever directory it is run in, and a
-/// count of the rest.
+/// The first few of `files`, each spelled as [`git::top_level_pathspec`]
+/// spells it, and a count of the rest.
 fn dirty_paths(files: &[PathBuf]) -> String {
     let named: Vec<String> = files
         .iter()
         .take(DIRTY_PATHS_NAMED)
-        .map(|file| format!(":/{}", file.display()))
+        .map(|file| git::top_level_pathspec(file))
         .collect();
     let named = named.join(", ");
     match files.len().checked_sub(DIRTY_PATHS_NAMED) {
