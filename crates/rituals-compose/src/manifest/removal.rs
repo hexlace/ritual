@@ -15,11 +15,9 @@ use rituals::Failure;
 
 use super::Manifest;
 use super::entry_removal::remove_matching_style;
+use super::member_globs::{expand, is_a_glob};
 use super::raw_text;
 use crate::paths::{lies_under, normalize};
-
-/// The characters that make a `members` entry a glob rather than a path.
-const GLOB_CHARACTERS: [char; 3] = ['*', '?', '['];
 
 impl Manifest {
     /// Takes `key` out of `[package.metadata.ritual] tasks`, every time it
@@ -272,7 +270,7 @@ impl Manifest {
     /// ```
     pub fn remove_workspace_member(&mut self, directory: &Path) -> bool {
         let target = self.joined_to_the_workspace_root(directory);
-        let root = self.workspace_root();
+        let root = self.directory();
         let Some(workspace) = self
             .document
             .get_mut("workspace")
@@ -333,7 +331,7 @@ impl Manifest {
     #[must_use]
     pub fn empties_default_members(&self, directory: &Path) -> bool {
         let target = self.joined_to_the_workspace_root(directory);
-        let root = self.workspace_root();
+        let root = self.directory();
         let Some(entries) = self
             .document
             .get("workspace")
@@ -388,7 +386,7 @@ impl Manifest {
     /// ```
     pub fn globs_left_matching_nothing(&self, directory: &Path) -> Result<Vec<String>, Failure> {
         let target = self.joined_to_the_workspace_root(directory);
-        let root = self.workspace_root();
+        let root = self.directory();
         let Some(workspace) = self.document.get("workspace").and_then(Item::as_table_like) else {
             return Ok(Vec::new());
         };
@@ -399,7 +397,7 @@ impl Manifest {
                 continue;
             };
             for entry in entries.iter().filter_map(Value::as_str) {
-                if !entry.contains(GLOB_CHARACTERS) || left_empty.iter().any(|seen| seen == entry) {
+                if !is_a_glob(entry) || left_empty.iter().any(|seen| seen == entry) {
                     continue;
                 }
                 let matches = expand(&root, entry)?;
@@ -450,7 +448,7 @@ impl Manifest {
     #[must_use]
     pub fn entries_pointing_under(&self, directory: &Path, dropped: Option<&str>) -> Vec<String> {
         let target = self.joined_to_the_workspace_root(directory);
-        let root = self.workspace_root();
+        let root = self.directory();
         let points_under = |declaration: &Item| {
             declaration
                 .as_table_like()
@@ -487,17 +485,17 @@ impl Manifest {
 
     /// The directory this manifest is in, which for a workspace's manifest
     /// is the root every path in it is read from.
-    fn workspace_root(&self) -> PathBuf {
+    pub(super) fn directory(&self) -> PathBuf {
         self.path
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_default()
     }
 
-    /// `directory` joined to [`Manifest::workspace_root`], which leaves an
+    /// `directory` joined to [`Manifest::directory`], which leaves an
     /// absolute one as it is.
     fn joined_to_the_workspace_root(&self, directory: &Path) -> PathBuf {
-        self.workspace_root().join(directory)
+        self.directory().join(directory)
     }
 }
 
@@ -706,7 +704,7 @@ fn inherits(dependencies: &dyn TableLike, key: &str) -> bool {
 /// not a glob, and the same path once both are normalised the way Cargo
 /// normalises a member entry.
 fn names(root: &Path, entry: &str, directory: &Path) -> bool {
-    !entry.contains(GLOB_CHARACTERS) && normalize(&root.join(entry)) == normalize(directory)
+    !is_a_glob(entry) && normalize(&root.join(entry)) == normalize(directory)
 }
 
 /// Every key and value of `item`, when it is a table of any kind, and
@@ -715,24 +713,6 @@ fn entries_of(item: Option<&Item>) -> impl Iterator<Item = (&str, &Item)> {
     item.and_then(Item::as_table_like)
         .into_iter()
         .flat_map(TableLike::iter)
-}
-
-/// Every path the glob `entry`, joined to `root`, matches on disk, the way
-/// Cargo expands a `members` glob.
-fn expand(root: &Path, entry: &str) -> Result<Vec<PathBuf>, Failure> {
-    let pattern = root.join(entry);
-    let unreadable = |error: &dyn std::fmt::Display| {
-        Failure::new(format!(
-            "the [workspace] members glob `{entry}` could not be expanded: {error}"
-        ))
-    };
-    let pattern = pattern
-        .to_str()
-        .ok_or_else(|| unreadable(&"its path is not UTF-8"))?;
-    glob::glob(pattern)
-        .map_err(|error| unreadable(&error))?
-        .map(|matched| matched.map_err(|error| unreadable(&error)))
-        .collect()
 }
 
 /// The positions in `array`, in order, of the string entries `matches`

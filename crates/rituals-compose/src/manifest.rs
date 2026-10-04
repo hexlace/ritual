@@ -11,7 +11,12 @@ use crate::generated_file::TaskKey;
 use crate::rollback::Changes;
 
 mod entry_removal;
+mod member_globs;
+mod path_change;
 mod removal;
+mod repointing;
+
+pub use path_change::PathChange;
 
 /// A manifest a task is about to edit.
 ///
@@ -640,24 +645,7 @@ pub fn dependency_path(manifest_path: &Path, crate_dir: &Path) -> String {
         );
     };
 
-    let from_components: Vec<_> = manifest_directory.components().collect();
-    let to_components: Vec<_> = crate_dir.components().collect();
-
-    let shared = from_components
-        .iter()
-        .zip(to_components.iter())
-        .take_while(|(from, to)| from == to)
-        .count();
-
-    let ascents = from_components.len() - shared;
-    let mut segments: Vec<String> = std::iter::repeat_n("..".to_string(), ascents).collect();
-    segments.extend(
-        to_components[shared..]
-            .iter()
-            .map(|component| component.as_os_str().to_string_lossy().into_owned()),
-    );
-
-    segments.join("/")
+    crate::paths::relative(manifest_directory, crate_dir)
 }
 
 #[cfg(test)]

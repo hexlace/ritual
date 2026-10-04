@@ -42,14 +42,26 @@ The composition library: reading `cargo metadata`, resolving a `tasks` list,
 editing manifests in place, rendering a task crate's files and a command
 line's generated file, checking whether a directory can hold a standalone
 crate, running the `cargo` that launched the process, rendering a command for
-a person to copy, putting a project back when a run does not finish, and
-saying where a project keeps its tasks. The
-management tasks depend on it because it is the library their job needs.
+a person to copy, putting a project back when a run does not finish, saying
+where a project keeps its tasks, asking git what it can give back, and working
+out where paths go when directories move. The management tasks depend on it
+because it is the library their job needs.
 
 **The layout is shared.** `layout` is the one place that says where a
 project's own tasks live, `.rituals/<name>`. A task that scaffolds a task
 crate asks it for the directory, the member entry and the path to report, so
 `add` and any scaffolder after it agree and a change of directory is one edit.
+
+**Git is asked in one place.** `git` answers whether git can give back every
+file in a directory about to be deleted, whether the work tree is clean, which
+directories hold Cargo configuration, which entries are submodules and which
+files mention a pattern. `remove` and the tasks that move directories ask the
+same code, and each words its own refusal from the `Obstacle` it gets back.
+
+**A move is worked out in one place.** A `relocation::Relocation` is built once
+from the directories that move and says where any path at or under one of them
+goes; `Manifest::repoint` applies it to every path a manifest writes, keeping
+the person's own spelling wherever it still reaches the same place.
 
 **The rollback is shared.** A task that writes to a project promises that a
 run which fails partway leaves the project as it found it, and says so when
@@ -60,7 +72,9 @@ is TOML, a file the run created is removed, a directory it created goes, and
 anything that could not be put back is named, with the caller's own words
 for trying again. The failure's own full stop is dropped so the report
 continues its sentence, and a run can ask what it found when it first
-recorded a file, to say "created" rather than "updated". A manifest can only
+recorded a file, to say "created" rather than "updated". A directory the run
+moved goes back whole, ignored files included, which no version control could
+give back. A manifest can only
 be written through a run's record, so none is changed without one. One
 rollback means one set of rules about what "put back" means, rather than one
 per task drifting apart.
