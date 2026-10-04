@@ -1,16 +1,15 @@
 //! The `remove` task: take a task out of this project, in the order that
 //! keeps it building.
 
-mod git;
 mod removal;
 #[cfg(test)]
 mod test_support;
 
 use std::path::{Path, PathBuf};
 
-use git::{Flag, Obstacle};
 use removal::{Manifests, Member, Removal};
 use rituals::{CommandLine, Failure, Outcome, Task, clap};
+use rituals_compose::git::{self, Flag, Obstacle};
 use rituals_compose::metadata::{self, Metadata, TaskImport};
 use rituals_compose::sentence::join_with_and;
 use rituals_compose::{cargo_config, top_level};
@@ -433,10 +432,10 @@ fn entries_refusal(directory: &str, entries: &[String]) -> Failure {
 
 /// Each path spelled from git's top level with the `:/` pathspec magic,
 /// which git reads from there whatever directory it is run in.
-fn from_the_top_level<'a>(paths: impl IntoIterator<Item = &'a PathBuf>) -> String {
+fn from_the_top_level<P: AsRef<Path>>(paths: impl IntoIterator<Item = P>) -> String {
     paths
         .into_iter()
-        .map(|path| format!(":/{}", path.display()))
+        .map(|path| format!(":/{}", path.as_ref().display()))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -492,11 +491,11 @@ fn git_refusal(
             let named: Vec<String> = files
                 .iter()
                 .map(|file| {
-                    let flag = match file.flag {
+                    let flag = match file.flag() {
                         Flag::AssumeUnchanged => "assume-unchanged",
                         Flag::SkipWorktree => "skip-worktree",
                     };
-                    format!("{} ({flag})", from_the_top_level([&file.path]))
+                    format!("{} ({flag})", from_the_top_level([file.path()]))
                 })
                 .collect();
             Failure::new(format!(
@@ -530,12 +529,13 @@ fn git_refusal(
 mod tests {
     use std::path::PathBuf;
 
+    use rituals_compose::git;
+
     use super::{
-        Flag, Obstacle, bundle_refusal, entries_refusal, git_refusal, globs_refusal,
-        is_strictly_inside, last_default_member_refusal, members_inside_refusal, neither_refusal,
+        Obstacle, bundle_refusal, entries_refusal, git_refusal, globs_refusal, is_strictly_inside,
+        last_default_member_refusal, members_inside_refusal, neither_refusal,
         other_dependents_refusal, outside_the_workspace_refusal, pick, several_keys_refusal, shown,
     };
-    use crate::git::Unwatched;
     use crate::test_support::{ScratchDir, TestOutcome};
 
     const REMOVE: &str = "cargo ritual remove";
@@ -787,25 +787,78 @@ mod tests {
         );
     }
 
+    /// `git` configured to read nothing from the machine it runs on, run in
+    /// `directory`: no global or system configuration, an identity from the
+    /// environment, and signing off for the commits this test makes alone.
+    fn git(directory: &std::path::Path, arguments: &[&str]) -> TestOutcome {
+        let output = std::process::Command::new("git")
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "init.defaultBranch=main",
+            ])
+            .arg("-C")
+            .arg(directory)
+            .args(arguments)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "Fixture")
+            .env("GIT_AUTHOR_EMAIL", "fixture@example.invalid")
+            .env("GIT_COMMITTER_NAME", "Fixture")
+            .env("GIT_COMMITTER_EMAIL", "fixture@example.invalid")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .output()?;
+        assert!(
+            output.status.success(),
+            "`git {}` failed: {}",
+            arguments.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(())
+    }
+
+    /// An `Unwatched` is only ever built from what git reports, so the
+    /// obstacle this test words a refusal for is the one `git` itself gives
+    /// for a task holding one file of each flag.
     #[test]
-    fn files_git_does_not_look_at_are_each_named_with_their_flag() {
+    fn files_git_does_not_look_at_are_each_named_with_their_flag() -> TestOutcome {
+        let scratch = ScratchDir::new("unwatched")?;
+        let root = scratch.path();
+        std::fs::create_dir_all(root.join("tasks/greet/src"))?;
+        std::fs::write(root.join("tasks/greet/local.toml"), "committed\n")?;
+        std::fs::write(root.join("tasks/greet/src/lib.rs"), "committed\n")?;
+        git(root, &["init"])?;
+        git(root, &["add", "--all"])?;
+        git(root, &["commit", "--message", "fixture"])?;
+        git(
+            root,
+            &[
+                "update-index",
+                "--assume-unchanged",
+                "tasks/greet/local.toml",
+            ],
+        )?;
+        git(
+            root,
+            &["update-index", "--skip-worktree", "tasks/greet/src/lib.rs"],
+        )?;
+
+        let Err(obstacle) = git::ensure_git_can_give_back(&root.join("tasks/greet"), root) else {
+            return Err("git was told not to look at two files and still vouched for them".into());
+        };
+
         assert_eq!(
-            refusal(Obstacle::Unwatched(vec![
-                Unwatched {
-                    path: PathBuf::from("tasks/greet/local.toml"),
-                    flag: Flag::AssumeUnchanged,
-                },
-                Unwatched {
-                    path: PathBuf::from("tasks/greet/src/lib.rs"),
-                    flag: Flag::SkipWorktree,
-                },
-            ])),
+            refusal(obstacle),
             "refusing to remove `greet`: git has been told not to look at changes to \
              :/tasks/greet/local.toml (assume-unchanged), :/tasks/greet/src/lib.rs \
              (skip-worktree), so it cannot vouch for them; clear the flag with `git \
              update-index --no-assume-unchanged` or `--no-skip-worktree`, commit what changed, \
              then run `cargo ritual remove greet` again"
         );
+        Ok(())
     }
 
     #[test]
