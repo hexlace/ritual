@@ -10,8 +10,8 @@
 //! [`layout`] that says where a project keeps its own tasks, for the [`git`]
 //! checks that say whether git can give back what a task is about to delete
 //! or move, for the [`relocation`] that says where paths go when directories
-//! move, and for the [`rollback`] that puts a project back when a task's run
-//! does not finish.
+//! move, for the [`paths`] that compares and spells them, and for the
+//! [`rollback`] that puts a project back when a task's run does not finish.
 //! Nothing here runs on a composed command line's own path: assembling a
 //! command line from a project's imports and dispatching to one of them live
 //! in `rituals`, which a composed CLI crate depends on directly.
@@ -57,7 +57,7 @@ pub mod git;
 pub mod layout;
 pub mod manifest;
 pub mod metadata;
-mod paths;
+pub mod paths;
 mod project;
 pub mod relocation;
 pub mod rollback;

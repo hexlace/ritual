@@ -1,5 +1,6 @@
-//! Comparing paths the way Cargo reaches them: spelled as Cargo spells
-//! them, then followed through the filesystem.
+//! Comparing and spelling paths: comparing them the way Cargo reaches them,
+//! spelled as Cargo spells them and then followed through the filesystem, and
+//! spelling one from another directory.
 //!
 //! Cargo joins most relative paths onto a base and removes `.` and `..`
 //! components as text before it opens anything, so `tasks/./lint` and
@@ -9,16 +10,23 @@
 //! `tasks`, `/tmp/w/tasks/lint` when `/tmp` is a link to `/private/tmp`. So
 //! whether a path reaches a directory is asked of the filesystem, by file
 //! identity, while the directory still exists.
-//
-// `redundant_pub_crate` (clippy nursery) wants `pub` here because this
-// module is private, but `pub(crate)` is the visibility that is actually
-// true — it stays correct if this module is ever re-exported at a different
-// level — so the nursery lint gives way.
-#![expect(
-    clippy::redundant_pub_crate,
-    reason = "pub(crate) reflects this module's actual visibility even though the enclosing \
-              module is private; see the note above"
-)]
+//!
+//! [`relative`] is the one way to spell the path that leads from one
+//! directory to another, wherever a path is written for a person or a
+//! manifest to read.
+//!
+//! # Examples
+//!
+//! Spelling where a task's directory is from a crate that depends on it:
+//!
+//! ```
+//! use std::path::Path;
+//!
+//! use rituals_compose::paths::relative;
+//!
+//! let path = relative(Path::new("/w/ritual"), Path::new("/w/.rituals/greet"));
+//! assert_eq!(path, "../.rituals/greet");
+//! ```
 
 use std::ffi::OsString;
 use std::fs::Metadata;
@@ -68,7 +76,25 @@ pub(crate) fn normalize(path: &Path) -> PathBuf {
 ///
 /// Panics if either path is not absolute, since a relative path between two
 /// relative paths depends on a working directory neither carries.
-pub(crate) fn relative(from_directory: &Path, to: &Path) -> String {
+///
+/// # Examples
+///
+/// The same directory is `.`, and a directory that only shares a name prefix
+/// with another is not inside it:
+///
+/// ```
+/// use std::path::Path;
+///
+/// use rituals_compose::paths::relative;
+///
+/// assert_eq!(relative(Path::new("/w/demo"), Path::new("/w/demo")), ".");
+/// assert_eq!(
+///     relative(Path::new("/w/demo"), Path::new("/w/demo-extra/x")),
+///     "../demo-extra/x"
+/// );
+/// ```
+#[must_use]
+pub fn relative(from_directory: &Path, to: &Path) -> String {
     assert!(
         from_directory.is_absolute(),
         "from_directory must be absolute, got {}",
@@ -414,6 +440,9 @@ mod tests {
             ("/a/b", "/c/d", "../../c/d"),
             ("/", "/c/d", "c/d"),
             ("/a/b", "/", "../.."),
+            // A directory is not inside another that only shares its prefix.
+            ("/w/demo", "/w/demo-extra/x", "../demo-extra/x"),
+            ("/w/demo", "/w/demo/.github/ci.yml", ".github/ci.yml"),
         ] {
             assert_eq!(
                 relative(Path::new(from), Path::new(to)),

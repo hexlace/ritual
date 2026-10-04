@@ -5,22 +5,25 @@ use std::path::{Path, PathBuf};
 use rituals::Failure;
 use rituals_compose::git::{self, NotClean, Unanswered};
 
-use crate::places::spelled_from;
+use crate::places::from_the_root_in;
 
 /// How many uncommitted paths a refusal names before it counts the rest, so
 /// a project that was never committed does not print a screenful.
 const DIRTY_PATHS_NAMED: usize = 10;
 
-/// Where the project's root is in the repository its clean work tree is in.
+/// Where the project's root is in the repository its clean work tree is in:
+/// the repository's top level and the project's root, both resolved through
+/// symbolic links, as git spells paths.
 pub(crate) struct Repository {
-    root_from_top_level: PathBuf,
+    top_level: PathBuf,
+    root: PathBuf,
 }
 
 impl Repository {
     /// `path`, which git spelled from the repository's top level, as the
     /// person knows it: from the project's root.
     pub(crate) fn shown(&self, path_from_top_level: &Path) -> String {
-        spelled_from(&self.root_from_top_level, path_from_top_level)
+        from_the_root_in(path_from_top_level, &self.top_level, &self.root)
     }
 }
 
@@ -55,18 +58,16 @@ fn located(workspace_root: &Path) -> Result<Repository, NotClean> {
             workspace_root.display()
         )))
     })?;
-    let root_from_top_level = resolved_root
-        .strip_prefix(&top_level)
-        .map(Path::to_path_buf)
-        .map_err(|_| {
-            NotClean::Unanswered(Unanswered::Failed(format!(
-                "{} is not inside the repository at {}",
-                resolved_root.display(),
-                top_level.display()
-            )))
-        })?;
+    if !resolved_root.starts_with(&top_level) {
+        return Err(NotClean::Unanswered(Unanswered::Failed(format!(
+            "{} is not inside the repository at {}",
+            resolved_root.display(),
+            top_level.display()
+        ))));
+    }
     Ok(Repository {
-        root_from_top_level,
+        top_level,
+        root: resolved_root,
     })
 }
 
