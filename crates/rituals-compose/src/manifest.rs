@@ -588,25 +588,20 @@ pub fn declares_a_workspace(path: &Path) -> bool {
     document.get("workspace").is_some()
 }
 
-/// Computes the forward-slash `path = "…"` value a dependency at
-/// `crate_dir` wants in the manifest at `manifest_path`.
-///
-/// Both arguments are absolute, and the result is the same on every
-/// platform because its separator is always `/`, never
-/// [`std::path::MAIN_SEPARATOR`].
+/// Computes the relative `path = "…"` value a dependency at `crate_dir`
+/// wants in the manifest at `manifest_path`. Both arguments are absolute.
 ///
 /// # Examples
 ///
 /// ```
+/// use std::path::Path;
+///
 /// use rituals_compose::manifest::dependency_path;
 ///
-/// // Any absolute directory will do; the temporary directory is one on
-/// // every platform, where a literal `/workspace` is not absolute on Windows.
-/// let workspace = std::env::temp_dir().join("workspace");
-/// let manifest_path = workspace.join("ritual/Cargo.toml");
-/// let crate_dir = workspace.join("tasks/lint");
+/// let manifest_path = Path::new("/workspace/ritual/Cargo.toml");
+/// let crate_dir = Path::new("/workspace/tasks/lint");
 ///
-/// assert_eq!(dependency_path(&manifest_path, &crate_dir), "../tasks/lint");
+/// assert_eq!(dependency_path(manifest_path, crate_dir), "../tasks/lint");
 /// ```
 ///
 /// # Panics
