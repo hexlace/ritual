@@ -3,12 +3,12 @@
 //! spelling one from another directory.
 //!
 //! Cargo joins most relative paths onto a base and removes `.` and `..`
-//! components as text before it opens anything, so `tasks/./lint` and
-//! `x/../tasks/lint` are one directory to it whatever `x` is. Then it opens
-//! the result, and the filesystem decides what that names: `Tasks/Lint` on a
-//! file system that folds case, `alias/lint` when `alias` is a link to
-//! `tasks`, `/tmp/w/tasks/lint` when `/tmp` is a link to `/private/tmp`. So
-//! whether a path reaches a directory is asked of the filesystem, by file
+//! components as text before it opens anything, so `.rituals/./lint` and
+//! `x/../.rituals/lint` are one directory to it whatever `x` is. Then it opens
+//! the result, and the filesystem decides what that names: `.Rituals/Lint` on
+//! a file system that folds case, `alias/lint` when `alias` is a link to
+//! `.rituals`, `/tmp/w/.rituals/lint` when `/tmp` is a link to `/private/tmp`.
+//! So whether a path reaches a directory is asked of the filesystem, by file
 //! identity, while the directory still exists.
 //!
 //! [`relative`] is the one way to spell the path that leads from one
