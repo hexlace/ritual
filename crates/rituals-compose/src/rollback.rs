@@ -12,17 +12,15 @@
 //! forget to undo, and nothing can be recorded once the undo has started.
 //! Each way of recording takes its snapshot before the change it makes:
 //! [`Changes::write`] writes the file itself, [`Changes::run_changing`] runs
-//! the change it guards, [`Changes::reserve_directory`] creates the
-//! directory itself, and [`Changes::rename`] moves the path itself. A change
-//! made around [`Changes`], such as a direct
-//! `std::fs` write or a command not run through [`Changes::run_changing`], is
-//! not recorded at all.
+//! the change it guards, [`Changes::reserve_directory`] creates the directory
+//! itself, and [`Changes::rename`] moves the path itself. A change made around
+//! [`Changes`], such as a direct `std::fs` write or a command not run through
+//! [`Changes::run_changing`], is not recorded at all.
 //!
-//! A fourth way, [`Changes::rename`], moves a directory and records the move,
-//! so the undo moves it back whole, ignored files that no version control can
-//! restore included. A file written through [`Changes::write`] before its
-//! directory moved is put back at the path it was written at, because the
-//! directory goes back first.
+//! [`Changes::rename`] moves a directory whole, so the undo moves it back
+//! whole, ignored files that no version control can restore included; a file
+//! written through [`Changes::write`] before its directory moved is put back
+//! at the path it was written at, because the directory goes back first.
 //!
 //! [`Changes::recorded_as_absent`] says what a run found when it first
 //! recorded a file, for a run that reports a file as created rather than
