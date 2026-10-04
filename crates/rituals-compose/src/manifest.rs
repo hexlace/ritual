@@ -4,9 +4,10 @@
 
 use std::path::{Path, PathBuf};
 
-use rituals::{Failure, Name};
+use rituals::Failure;
 use toml_edit::{Array, DocumentMut, InlineTable, Item, RawString, Value};
 
+use crate::generated_file::TaskKey;
 use crate::rollback::Changes;
 
 mod entry_removal;
@@ -207,6 +208,7 @@ impl Manifest {
     ///
     /// ```
     /// use rituals::Name;
+    /// use rituals_compose::generated_file::TaskKey;
     /// use rituals_compose::manifest::Manifest;
     /// use rituals_compose::rollback;
     ///
@@ -219,7 +221,7 @@ impl Manifest {
     /// #     "[dependencies]\n\n[package.metadata.ritual]\ntasks = []\n",
     /// # )?;
     /// let mut manifest = Manifest::read(&manifest_path)?;
-    /// let name = Name::new("lint")?;
+    /// let name = TaskKey::new(Name::new("lint")?)?;
     ///
     /// manifest.import_task(&name, "../tasks/lint")?;
     /// rollback::attempt("running `add lint` again", |changes| manifest.write(changes))?;
@@ -235,7 +237,7 @@ impl Manifest {
     /// # std::fs::remove_dir_all(&directory)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn import_task(&mut self, name: &Name, dependency_path: &str) -> Result<(), Failure> {
+    pub fn import_task(&mut self, name: &TaskKey, dependency_path: &str) -> Result<(), Failure> {
         // Both destinations are resolved, read-only, before either is
         // written — the refusal below must be reachable with the document
         // still exactly as `Manifest::read` left it, not after the
@@ -301,6 +303,7 @@ impl Manifest {
     ///
     /// ```
     /// use rituals::Name;
+    /// use rituals_compose::generated_file::TaskKey;
     /// use rituals_compose::manifest::Manifest;
     /// use rituals_compose::rollback;
     ///
@@ -315,7 +318,7 @@ impl Manifest {
     /// let mut manifest = Manifest::read(&manifest_path)?;
     ///
     /// // `cargo add` wrote the dependency; the list is what is left to edit.
-    /// manifest.append_task(&Name::new("greeter")?)?;
+    /// manifest.append_task(&TaskKey::new(Name::new("greeter")?)?)?;
     /// rollback::attempt("running `import greeter` again", |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
@@ -323,7 +326,7 @@ impl Manifest {
     /// # std::fs::remove_dir_all(&directory)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn append_task(&mut self, key: &Name) -> Result<(), Failure> {
+    pub fn append_task(&mut self, key: &TaskKey) -> Result<(), Failure> {
         let path = self.path.display().to_string();
         let tasks = self.tasks_list_mut().ok_or_else(|| {
             Failure::new(format!(
@@ -667,6 +670,7 @@ mod tests {
     use super::{
         Manifest, declares_a_task_crate, declares_a_workspace, dependency_path, push_matching_style,
     };
+    use crate::generated_file::TaskKey;
     use crate::paths::normalize;
     use crate::test_support::{ScratchDir, TestOutcome};
 
@@ -960,7 +964,7 @@ mod tests {
             "[dependencies]\nrituals.workspace = true\n\n\
              [package.metadata.ritual]\ntasks = [\"new\"]\n",
         )?;
-        let name = Name::new("lint")?;
+        let name = TaskKey::new(Name::new("lint")?)?;
         let result = manifest.import_task(&name, "../tasks/lint");
         assert!(result.is_ok(), "expected the edit to succeed: {result:?}");
         let rendered = manifest.document.to_string();
@@ -982,7 +986,7 @@ mod tests {
              metadata = { ritual = { tasks = [\"ritual\"] } }\n",
         )?;
 
-        manifest.import_task(&Name::new("lint")?, "../tasks/lint")?;
+        manifest.import_task(&TaskKey::new(Name::new("lint")?)?, "../tasks/lint")?;
 
         let rendered = manifest.document.to_string();
         assert!(rendered.contains("lint = { path = \"../tasks/lint\" }"));
@@ -1001,7 +1005,7 @@ mod tests {
             "import-task-no-tasks-list",
             "[dependencies]\nrituals.workspace = true\n",
         )?;
-        let name = Name::new("lint")?;
+        let name = TaskKey::new(Name::new("lint")?)?;
         let before = manifest.document.to_string();
 
         let result = manifest.import_task(&name, "../tasks/lint");
@@ -1026,7 +1030,7 @@ mod tests {
             "import-task-no-dependencies-table",
             "[package.metadata.ritual]\ntasks = []\n",
         )?;
-        let name = Name::new("lint")?;
+        let name = TaskKey::new(Name::new("lint")?)?;
         let before = manifest.document.to_string();
 
         let result = manifest.import_task(&name, "../tasks/lint");
@@ -1049,7 +1053,7 @@ mod tests {
     fn appending_a_task_is_one_added_line_and_keeps_the_comments() -> TestOutcome {
         let (_scratch, mut manifest) = manifest("append-task-commented", COMMENTED_MANIFEST)?;
 
-        manifest.append_task(&Name::new("greeter")?)?;
+        manifest.append_task(&TaskKey::new(Name::new("greeter")?)?)?;
 
         assert_eq!(
             manifest.document.to_string(),
@@ -1066,7 +1070,7 @@ mod tests {
             "[package.metadata.ritual]\ntasks = []\n",
         )?;
 
-        manifest.append_task(&Name::new("greeter")?)?;
+        manifest.append_task(&TaskKey::new(Name::new("greeter")?)?)?;
 
         assert_eq!(
             manifest.document.to_string(),
@@ -1082,7 +1086,7 @@ mod tests {
             "[package]\nname = \"demo-ritual\"\nmetadata = { ritual = { tasks = [\"ritual\"] } }\n",
         )?;
 
-        manifest.append_task(&Name::new("greeter")?)?;
+        manifest.append_task(&TaskKey::new(Name::new("greeter")?)?)?;
 
         assert_eq!(
             manifest.document.to_string(),
@@ -1108,7 +1112,7 @@ mod tests {
             let (_scratch, mut manifest) =
                 manifest(&format!("append-task-missing-{index}"), shape)?;
 
-            let result = manifest.append_task(&Name::new("greeter")?);
+            let result = manifest.append_task(&TaskKey::new(Name::new("greeter")?)?);
 
             assert!(result.is_err(), "expected {shape:?} to be refused");
             if let Err(failure) = result {

@@ -18,7 +18,7 @@
 mod entry;
 mod identifier;
 
-use std::fmt::Write as _;
+use std::fmt::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 pub use entry::Entry;
@@ -97,33 +97,93 @@ pub fn render(package_name: &str, entries: &[Entry]) -> String {
     output
 }
 
-/// Refuses a task key the generated file could not compile with.
+/// A key for `[package.metadata.ritual] tasks` that the generated file can
+/// compile with.
 ///
-/// That is a key whose extern-crate identifier is `std` or `core`, which the
-/// file reaches by those names: a dependency under either stands in for
-/// Rust's own crate.
-///
-/// One rule for every task that writes a key and for the resolver that reads
-/// the list, so a key `import` refuses is one `regenerate` refuses when it is
-/// written by hand. A command line that no longer compiles cannot run the
-/// command that would take the key back out, so this is asked before
-/// anything is written.
-///
-/// # Errors
-///
-/// Returns a [`Failure`] naming the key and the crate it would hide.
+/// [`TaskKey::new`] is the only way to make one, and it refuses a key whose
+/// extern-crate identifier is `std` or `core`, which the file reaches by
+/// those names: a dependency under either stands in for Rust's own crate. A
+/// command line that no longer compiles cannot run the command that would
+/// take the key back out, so every writer of the list takes a `TaskKey`
+/// rather than a [`Name`], and a writer that skips the rule does not
+/// compile. The rule is the same one the resolver asks of a list written by
+/// hand, so a key `import` refuses is one `regenerate` refuses.
 ///
 /// # Examples
 ///
 /// ```
 /// use rituals::Name;
-/// use rituals_compose::generated_file::ensure_key_hides_no_crate;
+/// use rituals_compose::generated_file::TaskKey;
 ///
-/// assert!(ensure_key_hides_no_crate(&Name::new("lint")?).is_ok());
-/// assert!(ensure_key_hides_no_crate(&Name::new("std")?).is_err());
-/// # Ok::<(), rituals::InvalidName>(())
+/// let key = TaskKey::new(Name::new("lint")?)?;
+/// assert_eq!(key.as_str(), "lint");
+///
+/// let refused = TaskKey::new(Name::new("std")?);
+/// assert!(refused.is_err());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub fn ensure_key_hides_no_crate(key: &Name) -> Outcome {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskKey(Name);
+
+impl TaskKey {
+    /// Makes `name` a task key, once it is known to hide no crate the
+    /// generated file names.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`Failure`] naming the key and the crate it would hide.
+    pub fn new(name: Name) -> Result<Self, Failure> {
+        ensure_key_hides_no_crate(&name)?;
+        Ok(Self(name))
+    }
+
+    /// The key as the [`Name`] it was made from.
+    #[must_use]
+    pub const fn as_name(&self) -> &Name {
+        &self.0
+    }
+
+    /// The key as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// The [`Name`] this key was made from.
+    #[must_use]
+    pub fn into_name(self) -> Name {
+        self.0
+    }
+}
+
+impl fmt::Display for TaskKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, formatter)
+    }
+}
+
+impl AsRef<Name> for TaskKey {
+    fn as_ref(&self) -> &Name {
+        &self.0
+    }
+}
+
+impl AsRef<str> for TaskKey {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+/// Refuses a task key the generated file could not compile with: one whose
+/// extern-crate identifier is `std` or `core`.
+///
+/// One rule for [`TaskKey::new`], which every writer of a key goes through,
+/// and for the resolver that reads the list, so the two cannot disagree.
+///
+/// # Errors
+///
+/// Returns a [`Failure`] naming the key and the crate it would hide.
+pub(crate) fn ensure_key_hides_no_crate(key: &Name) -> Outcome {
     let identifier = extern_identifier(key.as_str());
     if hides_a_crate_the_file_names(&identifier) {
         return Err(Failure::new(format!(
@@ -439,11 +499,35 @@ mod tests {
 
     use std::path::{Path, PathBuf};
 
-    use rituals::{CommandLine, Failure, Identity};
+    use rituals::{CommandLine, Failure, Identity, Name};
 
-    use super::{Entry, WriteOutcome, regenerate_recording, render, write_to_disk, write_with};
+    use super::{
+        Entry, TaskKey, WriteOutcome, regenerate_recording, render, write_to_disk, write_with,
+    };
     use crate::rollback;
     use crate::test_support::{ScratchDir, TestOutcome};
+
+    /// A key that would hide a crate the generated file names is never a
+    /// `TaskKey`, so no writer that takes one can put it in the list; any
+    /// other usable name is, unchanged.
+    #[test]
+    fn a_task_key_is_never_made_from_std_or_core() -> TestOutcome {
+        for hidden in ["std", "core"] {
+            let refused = TaskKey::new(Name::new(hidden)?).map_err(|failure| failure.to_string());
+            assert_eq!(
+                refused,
+                Err(format!(
+                    "`{hidden}` would hide Rust's own `{hidden}` crate, which the generated \
+                     command line is built on, and it would no longer compile; give this task \
+                     another key"
+                ))
+            );
+        }
+        let key = TaskKey::new(Name::new("lint")?)?;
+        assert_eq!(key.as_name(), &Name::new("lint")?);
+        assert_eq!(key.to_string(), "lint");
+        Ok(())
+    }
 
     #[test]
     fn zero_entries_render_as_one_empty_array_line() {

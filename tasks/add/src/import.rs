@@ -14,6 +14,7 @@
 use std::path::{Path, PathBuf};
 
 use rituals::{CommandLine, Failure, Name, Outcome, report};
+use rituals_compose::generated_file::TaskKey;
 use rituals_compose::manifest::Manifest;
 use rituals_compose::rollback::{self, Changes};
 use rituals_compose::source::Source;
@@ -26,7 +27,7 @@ use rituals_compose::{generated_file, task_crate, top_level};
 /// failures: a run of `add` that does not finish leaves the project exactly
 /// as it found it, and says so.
 pub(crate) struct Import {
-    pub(crate) name: Name,
+    pub(crate) name: TaskKey,
     pub(crate) task_crate_dir: PathBuf,
     pub(crate) workspace_manifest: Manifest,
     pub(crate) cli_manifest: Manifest,
@@ -48,7 +49,7 @@ impl Import {
     /// the step that fails, the directory is still there.
     fn write(&mut self, changes: &mut Changes) -> Outcome {
         changes.reserve_directory(&self.task_crate_dir)?;
-        write_task_crate(&self.task_crate_dir, &self.name)?;
+        write_task_crate(&self.task_crate_dir, self.name.as_name())?;
 
         let member = format!("tasks/{}", self.name);
         self.workspace_manifest.append_workspace_member(&member)?;
@@ -96,7 +97,7 @@ fn finish_by_regenerating(command_line: &CommandLine, import: &Import) -> Outcom
         ))
     })?;
     report(next_step(
-        &import.name,
+        import.name.as_name(),
         command_line.identity().binary_name(),
     ));
     Ok(())
@@ -148,6 +149,7 @@ mod tests {
     use std::path::PathBuf;
 
     use rituals::{Failure, Name, Outcome};
+    use rituals_compose::generated_file::TaskKey;
     use rituals_compose::manifest::Manifest;
     use rituals_compose::rollback::{self, Changes};
 
@@ -220,7 +222,7 @@ mod tests {
 
         fn import(&self, name: &str) -> Result<Import, Box<dyn Error>> {
             Ok(Import {
-                name: Name::new(name)?,
+                name: TaskKey::new(Name::new(name)?)?,
                 task_crate_dir: self.workspace_root.join("tasks").join(name),
                 workspace_manifest: Manifest::read(&self.workspace_manifest_path)?,
                 cli_manifest: Manifest::read(&self.cli_manifest_path)?,
@@ -283,7 +285,7 @@ mod tests {
         // happened yet.
         let reported = fail_after(&mut import, |import, changes| {
             changes.reserve_directory(&import.task_crate_dir)?;
-            super::write_task_crate(&import.task_crate_dir, &import.name)
+            super::write_task_crate(&import.task_crate_dir, import.name.as_name())
         });
 
         assert!(
@@ -311,7 +313,7 @@ mod tests {
         let mut import = project.import("lint")?;
         let reported = fail_after(&mut import, |import, changes| {
             changes.reserve_directory(&import.task_crate_dir)?;
-            super::write_task_crate(&import.task_crate_dir, &import.name)?;
+            super::write_task_crate(&import.task_crate_dir, import.name.as_name())?;
             import
                 .workspace_manifest
                 .append_workspace_member("tasks/lint")?;
@@ -339,7 +341,7 @@ mod tests {
         let mut import = project.import("lint")?;
         let reported = fail_after(&mut import, |import, changes| {
             changes.reserve_directory(&import.task_crate_dir)?;
-            super::write_task_crate(&import.task_crate_dir, &import.name)?;
+            super::write_task_crate(&import.task_crate_dir, import.name.as_name())?;
             import
                 .workspace_manifest
                 .append_workspace_member("tasks/lint")?;
@@ -375,7 +377,7 @@ mod tests {
         let mut import = project.import("lint")?;
         let _ = fail_after(&mut import, |import, changes| {
             changes.reserve_directory(&import.task_crate_dir)?;
-            super::write_task_crate(&import.task_crate_dir, &import.name)
+            super::write_task_crate(&import.task_crate_dir, import.name.as_name())
         });
 
         assert!(
@@ -415,7 +417,7 @@ mod tests {
 
         let reported = fail_after(&mut import, |import, changes| {
             changes.reserve_directory(&import.task_crate_dir)?;
-            super::write_task_crate(&import.task_crate_dir, &import.name)?;
+            super::write_task_crate(&import.task_crate_dir, import.name.as_name())?;
 
             let setup = |error| Failure::new("changing permissions failed").caused_by(error);
             std::fs::set_permissions(

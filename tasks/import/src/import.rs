@@ -14,6 +14,7 @@
 use std::path::{Path, PathBuf};
 
 use rituals::{CommandLine, Failure, Name, Outcome, report};
+use rituals_compose::generated_file::TaskKey;
 use rituals_compose::manifest::Manifest;
 use rituals_compose::rollback::Changes;
 use rituals_compose::{generated_file, metadata, top_level};
@@ -28,7 +29,7 @@ use crate::cargo_add;
 /// workspace's `Cargo.lock`, back byte for byte, and says so.
 pub(crate) struct Import {
     pub(crate) package: String,
-    pub(crate) key: Name,
+    pub(crate) key: TaskKey,
     pub(crate) current_dir: PathBuf,
     pub(crate) workspace_root: PathBuf,
     pub(crate) cli_manifest_path: PathBuf,
@@ -62,7 +63,7 @@ impl Import {
         // The project is known to be this one by now, so there is nothing
         // more to check about where it runs.
         metadata::fetch_recording(changes, &self.current_dir)?
-            .ensure_dependency_is_a_task(&self.package, &self.key)?;
+            .ensure_dependency_is_a_task(&self.package, self.key.as_name())?;
 
         let mut cli_manifest = Manifest::read(&self.cli_manifest_path)?;
         cli_manifest.append_task(&self.key)?;
@@ -98,12 +99,12 @@ pub(crate) fn finish_by_regenerating(command_line: &CommandLine, import: &Import
     generated_file::regenerate(command_line).map_err(|failure| {
         imported_but_not_regenerated(
             &failure,
-            &import.key,
+            import.key.as_name(),
             &top_level::management_command(command_line, "regenerate"),
         )
     })?;
     report(next_step(
-        &import.key,
+        import.key.as_name(),
         command_line.identity().binary_name(),
     ));
     Ok(())
@@ -157,6 +158,7 @@ mod tests {
     use std::path::Path;
 
     use rituals::{Failure, Name};
+    use rituals_compose::generated_file::TaskKey;
     use rituals_compose::rollback;
 
     use super::{
@@ -213,15 +215,19 @@ mod tests {
         project: &ScratchProject,
         key: &str,
         words: &[&str],
-    ) -> Result<Import, rituals::InvalidName> {
-        let key = Name::new(key)?;
+    ) -> Result<Import, Box<dyn std::error::Error>> {
+        let key = TaskKey::new(Name::new(key)?)?;
         Ok(Import {
             package: "demo-ritual".to_string(),
             current_dir: project.cli_dir(),
             workspace_root: project.root().to_path_buf(),
             cli_manifest_path: project.cli_manifest_path(),
             lockfile_path: project.lockfile_path(),
-            cargo_add_arguments: cargo_add::arguments("demo-ritual", &key, &typed_arguments(words)),
+            cargo_add_arguments: cargo_add::arguments(
+                "demo-ritual",
+                key.as_name(),
+                &typed_arguments(words),
+            ),
             key,
         })
     }

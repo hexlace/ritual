@@ -12,9 +12,10 @@ use std::path::Path;
 
 use arguments::ImportArguments;
 use import::Import;
-use rituals::{CommandLine, Failure, Name, Outcome, Task};
+use rituals::{CommandLine, Failure, Outcome, Task};
+use rituals_compose::generated_file::TaskKey;
 use rituals_compose::rollback::{self, Changes};
-use rituals_compose::{generated_file, metadata, top_level, workspace};
+use rituals_compose::{metadata, top_level, workspace};
 
 /// This task, for a command line to mount under whatever name imports it.
 ///
@@ -43,8 +44,7 @@ fn run(command_line: &CommandLine, arguments: &ImportArguments) -> Outcome {
     // or `core`, which the task check after `cargo add` refuses too, but only
     // once Cargo has run. Nor is the refusal for running where there is no
     // project at all in the attempt, since there is nothing to put back.
-    let key = arguments.key(&import_command, &current_dir)?;
-    generated_file::ensure_key_hides_no_crate(&key)?;
+    let key = TaskKey::new(arguments.key(&import_command, &current_dir)?)?;
     let again = arguments.to_run_again(&current_dir);
     metadata::ensure_inside_a_project(&current_dir, "import", &again)?;
 
@@ -86,7 +86,7 @@ fn prepare(
     command_line: &CommandLine,
     arguments: &ImportArguments,
     current_dir: &Path,
-    key: Name,
+    key: TaskKey,
     again: &str,
     changes: &mut Changes,
 ) -> Result<Import, Failure> {
@@ -95,14 +95,17 @@ fn prepare(
 
     let document =
         metadata::fetch_in_its_own_project(changes, current_dir, package, "import", again)?;
-    refusals::ensure_the_key_is_not_the_bin_name(&key, command_line.identity().binary_name())?;
+    refusals::ensure_the_key_is_not_the_bin_name(
+        key.as_name(),
+        command_line.identity().binary_name(),
+    )?;
     top_level::ensure_command_is_free(command_line, key.as_str())?;
     let project = document.locate_project(package)?;
     refusals::already_imported_refusal(
         package,
-        &key,
-        project.declares_dependency_key(&key),
-        project.lists_task(&key),
+        key.as_name(),
+        project.declares_dependency_key(key.as_name()),
+        project.lists_task(key.as_name()),
         &refusals::RemedyCommands {
             regenerate: &top_level::management_command(command_line, "regenerate"),
             import_again: &format!("{import_command} {again}"),
@@ -112,7 +115,7 @@ fn prepare(
 
     Ok(Import {
         package: package.to_string(),
-        cargo_add_arguments: cargo_add::arguments(package, &key, arguments),
+        cargo_add_arguments: cargo_add::arguments(package, key.as_name(), arguments),
         key,
         current_dir: current_dir.to_path_buf(),
         workspace_root: project.workspace_root().to_path_buf(),
@@ -128,7 +131,8 @@ mod tests {
     use rituals::{CommandLine, Identity};
 
     use rituals::Failure;
-    use rituals_compose::{generated_file, metadata, rollback};
+    use rituals_compose::generated_file::TaskKey;
+    use rituals_compose::{metadata, rollback};
 
     use super::{Import, prepare};
     use crate::test_support::{
@@ -147,8 +151,7 @@ mod tests {
         current_dir: &Path,
     ) -> Result<Import, Failure> {
         let arguments = typed_arguments(words);
-        let key = arguments.key("cargo ritual import", current_dir)?;
-        generated_file::ensure_key_hides_no_crate(&key)?;
+        let key = TaskKey::new(arguments.key("cargo ritual import", current_dir)?)?;
         let again = arguments.to_run_again(current_dir);
         metadata::ensure_inside_a_project(current_dir, "import", &again)?;
         rollback::attempt("running `import` again", |changes| {

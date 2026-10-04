@@ -9,9 +9,10 @@ use std::path::Path;
 
 use import::Import;
 use rituals::{CommandLine, Failure, Name, Outcome, Task, clap};
+use rituals_compose::generated_file::TaskKey;
 use rituals_compose::manifest::{self, Manifest};
 use rituals_compose::rust_name::other_spelling_clause;
-use rituals_compose::{generated_file, metadata, top_level};
+use rituals_compose::{metadata, top_level};
 
 /// `add`'s one argument: the name the new task will answer to.
 #[derive(clap::Args)]
@@ -70,9 +71,8 @@ fn run(command_line: &CommandLine, arguments: &AddArguments) -> Outcome {
 /// checking the more specific one first. Returns what `add` needs to write —
 /// nothing is written until every refusal here has passed.
 fn prepare(command_line: &CommandLine, arguments: &AddArguments) -> Result<Import, Failure> {
-    let name = Name::new(&arguments.name)?;
-    generated_file::ensure_key_hides_no_crate(&name)?;
-    ensure_the_name_is_not_the_bin_name(&name, command_line.identity().binary_name())?;
+    let name = TaskKey::new(Name::new(&arguments.name)?)?;
+    ensure_the_name_is_not_the_bin_name(name.as_name(), command_line.identity().binary_name())?;
     top_level::ensure_command_is_free(command_line, name.as_str())?;
     let package = command_line.identity().package_name();
 
@@ -89,9 +89,9 @@ fn prepare(command_line: &CommandLine, arguments: &AddArguments) -> Result<Impor
     let regenerate = top_level::management_command(command_line, "regenerate");
     already_imported_refusal(
         package,
-        &name,
-        project.declares_dependency_key(&name),
-        project.lists_task(&name),
+        name.as_name(),
+        project.declares_dependency_key(name.as_name()),
+        project.lists_task(name.as_name()),
         &RemedyCommands {
             regenerate: &regenerate,
             import: &top_level::management_command(command_line, "import"),
@@ -111,15 +111,18 @@ fn prepare(command_line: &CommandLine, arguments: &AddArguments) -> Result<Impor
     if task_crate_dir.exists() {
         return Err(leftover_refusal(
             package,
-            &name,
+            name.as_name(),
             &task_crate_dir,
             &dependency_path,
             &regenerate,
         ));
     }
 
-    if document.has_workspace_member(&name) {
-        return Err(package_name_taken_refusal(&name, project.workspace_root()));
+    if document.has_workspace_member(name.as_name()) {
+        return Err(package_name_taken_refusal(
+            name.as_name(),
+            project.workspace_root(),
+        ));
     }
 
     // The same resolver `regenerate` runs, against the metadata already
