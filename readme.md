@@ -138,8 +138,11 @@ lint = { path = "../tasks/lint" }
 tasks = ["lint"]
 ```
 
+`cargo ritual import` writes both halves, the dependency and its entry in
+`tasks`, and regenerates the command line, so neither is edited by hand.
+
 The dependency key is the command name. Importing a crate under another name
-is one line of plain Cargo:
+is the key you give `import`, and it writes one line of plain Cargo:
 
 ```toml
 check = { package = "acme-linting", git = "https://github.com/acme/rituals" }
@@ -164,10 +167,10 @@ task, and bundles nest.
 
 ### Ritual's own commands are a bundle too
 
-`add`, `regenerate`, `new`, `create` and `remove` come from the bundle
-`rituals-core`, imported under the key `ritual`. A new project's command line
-is also called `ritual`, so those commands appear directly: `cargo ritual add`,
-not `cargo ritual ritual add`. If you name your command line something else,
+`add`, `regenerate`, `new`, `create`, `import` and `remove` come from the
+bundle `rituals-core`, imported under the key `ritual`. A new project's
+command line is also called `ritual`, so those commands appear directly:
+`cargo ritual add`, not `cargo ritual ritual add`. If you name your command line something else,
 with `ritual new demo --cli acme`, they stay grouped: your tasks run as
 `cargo acme <task>` and ritual's as `cargo acme ritual add`.
 
@@ -190,18 +193,35 @@ manifest, and regenerates. Edit `tasks/lint/src/lib.rs`, then run
 
 ### Import a task from somewhere else
 
-Add the task crate as a dependency of the CLI crate, `ritual/Cargo.toml`,
-and append its key to `tasks`:
+Run this anywhere inside the project. The crate comes from the registry by
+default, and `@` picks a version other than the newest:
 
-```toml
-[dependencies]
-lint = { git = "https://github.com/acme/rituals" }
-
-[package.metadata.ritual]
-tasks = ["ritual", "lint"]
+```sh
+cargo ritual import acme-linting@1.2.0 lint
 ```
 
-Then run `cargo ritual regenerate`.
+The second word is the key the task answers to, so this one runs as
+`cargo ritual lint`. Without it, the key is the crate's name.
+
+A crate in a git repository takes `--git`, with at most one of `--branch`,
+`--tag` or `--rev`:
+
+```sh
+cargo ritual import acme-linting lint --git https://github.com/acme/rituals --tag v1.2.0
+```
+
+A crate in a directory takes `--path`:
+
+```sh
+cargo ritual import lint --path ../lint
+```
+
+`import` adds the dependency to the CLI crate, lists its key in `tasks`, and
+regenerates, so the task runs as soon as it finishes. It refuses a crate that
+is not a task, or a task built on another `rituals` than the project uses,
+whether another release or the same release from another source, and whether
+the crate depends on it directly or through a crate whose task it re-exports.
+A refusal leaves the project as it found it.
 
 To write a task crate that several projects can share, run this outside any
 Cargo workspace, since the crate has to build on its own:
@@ -210,7 +230,7 @@ Cargo workspace, since the crate has to build on its own:
 ritual create lint
 ```
 
-It ends by printing the dependency line to add to a project, with the
+It ends by printing the `import` command to run in a project, with the
 crate's path filled in.
 
 ### Remove a task
@@ -282,8 +302,8 @@ anywhere in the project.
 ### Inside a project, use `cargo ritual`
 
 `cargo ritual` works from any directory inside the project. The global
-`ritual` carries `add`, `regenerate` and `remove` too, but they refuse in
-your project: use `cargo ritual add`.
+`ritual` carries `add`, `regenerate`, `import` and `remove` too, but they
+refuse in your project: use `cargo ritual add`.
 
 ## Where next
 

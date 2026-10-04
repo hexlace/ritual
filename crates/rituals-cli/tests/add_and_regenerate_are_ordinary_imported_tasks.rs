@@ -1,9 +1,9 @@
 //! `add` and `regenerate` are ordinary imported tasks, not framework
 //! built-ins. A scaffolded project imports ritual's management bundle —
-//! `rituals-core`, whose children are `add`, `regenerate`, `new`, `create`
-//! and `remove` — the way it imports any task: a Cargo dependency, sourced from
-//! the same `--path` checkout as `rituals`, plus one entry, `ritual`, in
-//! `[package.metadata.ritual] tasks`. Nothing is reserved for those tasks at
+//! `rituals-core`, whose children are `add`, `regenerate`, `new`, `create`,
+//! `import` and `remove` — the way it imports any task: a Cargo dependency,
+//! sourced from the same `--path` checkout as `rituals`, plus one entry,
+//! `ritual`, in `[package.metadata.ritual] tasks`. Nothing is reserved for those tasks at
 //! the assembly step: dropping the bundle the way any import is dropped
 //! drops all of them from the command line.
 //!
@@ -59,7 +59,15 @@ fn assert_help_lists_the_bundles_children_in_order(project: &Project) -> TestOut
 
     assert_eq!(
         help::command_names(&help.stdout),
-        ["add", "regenerate", "new", "create", "remove", "help"],
+        [
+            "add",
+            "regenerate",
+            "new",
+            "create",
+            "import",
+            "remove",
+            "help"
+        ],
         "stdout was:\n{}",
         help.stdout
     );
@@ -99,6 +107,7 @@ fn assert_a_later_task_follows_the_bundle(project: &Project) -> TestOutcome {
             "regenerate",
             "new",
             "create",
+            "import",
             "remove",
             "greet",
             "help"

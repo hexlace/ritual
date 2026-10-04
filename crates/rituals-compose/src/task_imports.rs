@@ -22,6 +22,7 @@ use rituals::Failure;
 
 use crate::metadata::{self, Dependency, Metadata, Package};
 use crate::paths::lies_under;
+use crate::rust_name::extern_identifier;
 use crate::{project, task_list};
 
 /// One key in a composed CLI's `[package.metadata.ritual] tasks` list, and
@@ -59,20 +60,29 @@ use crate::{project, task_list};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskImport<'a> {
     key: &'a str,
-    package_name: Option<&'a str>,
+    dependency: Option<DependencyLine<'a>>,
     directory: Option<&'a Path>,
     is_workspace_member: bool,
     other_dependents: Vec<&'a str>,
     members_inside: Vec<&'a str>,
 }
 
+/// The composed CLI's dependency line behind a key: the key it is written
+/// under, which Rust reads as the same name as the `tasks` key, and the
+/// package it names. One value, so a key cannot have one without the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DependencyLine<'a> {
+    key: &'a str,
+    package_name: &'a str,
+}
+
 impl<'a> TaskImport<'a> {
     /// A key whose dependency, if it has one, resolves to nothing: no
     /// package, no directory, not a member, nothing depending on it.
-    const fn unresolved(key: &'a str, package_name: Option<&'a str>) -> Self {
+    const fn unresolved(key: &'a str, dependency: Option<DependencyLine<'a>>) -> Self {
         Self {
             key,
-            package_name,
+            dependency,
             directory: None,
             is_workspace_member: false,
             other_dependents: Vec::new(),
@@ -80,11 +90,25 @@ impl<'a> TaskImport<'a> {
         }
     }
 
-    /// The key as `[package.metadata.ritual] tasks` spells it, which is also
-    /// the dependency key in the manifest.
+    /// The key as `[package.metadata.ritual] tasks` spells it.
     #[must_use]
     pub const fn key(&self) -> &'a str {
         self.key
+    }
+
+    /// The key the dependency is written under in the composed CLI's
+    /// manifest, or `None` when no normal dependency of the composed CLI has
+    /// this key.
+    ///
+    /// Rust reads `-` and `_` in a dependency key as one name, so this is
+    /// [`TaskImport::key`] or its other spelling: a `tasks` entry `a-b` is
+    /// mounted from a dependency written `a_b`, the same way
+    /// [`Metadata::resolve_task_list`](crate::metadata::Metadata::resolve_task_list)
+    /// finds it. A task that edits the dependency line edits it under this
+    /// key.
+    #[must_use]
+    pub fn dependency_key(&self) -> Option<&'a str> {
+        self.dependency.map(|dependency| dependency.key)
     }
 
     /// The name of the package the key imports, or `None` when no normal
@@ -93,8 +117,8 @@ impl<'a> TaskImport<'a> {
     /// A dev- or build-dependency under the key does not count: a task is
     /// mounted from a normal dependency.
     #[must_use]
-    pub const fn package_name(&self) -> Option<&'a str> {
-        self.package_name
+    pub fn package_name(&self) -> Option<&'a str> {
+        self.dependency.map(|dependency| dependency.package_name)
     }
 
     /// The directory the dependency's `path` points at, or `None` for a
@@ -179,17 +203,20 @@ fn import_under<'a>(
     let Some(dependency) = declared_dependency(cli_package, key) else {
         return Ok(TaskImport::unresolved(key, None));
     };
-    let package_name = Some(dependency.name.as_str());
+    let line = Some(DependencyLine {
+        key: dependency_key(dependency),
+        package_name: &dependency.name,
+    });
 
     let Some(edge) = resolved_edge(metadata, cli_package, key) else {
-        return Ok(TaskImport::unresolved(key, package_name));
+        return Ok(TaskImport::unresolved(key, line));
     };
     let Some(resolved) = metadata
         .packages
         .iter()
         .find(|package| package.id == edge.pkg)
     else {
-        return Ok(TaskImport::unresolved(key, package_name));
+        return Ok(TaskImport::unresolved(key, line));
     };
 
     let directory = dependency.path.as_deref();
@@ -199,7 +226,7 @@ fn import_under<'a>(
 
     Ok(TaskImport {
         key,
-        package_name,
+        dependency: line,
         directory,
         is_workspace_member: metadata.workspace_members.contains(&resolved.id),
         other_dependents: other_dependents(metadata, cli_package, key, resolved, directory),
@@ -209,18 +236,27 @@ fn import_under<'a>(
     })
 }
 
-/// The composed CLI's normal dependency that `key` names, matched by its
-/// `package = "…"` rename or, without one, its own name. One declared on
+/// The composed CLI's normal dependency that `key` names, matched by the
+/// key it is written under, read the way Rust reads it. One declared on
 /// every target is preferred over one under a `cfg(...)` predicate.
 fn declared_dependency<'a>(cli_package: &'a Package, key: &str) -> Option<&'a Dependency> {
     cli_package
         .dependencies
         .iter()
-        .filter(|dependency| {
-            dependency.kind.is_none()
-                && dependency.rename.as_deref().unwrap_or(&dependency.name) == key
-        })
+        .filter(|dependency| dependency.kind.is_none() && is_written_under(dependency, key))
         .min_by_key(|dependency| dependency.target.is_some())
+}
+
+/// The key `dependency` is written under: its `package = "…"` rename or,
+/// without one, its own name.
+fn dependency_key(dependency: &Dependency) -> &str {
+    dependency.rename.as_deref().unwrap_or(&dependency.name)
+}
+
+/// Whether `dependency` is written under `key`, or under the other spelling
+/// of it, which Rust reads as the same name.
+fn is_written_under(dependency: &Dependency, key: &str) -> bool {
+    extern_identifier(dependency_key(dependency)) == extern_identifier(key)
 }
 
 /// The resolved edge from the composed CLI to the package `key` imports.
@@ -233,7 +269,7 @@ fn resolved_edge<'a>(
     cli_package: &Package,
     key: &str,
 ) -> Option<&'a crate::metadata::NodeDependency> {
-    let extern_name = key.replace('-', "_");
+    let extern_name = extern_identifier(key);
     metadata
         .resolve
         .nodes
@@ -286,7 +322,7 @@ fn other_dependents<'a>(
         let declares_it = package.dependencies.iter().any(|dependency| {
             let is_keys_line = package.id == cli_package.id
                 && dependency.kind.is_none()
-                && dependency.rename.as_deref().unwrap_or(&dependency.name) == key;
+                && is_written_under(dependency, key);
             !is_keys_line
                 && directory.map_or_else(
                     || dependency.name == resolved.name,
@@ -777,6 +813,27 @@ mod tests {
 
         let imports = read(&metadata, "demo-ritual")?;
 
+        assert_eq!(
+            imports[0].directory(),
+            Some(Path::new("/scrubbed/checkout/task-true"))
+        );
+        Ok(())
+    }
+
+    /// The fixture's dependency is written `task-true`; listed as
+    /// `task_true`, the key reaches it the way the resolver does, and says
+    /// the spelling the dependency line is written under.
+    #[test]
+    fn a_key_reaches_a_dependency_written_with_its_other_spelling() -> TestOutcome {
+        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        list_tasks(&mut metadata, &["task_true"]);
+
+        let imports = read(&metadata, "demo-ritual")?;
+
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].key(), "task_true");
+        assert_eq!(imports[0].dependency_key(), Some("task-true"));
+        assert_eq!(imports[0].package_name(), Some("task-true"));
         assert_eq!(
             imports[0].directory(),
             Some(Path::new("/scrubbed/checkout/task-true"))

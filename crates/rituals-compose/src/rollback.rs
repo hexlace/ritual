@@ -17,6 +17,10 @@
 //! `std::fs` write or a command not run through [`Changes::run_changing`], is
 //! not recorded at all.
 //!
+//! [`Changes::recorded_as_absent`] says what a run found when it first
+//! recorded a file, for a run that reports a file as created rather than
+//! updated.
+//!
 //! The promise covers a run that returns a failure. A run that panics is not
 //! undone.
 //!
@@ -71,7 +75,9 @@ use rituals::Failure;
 /// every change was undone, or, when something could not be, every path
 /// that was not put back, followed by `"— check it before <retry>"`.
 /// `retry` is the caller's own, because only the caller knows what a person
-/// types to try again: `add` passes ``"running `add lint` again"``.
+/// types to try again: `add` passes ``"running `add lint` again"``. A full
+/// stop ending the failure is dropped first, because the report continues
+/// its sentence.
 ///
 /// # Examples
 ///
@@ -400,6 +406,45 @@ impl Changes {
         Ok(())
     }
 
+    /// Whether this run recorded `path` and found no file there, so that a
+    /// file now at `path` is one the run made, whoever wrote it.
+    ///
+    /// Answers for what the run found when it first recorded `path`, however
+    /// many times it has written it since, and is false for a path the run
+    /// never recorded.
+    ///
+    /// # Examples
+    ///
+    /// A run reports a lockfile as created, not updated, when there was none
+    /// before it:
+    ///
+    /// ```
+    /// use rituals_compose::rollback;
+    ///
+    /// # let directory = std::env::temp_dir()
+    /// #     .join(format!("rituals-compose-doctest-rollback-absent-{}", std::process::id()));
+    /// # std::fs::create_dir_all(&directory)?;
+    /// let lockfile = directory.join("Cargo.lock");
+    ///
+    /// let verb = rollback::attempt("running `import lint` again", |changes| {
+    ///     changes.write(&lockfile, "version = 4\n")?;
+    ///     Ok(if changes.recorded_as_absent(&lockfile) { "created" } else { "updated" })
+    /// })?;
+    ///
+    /// assert_eq!(verb, "created");
+    /// # std::fs::remove_dir_all(&directory)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn recorded_as_absent(&self, path: &Path) -> bool {
+        self.steps.iter().any(|step| {
+            matches!(
+                step,
+                Step::File { path: recorded, original: None } if recorded == path
+            )
+        })
+    }
+
     /// Undoes every recorded change, most recent first, and returns
     /// `failure` extended with what happened to the project. Every step is
     /// attempted whatever happened to the ones before it, and each one that
@@ -411,6 +456,11 @@ impl Changes {
                 not_restored.push(step.path().display().to_string());
             }
         }
+
+        // The report continues the failure's sentence after a semicolon, so
+        // the full stop that ended it, which several refusals carry, goes.
+        let failure = failure.to_string();
+        let failure = failure.strip_suffix('.').unwrap_or(&failure);
 
         if not_restored.is_empty() {
             return Failure::new(format!(
@@ -945,6 +995,101 @@ mod tests {
             )
         );
         assert!(task.exists(), "a directory the run did not create stays");
+        Ok(())
+    }
+
+    /// `top_level`'s refusals end in a full stop, and the rollback's report
+    /// continues the sentence after a semicolon, so a stop left in place
+    /// reads `.;`.
+    #[test]
+    fn a_failure_ending_in_a_full_stop_is_continued_without_one() {
+        let outcome = attempt(RETRY, |_changes| {
+            Err::<(), _>(Failure::new("`add` would be a top-level command twice."))
+        });
+
+        let Err(reported) = outcome else {
+            unreachable!("a run that always ends in Err cannot succeed");
+        };
+        assert_eq!(
+            reported.to_string(),
+            "`add` would be a top-level command twice; ritual put the project back as it \
+             found it"
+        );
+    }
+
+    /// The same join when something could not be put back, where the report
+    /// continues with `except for` instead.
+    #[test]
+    fn a_failure_ending_in_a_full_stop_is_continued_without_one_when_a_restore_fails() -> TestOutcome
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = ScratchDir::new("rollback-full-stop-restore-fails")?;
+        let locked = scratch.path().join("locked");
+        std::fs::create_dir(&locked)?;
+        let created = locked.join("Cargo.lock");
+        let mut enforced = true;
+
+        let outcome = attempt(RETRY, |changes| {
+            changes.write(&created, "version = 4\n")?;
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555))
+                .map_err(|error| Failure::new("setup").caused_by(error))?;
+            enforced = write_permission_is_enforced(&locked);
+            Err::<(), _>(Failure::new("refused."))
+        });
+
+        // Before any assertion can return early, so the scratch directory
+        // can still be removed on drop.
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755))?;
+
+        if !enforced {
+            crate::test_support::report_skip(
+                "a_failure_ending_in_a_full_stop_is_continued_without_one_when_a_restore_fails \
+                 could not demonstrate a failed removal because this process does not honour \
+                 directory write permissions",
+            );
+            return Ok(());
+        }
+        let reported = outcome.err().ok_or("expected the run to fail")?.to_string();
+        assert!(
+            reported.starts_with("refused; ritual put the project back except for "),
+            "expected the full stop trimmed before the continuation; got: {reported}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_file_recorded_as_absent_is_reported_absent_and_one_that_was_there_is_not() -> TestOutcome {
+        // Verifies `recorded_as_absent` answers what the run found when it
+        // recorded each path: a missing file is absent, a present one is
+        // not, and a path the run never recorded says nothing either way.
+        let scratch = ScratchDir::new("rollback-recorded-as-absent")?;
+        let missing = scratch.path().join("Cargo.lock");
+        let present = scratch.path().join("Cargo.toml");
+        let unrecorded = scratch.path().join("notes.txt");
+        std::fs::write(&present, "[workspace]\n")?;
+
+        let mut changes = Changes::new();
+        changes.record_file(&missing)?;
+        changes.record_file(&present)?;
+
+        assert!(changes.recorded_as_absent(&missing));
+        assert!(!changes.recorded_as_absent(&present));
+        assert!(!changes.recorded_as_absent(&unrecorded));
+        Ok(())
+    }
+
+    /// The first record is the one that holds what the project had, so a
+    /// file the run wrote after recording it as absent is still absent.
+    #[test]
+    fn a_file_the_run_has_since_written_is_still_recorded_as_absent() -> TestOutcome {
+        let scratch = ScratchDir::new("rollback-absent-then-written")?;
+        let path = scratch.path().join("Cargo.lock");
+
+        let mut changes = Changes::new();
+        changes.write(&path, "version = 4\n")?;
+
+        assert!(changes.recorded_as_absent(&path));
         Ok(())
     }
 

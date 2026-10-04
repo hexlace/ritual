@@ -1,6 +1,6 @@
-//! The one check `add` and `regenerate` run before they write: whether a
-//! command name a project is about to mount is still free at the top level
-//! of the command line currently running.
+//! The one check `add`, `import` and `regenerate` run before they write:
+//! whether a command name a project is about to mount is still free at the
+//! top level of the command line currently running.
 
 use rituals::{CommandLine, Failure, Outcome};
 
@@ -127,7 +127,7 @@ pub const MANAGEMENT_BUNDLE_KEY: &str = "ritual";
 ///
 /// let default = CommandLine::from_dispatch(
 ///     Identity::from_macro_expansion("demo-ritual", "ritual", "0.1.0"),
-///     ["add", "regenerate", "new", "create", "remove"],
+///     ["add", "regenerate", "new", "create", "import", "remove"],
 /// );
 /// assert_eq!(top_level::management_command(&default, "regenerate"), "cargo ritual regenerate");
 ///
@@ -175,7 +175,7 @@ mod tests {
     fn a_hint_is_flat_when_the_command_line_is_named_after_rituals_bundle() {
         let command_line = rituals::CommandLine::from_dispatch(
             Identity::from_macro_expansion("demo-ritual", "ritual", "0.1.0"),
-            ["add", "regenerate", "new", "create", "remove"],
+            ["add", "regenerate", "new", "create", "import", "remove"],
         );
         assert_eq!(
             management_command(&command_line, "regenerate"),

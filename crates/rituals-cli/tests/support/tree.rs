@@ -111,6 +111,19 @@ pub(crate) fn snapshot_tree(root: &Path) -> Outcome<Snapshot> {
         .collect()
 }
 
+/// The bytes of the lockfile at the root of `root`, or `None` when there is
+/// none. [`snapshot_tree`] leaves the lockfile out, because other stories
+/// let it change; a story about a run that must leave the project as it found
+/// it, a lockfile it did not have included, reads it here.
+pub(crate) fn lockfile(root: &Path) -> Outcome<Option<Vec<u8>>> {
+    let path = root.join("Cargo.lock");
+    match fs::read(&path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).context(&format!("reading {} failed", path.display())),
+    }
+}
+
 /// The paths whose presence or content differs between two snapshots, in
 /// path order.
 pub(crate) fn changed_paths(before: &Snapshot, after: &Snapshot) -> Vec<PathBuf> {

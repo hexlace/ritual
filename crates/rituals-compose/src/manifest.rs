@@ -4,9 +4,10 @@
 
 use std::path::{Path, PathBuf};
 
-use rituals::{Failure, Name};
+use rituals::Failure;
 use toml_edit::{Array, DocumentMut, InlineTable, Item, RawString, Value};
 
+use crate::generated_file::TaskKey;
 use crate::rollback::Changes;
 
 mod entry_removal;
@@ -207,6 +208,7 @@ impl Manifest {
     ///
     /// ```
     /// use rituals::Name;
+    /// use rituals_compose::generated_file::TaskKey;
     /// use rituals_compose::manifest::Manifest;
     /// use rituals_compose::rollback;
     ///
@@ -219,7 +221,7 @@ impl Manifest {
     /// #     "[dependencies]\n\n[package.metadata.ritual]\ntasks = []\n",
     /// # )?;
     /// let mut manifest = Manifest::read(&manifest_path)?;
-    /// let name = Name::new("lint")?;
+    /// let name = TaskKey::new(Name::new("lint")?)?;
     ///
     /// manifest.import_task(&name, "../tasks/lint")?;
     /// rollback::attempt("running `add lint` again", |changes| manifest.write(changes))?;
@@ -235,7 +237,7 @@ impl Manifest {
     /// # std::fs::remove_dir_all(&directory)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn import_task(&mut self, name: &Name, dependency_path: &str) -> Result<(), Failure> {
+    pub fn import_task(&mut self, name: &TaskKey, dependency_path: &str) -> Result<(), Failure> {
         // Both destinations are resolved, read-only, before either is
         // written — the refusal below must be reachable with the document
         // still exactly as `Manifest::read` left it, not after the
@@ -249,21 +251,12 @@ impl Manifest {
                     self.path.display()
                 ))
             })?;
-        self.document
-            .get("package")
-            .and_then(Item::as_table)
-            .and_then(|package| package.get("metadata"))
-            .and_then(Item::as_table)
-            .and_then(|metadata| metadata.get("ritual"))
-            .and_then(Item::as_table)
-            .and_then(|ritual| ritual.get("tasks"))
-            .and_then(Item::as_array)
-            .ok_or_else(|| {
-                Failure::new(format!(
-                    "{} has no [package.metadata.ritual] tasks list to add `{name}` to",
-                    self.path.display()
-                ))
-            })?;
+        if self.tasks_list_mut().is_none() {
+            return Err(Failure::new(format!(
+                "{} has no [package.metadata.ritual] tasks list to add `{name}` to",
+                self.path.display()
+            )));
+        }
 
         // Both destinations exist, so both re-fetches below are infallible:
         // nothing between the checks above and here can have changed the
@@ -278,22 +271,90 @@ impl Manifest {
         inline.insert("path", Value::from(dependency_path));
         dependencies.insert(name.as_str(), Item::Value(Value::from(inline)));
 
-        let tasks = self
-            .document
-            .get_mut("package")
-            .and_then(Item::as_table_mut)
-            .and_then(|package| package.get_mut("metadata"))
-            .and_then(Item::as_table_mut)
-            .and_then(|metadata| metadata.get_mut("ritual"))
-            .and_then(Item::as_table_mut)
-            .and_then(|ritual| ritual.get_mut("tasks"))
-            .and_then(Item::as_array_mut)
-            .unwrap_or_else(|| {
-                unreachable!("[package.metadata.ritual] tasks checked present above")
-            });
+        let tasks = self.tasks_list_mut().unwrap_or_else(|| {
+            unreachable!("[package.metadata.ritual] tasks checked present above")
+        });
         push_matching_style(tasks, name.as_str());
 
         Ok(())
+    }
+
+    /// Appends `key` to `[package.metadata.ritual] tasks`, and writes
+    /// nothing else.
+    ///
+    /// This is the list half of an import, for a dependency somebody else
+    /// wrote: `cargo add` has already declared it, so only the list that
+    /// makes it a command is left to edit. [`Manifest::import_task`] writes
+    /// both halves, for a dependency ritual writes itself. Like every append
+    /// here, only the positioning of the list's last entry is copied, so the
+    /// change is one line in a diff and its comments stay where they were.
+    ///
+    /// Each table on the way to the list is read as the TOML table it is,
+    /// whether it is written as `[package.metadata.ritual]` or inline as
+    /// `metadata = { ritual = { tasks = [] } }`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`Failure`] naming [`Manifest::path`] when there is no
+    /// `[package.metadata.ritual] tasks` list, leaving the document as it
+    /// was.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rituals::Name;
+    /// use rituals_compose::generated_file::TaskKey;
+    /// use rituals_compose::manifest::Manifest;
+    /// use rituals_compose::rollback;
+    ///
+    /// # let directory = std::env::temp_dir()
+    /// #     .join(format!("rituals-compose-doctest-manifest-append-task-{}", std::process::id()));
+    /// # std::fs::create_dir_all(&directory)?;
+    /// let manifest_path = directory.join("Cargo.toml");
+    /// # std::fs::write(
+    /// #     &manifest_path,
+    /// #     "[dependencies]\ngreeter = \"0.1.0\"\n\n[package.metadata.ritual]\ntasks = [\"new\"]\n",
+    /// # )?;
+    /// let mut manifest = Manifest::read(&manifest_path)?;
+    ///
+    /// // `cargo add` wrote the dependency; the list is what is left to edit.
+    /// manifest.append_task(&TaskKey::new(Name::new("greeter")?)?)?;
+    /// rollback::attempt("running `import greeter` again", |changes| manifest.write(changes))?;
+    ///
+    /// let on_disk = std::fs::read_to_string(&manifest_path)?;
+    /// assert!(on_disk.contains("tasks = [\"new\", \"greeter\"]"));
+    /// # std::fs::remove_dir_all(&directory)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn append_task(&mut self, key: &TaskKey) -> Result<(), Failure> {
+        let path = self.path.display().to_string();
+        let tasks = self.tasks_list_mut().ok_or_else(|| {
+            Failure::new(format!(
+                "{path} has no [package.metadata.ritual] tasks list to add `{key}` to"
+            ))
+        })?;
+
+        push_matching_style(tasks, key.as_str());
+        Ok(())
+    }
+
+    /// Finds `[package.metadata.ritual] tasks`, the one list every task that
+    /// edits it appends to.
+    ///
+    /// Each table on the way is read as the TOML table it is, whether it is
+    /// written as a `[package.metadata.ritual]` header or inline as
+    /// `metadata = { ritual = { tasks = [] } }`, because Cargo reads both as
+    /// the same list and so must every writer of it.
+    fn tasks_list_mut(&mut self) -> Option<&mut Array> {
+        self.document
+            .get_mut("package")
+            .and_then(Item::as_table_like_mut)
+            .and_then(|package| package.get_mut("metadata"))
+            .and_then(Item::as_table_like_mut)
+            .and_then(|metadata| metadata.get_mut("ritual"))
+            .and_then(Item::as_table_like_mut)
+            .and_then(|ritual| ritual.get_mut("tasks"))
+            .and_then(Item::as_array_mut)
     }
 }
 
@@ -609,6 +670,7 @@ mod tests {
     use super::{
         Manifest, declares_a_task_crate, declares_a_workspace, dependency_path, push_matching_style,
     };
+    use crate::generated_file::TaskKey;
     use crate::paths::normalize;
     use crate::test_support::{ScratchDir, TestOutcome};
 
@@ -902,12 +964,33 @@ mod tests {
             "[dependencies]\nrituals.workspace = true\n\n\
              [package.metadata.ritual]\ntasks = [\"new\"]\n",
         )?;
-        let name = Name::new("lint")?;
+        let name = TaskKey::new(Name::new("lint")?)?;
         let result = manifest.import_task(&name, "../tasks/lint");
         assert!(result.is_ok(), "expected the edit to succeed: {result:?}");
         let rendered = manifest.document.to_string();
         assert!(rendered.contains("lint = { path = \"../tasks/lint\" }"));
         assert!(rendered.contains("tasks = [\"new\", \"lint\"]"));
+        Ok(())
+    }
+
+    /// Cargo reads `metadata = { ritual = { tasks = [] } }` as the same list
+    /// as `[package.metadata.ritual] tasks`, so `add` and `import` must both
+    /// find it there rather than one of them refusing a manifest Cargo
+    /// accepts.
+    #[test]
+    fn importing_a_task_reads_inline_tables_as_tables_too() -> TestOutcome {
+        let (_scratch, mut manifest) = manifest(
+            "import-task-inline",
+            "[dependencies]\nrituals.workspace = true\n\n\
+             [package]\nname = \"demo-ritual\"\n\
+             metadata = { ritual = { tasks = [\"ritual\"] } }\n",
+        )?;
+
+        manifest.import_task(&TaskKey::new(Name::new("lint")?)?, "../tasks/lint")?;
+
+        let rendered = manifest.document.to_string();
+        assert!(rendered.contains("lint = { path = \"../tasks/lint\" }"));
+        assert!(rendered.contains("metadata = { ritual = { tasks = [\"ritual\", \"lint\"] } }"));
         Ok(())
     }
 
@@ -922,7 +1005,7 @@ mod tests {
             "import-task-no-tasks-list",
             "[dependencies]\nrituals.workspace = true\n",
         )?;
-        let name = Name::new("lint")?;
+        let name = TaskKey::new(Name::new("lint")?)?;
         let before = manifest.document.to_string();
 
         let result = manifest.import_task(&name, "../tasks/lint");
@@ -947,7 +1030,7 @@ mod tests {
             "import-task-no-dependencies-table",
             "[package.metadata.ritual]\ntasks = []\n",
         )?;
-        let name = Name::new("lint")?;
+        let name = TaskKey::new(Name::new("lint")?)?;
         let before = manifest.document.to_string();
 
         let result = manifest.import_task(&name, "../tasks/lint");
@@ -958,6 +1041,96 @@ mod tests {
             before,
             "the document must be unchanged when import_task is refused"
         );
+        Ok(())
+    }
+
+    /// A manifest whose tasks list a person laid out and commented, to see
+    /// that appending to it is the one added line and nothing else moves.
+    const COMMENTED_MANIFEST: &str = "[package]\nname = \"demo-ritual\"\n\n\
+        [package.metadata.ritual]\n# what this command line runs\ntasks = [\n    \"ritual\",\n    \"wake\", # first\n]\n";
+
+    #[test]
+    fn appending_a_task_is_one_added_line_and_keeps_the_comments() -> TestOutcome {
+        let (_scratch, mut manifest) = manifest("append-task-commented", COMMENTED_MANIFEST)?;
+
+        manifest.append_task(&TaskKey::new(Name::new("greeter")?)?)?;
+
+        assert_eq!(
+            manifest.document.to_string(),
+            "[package]\nname = \"demo-ritual\"\n\n\
+             [package.metadata.ritual]\n# what this command line runs\ntasks = [\n    \"ritual\",\n    \"wake\", # first\n    \"greeter\",\n]\n"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn appending_a_task_to_an_empty_list_fills_it() -> TestOutcome {
+        let (_scratch, mut manifest) = manifest(
+            "append-task-empty",
+            "[package.metadata.ritual]\ntasks = []\n",
+        )?;
+
+        manifest.append_task(&TaskKey::new(Name::new("greeter")?)?)?;
+
+        assert_eq!(
+            manifest.document.to_string(),
+            "[package.metadata.ritual]\ntasks = [\"greeter\"]\n"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn appending_a_task_reads_inline_tables_as_tables_too() -> TestOutcome {
+        let (_scratch, mut manifest) = manifest(
+            "append-task-inline",
+            "[package]\nname = \"demo-ritual\"\nmetadata = { ritual = { tasks = [\"ritual\"] } }\n",
+        )?;
+
+        manifest.append_task(&TaskKey::new(Name::new("greeter")?)?)?;
+
+        assert_eq!(
+            manifest.document.to_string(),
+            "[package]\nname = \"demo-ritual\"\n\
+             metadata = { ritual = { tasks = [\"ritual\", \"greeter\"] } }\n"
+        );
+        Ok(())
+    }
+
+    /// Each manifest here is missing the list at a different depth, from the
+    /// whole `[package]` table down to a `tasks` that is not a list, and each
+    /// must be refused naming the file and leave the document as it was.
+    #[test]
+    fn appending_a_task_with_no_list_to_append_to_is_refused_and_changes_nothing() -> TestOutcome {
+        let shapes = [
+            "[dependencies]\n",
+            "[package]\nname = \"demo-ritual\"\n",
+            "[package.metadata]\nother = true\n",
+            "[package.metadata.ritual]\ntask = true\n",
+            "[package.metadata.ritual]\ntasks = \"ritual\"\n",
+        ];
+        for (index, shape) in shapes.into_iter().enumerate() {
+            let (_scratch, mut manifest) =
+                manifest(&format!("append-task-missing-{index}"), shape)?;
+
+            let result = manifest.append_task(&TaskKey::new(Name::new("greeter")?)?);
+
+            assert!(result.is_err(), "expected {shape:?} to be refused");
+            if let Err(failure) = result {
+                assert_eq!(
+                    failure.to_string(),
+                    format!(
+                        "{} has no [package.metadata.ritual] tasks list to add `greeter` to",
+                        manifest.path().display()
+                    ),
+                    "for {shape:?}"
+                );
+            }
+            assert_eq!(
+                manifest.document.to_string(),
+                shape,
+                "the document must be unchanged when append_task is refused"
+            );
+        }
         Ok(())
     }
 

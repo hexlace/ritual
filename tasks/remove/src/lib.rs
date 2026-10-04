@@ -13,7 +13,7 @@ use removal::{Manifests, Member, Removal};
 use rituals::{CommandLine, Failure, Outcome, Task, clap};
 use rituals_compose::metadata::{self, Metadata, TaskImport};
 use rituals_compose::sentence::join_with_and;
-use rituals_compose::{cargo_config, top_level, workspace};
+use rituals_compose::{cargo_config, top_level};
 
 /// The package every composed command line's own commands come from: the
 /// bundle of `add`, `regenerate` and the rest, which nothing could put back
@@ -51,21 +51,27 @@ pub fn task() -> Task {
 fn run(command_line: &CommandLine, arguments: &RemoveArguments) -> Outcome {
     let current_dir = std::env::current_dir()
         .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
-    // Asked before anything runs that could write it: `cargo metadata`
-    // creates or rewrites a missing or stale lockfile, and a refusal has to
-    // be able to put it back.
-    let lockfile = workspace::lockfile(&current_dir)?;
+    // Where there is no project at all there is nothing to put back, so this
+    // is refused before the run that would say it put the project back.
+    metadata::ensure_inside_a_project(&current_dir, "remove", &arguments.name)?;
     removal::finish(command_line, &arguments.name, |changes| {
-        let document =
-            changes.run_changing(&[lockfile.as_path()], || metadata::fetch(&current_dir))?;
-        prepare(command_line, arguments, &document, &current_dir, lockfile)
+        // `cargo metadata` creates or rewrites a missing or stale lockfile,
+        // which this records first, so a refusal puts it back.
+        let document = metadata::fetch_in_its_own_project(
+            changes,
+            &current_dir,
+            command_line.identity().package_name(),
+            "remove",
+            &arguments.name,
+        )?;
+        prepare(command_line, arguments, &document, &current_dir)
     })
 }
 
 /// Reads the project and decides what `remove` would write, refusing when
 /// that would be unsafe. Runs inside the rollback, after the one read that
 /// can write, the `cargo metadata` that fetched `document`, so a refusal
-/// puts `lockfile` back as it was; everything here only reads.
+/// puts the lockfile back as it was; everything here only reads.
 ///
 /// The order is from the cheapest and most specific question to the widest:
 /// which task the argument names, whether it is the one task that cannot be
@@ -79,10 +85,8 @@ fn prepare(
     arguments: &RemoveArguments,
     document: &Metadata,
     current_dir: &Path,
-    lockfile: PathBuf,
 ) -> Result<Removal, Failure> {
     let package = command_line.identity().package_name();
-    document.ensure_runs_in_its_own_project(package, "remove", &arguments.name)?;
 
     let imports = document.task_imports(package)?;
     let remove_command = top_level::management_command(command_line, "remove");
@@ -108,7 +112,9 @@ fn prepare(
 
     // Dropped only when nothing else depends on the crate: another package's
     // own dependency on it would otherwise stop inheriting.
-    let drops_inherited_entry = manifests.cli().inherits_workspace_dependency(import.key())
+    let drops_inherited_entry = import
+        .dependency_key()
+        .is_some_and(|key| manifests.cli().inherits_workspace_dependency(key))
         && import.other_dependents().is_empty();
 
     let member = match (import.directory(), import.is_workspace_member()) {
@@ -121,7 +127,9 @@ fn prepare(
                 workspace_root: &workspace_root,
                 current_dir,
                 manifests: &manifests,
-                dropped_workspace_dependency: drops_inherited_entry.then(|| import.key()),
+                dropped_workspace_dependency: import
+                    .dependency_key()
+                    .filter(|_| drops_inherited_entry),
             },
             &format!("{remove_command} {}", arguments.name),
         )?),
@@ -130,11 +138,10 @@ fn prepare(
 
     Ok(Removal {
         key: import.key().to_string(),
-        has_dependency: import.package_name().is_some(),
+        dependency_key: import.dependency_key().map(str::to_string),
         drops_inherited_entry,
         manifests,
         workspace_root,
-        lockfile,
         member,
     })
 }

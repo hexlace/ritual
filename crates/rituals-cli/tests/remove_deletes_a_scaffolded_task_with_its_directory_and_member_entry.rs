@@ -63,7 +63,15 @@ fn removing_a_scaffolded_task_by_key_deletes_it_and_leaves_a_project_that_builds
         assert_help_lists(
             &project,
             "`remove greet`",
-            &["add", "regenerate", "new", "create", "remove", "help"],
+            &[
+                "add",
+                "regenerate",
+                "new",
+                "create",
+                "import",
+                "remove",
+                "help",
+            ],
         )?;
         help::assert_refuses_unrecognized_subcommand(&project.run_cli(&["greet"])?, "greet");
 

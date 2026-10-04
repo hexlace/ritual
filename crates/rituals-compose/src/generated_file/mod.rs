@@ -18,15 +18,16 @@
 mod entry;
 mod identifier;
 
-use std::fmt::Write as _;
+use std::fmt::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 pub use entry::Entry;
-use identifier::render_identifier;
-use rituals::{CommandLine, Failure, Outcome, report};
+use identifier::{hides_a_crate_the_file_names, render_identifier};
+use rituals::{CommandLine, Failure, Name, Outcome, report};
 
 use crate::metadata::Metadata;
 use crate::rollback::Changes;
+use crate::rust_name::extern_identifier;
 use crate::{metadata, top_level};
 
 /// Renders a composed command line's generated `main.rs`.
@@ -94,6 +95,103 @@ pub fn render(package_name: &str, entries: &[Entry]) -> String {
     output.push_str("}\n");
 
     output
+}
+
+/// A key for `[package.metadata.ritual] tasks` that the generated file can
+/// compile with.
+///
+/// [`TaskKey::new`] is the only way to make one, and it refuses a key whose
+/// extern-crate identifier is `std` or `core`, which the file reaches by
+/// those names: a dependency under either stands in for Rust's own crate. A
+/// command line that no longer compiles cannot run the command that would
+/// take the key back out, so every writer of the list takes a `TaskKey`
+/// rather than a [`Name`], and a writer that skips the rule does not
+/// compile. The rule is the same one the resolver asks of a list written by
+/// hand, so a key `import` refuses is one `regenerate` refuses.
+///
+/// # Examples
+///
+/// ```
+/// use rituals::Name;
+/// use rituals_compose::generated_file::TaskKey;
+///
+/// let key = TaskKey::new(Name::new("lint")?)?;
+/// assert_eq!(key.as_str(), "lint");
+///
+/// let refused = TaskKey::new(Name::new("std")?);
+/// assert!(refused.is_err());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskKey(Name);
+
+impl TaskKey {
+    /// Makes `name` a task key, once it is known to hide no crate the
+    /// generated file names.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`Failure`] naming the key and the crate it would hide.
+    pub fn new(name: Name) -> Result<Self, Failure> {
+        ensure_key_hides_no_crate(&name)?;
+        Ok(Self(name))
+    }
+
+    /// The key as the [`Name`] it was made from.
+    #[must_use]
+    pub const fn as_name(&self) -> &Name {
+        &self.0
+    }
+
+    /// The key as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// The [`Name`] this key was made from.
+    #[must_use]
+    pub fn into_name(self) -> Name {
+        self.0
+    }
+}
+
+impl fmt::Display for TaskKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, formatter)
+    }
+}
+
+impl AsRef<Name> for TaskKey {
+    fn as_ref(&self) -> &Name {
+        &self.0
+    }
+}
+
+impl AsRef<str> for TaskKey {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+/// Refuses a task key the generated file could not compile with: one whose
+/// extern-crate identifier is `std` or `core`.
+///
+/// One rule for [`TaskKey::new`], which every writer of a key goes through,
+/// and for the resolver that reads the list, so the two cannot disagree.
+///
+/// # Errors
+///
+/// Returns a [`Failure`] naming the key and the crate it would hide.
+pub(crate) fn ensure_key_hides_no_crate(key: &Name) -> Outcome {
+    let identifier = extern_identifier(key.as_str());
+    if hides_a_crate_the_file_names(&identifier) {
+        return Err(Failure::new(format!(
+            "`{key}` would hide Rust's own `{identifier}` crate, which the generated command \
+             line is built on, and it would no longer compile; give this task another key"
+        )));
+    }
+    Ok(())
 }
 
 /// Appends the second argument to `rituals::run` — an empty array on
@@ -195,11 +293,11 @@ pub fn regenerate(command_line: &CommandLine) -> Outcome {
 /// `directory` is where `cargo metadata` runs, as [`regenerate`] runs it
 /// from the current directory; any directory of the project will do.
 /// `cargo metadata` creates or rewrites `Cargo.lock` when it is missing or
-/// behind the manifests, so before it runs, the lockfile it would write is
-/// found with [`workspace::lockfile`](crate::workspace::lockfile) and
-/// recorded in `changes`: the workspace root's, whichever directory
-/// `directory` is. The caller has already checked that this command line
-/// runs inside its own project; this does not repeat the check.
+/// behind the manifests, so it runs through
+/// [`metadata::fetch_recording`], which
+/// records the workspace root's lockfile in `changes` first, whichever
+/// directory `directory` is. The caller has already checked that this
+/// command line runs inside its own project; this does not repeat the check.
 ///
 /// # Errors
 ///
@@ -236,8 +334,7 @@ pub fn regenerate_recording(
     command_line: &CommandLine,
     directory: &Path,
 ) -> Result<Regenerated, Failure> {
-    let lockfile = crate::workspace::lockfile(directory)?;
-    let document = changes.run_changing(&[lockfile.as_path()], || metadata::fetch(directory))?;
+    let document = metadata::fetch_recording(changes, directory)?;
 
     regenerate_from(command_line, &document, |path, content| {
         changes.write(path, content)
@@ -402,11 +499,35 @@ mod tests {
 
     use std::path::{Path, PathBuf};
 
-    use rituals::{CommandLine, Failure, Identity};
+    use rituals::{CommandLine, Failure, Identity, Name};
 
-    use super::{Entry, WriteOutcome, regenerate_recording, render, write_to_disk, write_with};
+    use super::{
+        Entry, TaskKey, WriteOutcome, regenerate_recording, render, write_to_disk, write_with,
+    };
     use crate::rollback;
     use crate::test_support::{ScratchDir, TestOutcome};
+
+    /// A key that would hide a crate the generated file names is never a
+    /// `TaskKey`, so no writer that takes one can put it in the list; any
+    /// other usable name is, unchanged.
+    #[test]
+    fn a_task_key_is_never_made_from_std_or_core() -> TestOutcome {
+        for hidden in ["std", "core"] {
+            let refused = TaskKey::new(Name::new(hidden)?).map_err(|failure| failure.to_string());
+            assert_eq!(
+                refused,
+                Err(format!(
+                    "`{hidden}` would hide Rust's own `{hidden}` crate, which the generated \
+                     command line is built on, and it would no longer compile; give this task \
+                     another key"
+                ))
+            );
+        }
+        let key = TaskKey::new(Name::new("lint")?)?;
+        assert_eq!(key.as_name(), &Name::new("lint")?);
+        assert_eq!(key.to_string(), "lint");
+        Ok(())
+    }
 
     #[test]
     fn zero_entries_render_as_one_empty_array_line() {
@@ -606,28 +727,37 @@ mod tests {
     /// A scratch project that `cargo metadata` can read without a network:
     /// a composed CLI crate called `demo-ritual` at the workspace root that
     /// imports one task, `hello`, by path, whose generated file does not yet
-    /// mount it. Returns the canonical workspace root, since `cargo
-    /// metadata` reports the root it resolved and a temp directory may be
-    /// behind a symbolic link.
+    /// mount it. Both depend on one `rituals`, a crate of that name beside
+    /// them, as a task and the command line mounting it must. Returns the
+    /// canonical workspace root, since `cargo metadata` reports the root it
+    /// resolved and a temp directory may be behind a symbolic link.
     fn a_project_with_a_stale_generated_file(
         scratch: &ScratchDir,
     ) -> Result<PathBuf, std::io::Error> {
         let root = fs::canonicalize(scratch.path())?;
         fs::create_dir_all(root.join("src"))?;
         fs::create_dir_all(root.join("hello/src"))?;
+        fs::create_dir_all(root.join("rituals/src"))?;
         fs::write(
             root.join("Cargo.toml"),
             "[package]\nname = \"demo-ritual\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
              [package.metadata.ritual]\ntasks = [\"hello\"]\n\n\
-             [dependencies]\nhello = { path = \"hello\" }\n\n[workspace]\n",
+             [dependencies]\nhello = { path = \"hello\" }\nrituals = { path = \"rituals\" }\n\n\
+             [workspace]\n",
         )?;
         fs::write(root.join("src/main.rs"), STALE_GENERATED_FILE)?;
         fs::write(
             root.join("hello/Cargo.toml"),
             "[package]\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+             [dependencies]\nrituals = { path = \"../rituals\" }\n\n\
              [package.metadata.ritual]\ntask = true\n",
         )?;
         fs::write(root.join("hello/src/lib.rs"), "")?;
+        fs::write(
+            root.join("rituals/Cargo.toml"),
+            "[package]\nname = \"rituals\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )?;
+        fs::write(root.join("rituals/src/lib.rs"), "")?;
         Ok(root)
     }
 

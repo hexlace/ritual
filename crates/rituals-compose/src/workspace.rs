@@ -18,11 +18,10 @@
 //! that run — see [`lockfile`].
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use rituals::{Failure, Outcome};
 
-use crate::manifest;
+use crate::{cargo, manifest};
 
 /// What `cargo locate-project` answered.
 pub(crate) enum Located {
@@ -33,19 +32,18 @@ pub(crate) enum Located {
 }
 
 /// Runs `cargo locate-project [--workspace] --message-format plain` in
-/// `directory`, through `$CARGO` when set.
+/// `directory`, through [`cargo::command`].
 ///
 /// A non-zero exit is one of the two answers this decision tree reads, not
 /// a tool failure — only a failure to run `cargo` at all is a [`Failure`].
 pub(crate) fn locate_project(directory: &Path, workspace: bool) -> Result<Located, Failure> {
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let mut arguments = vec!["locate-project"];
     if workspace {
         arguments.push("--workspace");
     }
     arguments.extend(["--message-format", "plain"]);
 
-    let output = Command::new(&cargo)
+    let output = cargo::command()
         .args(&arguments)
         .current_dir(directory)
         .output()
@@ -70,25 +68,29 @@ pub(crate) fn locate_project(directory: &Path, workspace: bool) -> Result<Locate
 /// nothing. A run that records this path in
 /// [`Changes`](crate::rollback::Changes) before running `cargo metadata` can
 /// put the lockfile back, byte for byte or to absent, whatever directory of
-/// the workspace it ran from.
+/// the workspace it ran from;
+/// [`metadata::fetch_recording`](crate::metadata::fetch_recording) does
+/// both, and is how this crate's own callers fetch.
 ///
 /// # Examples
 ///
 /// ```no_run
 /// use rituals::Failure;
-/// use rituals_compose::{metadata, rollback, workspace};
+/// use rituals_compose::{rollback, workspace};
 ///
 /// // Needs a real project on disk and runs `cargo`, so this example is
 /// // `no_run`.
 /// let directory = std::env::current_dir()
 ///     .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
 /// let lockfile = workspace::lockfile(&directory)?;
-/// rollback::attempt("running `remove lint` again", |changes| {
-///     let _document =
-///         changes.run_changing(&[lockfile.as_path()], || metadata::fetch(&directory))?;
-///     // ... a refusal from here on leaves the lockfile as it was found.
-///     Ok(())
+/// let created = rollback::attempt("running `import greeter` again", |changes| {
+///     changes.run_changing(&[lockfile.as_path()], || {
+///         // ... a subprocess that may write the lockfile.
+///         Ok(())
+///     })?;
+///     Ok(changes.recorded_as_absent(&lockfile))
 /// })?;
+/// println!("{}", if created { "created Cargo.lock" } else { "updated Cargo.lock" });
 /// # Ok::<(), Failure>(())
 /// ```
 ///

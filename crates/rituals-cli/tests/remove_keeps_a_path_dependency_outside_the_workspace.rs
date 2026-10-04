@@ -61,7 +61,15 @@ fn a_task_imported_from_outside_the_workspace_loses_only_its_dependency_line() -
         assert_help_lists(
             &project,
             "`remove chore`",
-            &["add", "regenerate", "new", "create", "remove", "help"],
+            &[
+                "add",
+                "regenerate",
+                "new",
+                "create",
+                "import",
+                "remove",
+                "help",
+            ],
         )
     })
 }

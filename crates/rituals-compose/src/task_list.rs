@@ -16,13 +16,15 @@
               module is private; see the note above"
 )]
 
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
-use rituals::{Failure, Name};
+use rituals::{Failure, Name, Outcome};
 
-use crate::generated_file::Entry;
-use crate::metadata::{DepKind, Metadata, Node, Package};
+use crate::generated_file::{self, Entry};
+use crate::metadata::{DepKind, Metadata, Node, NodeDependency, Package};
 use crate::project;
+use crate::rust_name::extern_identifier;
 use crate::sentence::join_with_and;
 
 /// Reads `package_name`'s `[package.metadata.ritual] tasks` list from
@@ -32,18 +34,22 @@ use crate::sentence::join_with_and;
 /// This is a pure read: nothing is written, and each check runs only once the
 /// one before it has succeeded — `package_name` found as a workspace member
 /// with one binary target, `tasks` present and a list of strings, each name
-/// valid, no duplicates, a matching normal dependency present on every target,
-/// that dependency resolved, and the resolved crate marked `task = true`. A
-/// name has to be valid before it can be matched to a dependency, and a
-/// dependency has to resolve before what it declares about itself can be read.
+/// valid and one the generated file compiles with, no duplicates, a matching
+/// normal dependency present on every target, that dependency resolved, the
+/// resolved crate marked `task = true`, and that crate built on the composed
+/// CLI's own `rituals`. A name has to be valid before it can be matched to a
+/// dependency, and a dependency has to resolve before what it declares about
+/// itself can be read.
 ///
 /// # Errors
 ///
 /// Returns a [`Failure`] naming the specific problem: a project that cannot
 /// be located, an absent or wrongly-shaped `tasks` list, an invalid or
-/// duplicated name, a name with no matching dependency, a dependency
-/// declared only under a `cfg(...)` target, or a dependency that resolves
-/// to a crate whose `task` value is missing, `false`, or not a boolean.
+/// duplicated name, a name that would hide `std` or `core`, a name with no
+/// matching dependency, a dependency declared only under a `cfg(...)`
+/// target, a dependency that resolves to a crate whose `task` value is
+/// missing, `false`, or not a boolean, or one built on another `rituals`
+/// than the composed CLI's, or on none.
 pub(crate) fn resolve(metadata: &Metadata, package_name: &str) -> Result<Vec<Entry>, Failure> {
     resolve_leaving_out(metadata, package_name, None)
 }
@@ -82,21 +88,49 @@ fn resolve_leaving_out(
     let task_names = validate_task_names(&task_name_strings)?;
     assert_no_duplicates(&task_names)?;
 
-    let node = metadata
-        .resolve
-        .nodes
-        .iter()
-        .find(|node| node.id == cli_package.id);
-    let Some(node) = node else {
-        // Every workspace member is its own resolve node — a cargo metadata
-        // invariant, not a condition this framework's caller can act on.
-        unreachable!("workspace member `{package_name}` has no resolve node");
-    };
+    let node = resolve_node_of(metadata, cli_package, package_name);
 
     task_names
         .into_iter()
-        .map(|name| resolve_one(&name, package_name, node, &metadata.packages))
+        .map(|name| resolve_one(&name, package_name, node, metadata))
         .collect()
+}
+
+/// Refuses unless `package_name`'s dependency under `key` is a task: found
+/// the way [`resolve_one`] finds the one a listed name stands for, and judged
+/// by the same [`declaration`], so what this accepts the resolver accepts
+/// once `key` is in the list.
+///
+/// Reached through [`crate::metadata::Metadata::ensure_dependency_is_a_task`].
+/// Its refusals are for a key that is not in the list yet, so none of them
+/// says it is named there.
+pub(crate) fn ensure_dependency_is_a_task(
+    metadata: &Metadata,
+    package_name: &str,
+    key: &Name,
+) -> Outcome {
+    let project = project::locate(metadata, package_name)?;
+    generated_file::ensure_key_hides_no_crate(key)?;
+    let node = resolve_node_of(metadata, project.package, package_name);
+
+    match find_dependency(key, node, &metadata.packages) {
+        DependencyFound::Absent => Err(no_such_dependency(key, package_name)),
+        DependencyFound::DevelopmentOrBuildOnly => {
+            Err(only_a_dev_or_build_dependency(key, package_name))
+        }
+        DependencyFound::OnlyUnderTargets(predicates) => {
+            Err(conditional_dependency(key, package_name, &predicates))
+        }
+        DependencyFound::Normal { package, .. } => match declaration(package) {
+            TaskDeclaration::Task => {
+                ensure_same_rituals(metadata, node, package).map_err(|disagreement| {
+                    rituals_refusal(&disagreement, key, package_name, Asking::Import)
+                })
+            }
+            TaskDeclaration::NotATask => Err(not_a_task_crate(key, &package.name)),
+            TaskDeclaration::NotABoolean => Err(task_value_not_a_boolean(&package.name)),
+        },
+    }
 }
 
 /// Reads `project`'s `[package.metadata.ritual] tasks` list as the strings
@@ -144,14 +178,18 @@ fn read_task_name_strings<'a>(
         .collect()
 }
 
-/// Validates every raw string in `names` as a [`Name`], refusing on the
-/// first invalid one — this runs before duplicates are checked, so a name
-/// that is both invalid and repeated is refused for its spelling, not its
-/// repetition.
+/// Validates every raw string in `names` as a [`Name`] the generated file
+/// can compile with, refusing on the first that is not one — this runs
+/// before duplicates are checked, so a name that is both invalid and
+/// repeated is refused for its spelling, not its repetition.
 fn validate_task_names(names: &[&str]) -> Result<Vec<Name>, Failure> {
     names
         .iter()
-        .map(|name_string| Name::new(name_string).map_err(Failure::from))
+        .map(|name_string| {
+            let name = Name::new(name_string)?;
+            generated_file::ensure_key_hides_no_crate(&name)?;
+            Ok(name)
+        })
         .collect()
 }
 
@@ -168,17 +206,48 @@ fn assert_no_duplicates(names: &[Name]) -> Result<(), Failure> {
     Ok(())
 }
 
-/// Resolves one already-validated task name to an [`Entry`]: matched to a
-/// real dependency, that dependency present on every target (not only under
-/// a `cfg(...)` predicate), that dependency resolved to a package, and that
-/// package marked `task = true` — each check running only once the one
-/// before it has succeeded.
-fn resolve_one(
-    name: &Name,
-    cli_package_name: &str,
-    node: &Node,
-    packages: &[Package],
-) -> Result<Entry, Failure> {
+/// `package`'s own resolve node.
+fn resolve_node_of<'a>(metadata: &'a Metadata, package: &Package, package_name: &str) -> &'a Node {
+    let node = metadata
+        .resolve
+        .nodes
+        .iter()
+        .find(|node| node.id == package.id);
+    let Some(node) = node else {
+        // Every workspace member is its own resolve node — a cargo metadata
+        // invariant, not a condition this framework's caller can act on.
+        unreachable!("workspace member `{package_name}` has no resolve node");
+    };
+    node
+}
+
+/// What the resolve node of a composed CLI says about the dependency a key
+/// names.
+enum DependencyFound<'a> {
+    /// No dependency answers to the key.
+    Absent,
+    /// One does, but only as a dev- or build-dependency.
+    DevelopmentOrBuildOnly,
+    /// A normal dependency, but only under these `cfg(...)` predicates,
+    /// never unconditionally: the composed CLI would fail to compile on
+    /// every other target.
+    OnlyUnderTargets(Vec<String>),
+    /// A normal dependency on every target, resolved to `package`, which
+    /// rustc knows by `extern_identifier`.
+    Normal {
+        package: &'a Package,
+        extern_identifier: &'a str,
+    },
+}
+
+/// Finds the dependency of `node` that `key` names: matched to a resolve
+/// edge, that edge present as a normal dependency, on every target and not
+/// only under `cfg(...)` predicates, and that edge resolved to a package —
+/// each check running only once the one before it has succeeded.
+///
+/// One rule for [`resolve_one`] and [`ensure_dependency_is_a_task`], which
+/// differ only in what they say about what they find.
+fn find_dependency<'a>(key: &Name, node: &'a Node, packages: &'a [Package]) -> DependencyFound<'a> {
     // `resolve.nodes[].deps[].name` is the extern-crate identifier rustc is
     // given, which is the dependency key with any hyphen already turned
     // into an underscore by Cargo (a dependency key `ritual-task` is
@@ -186,13 +255,13 @@ fn resolve_one(
     // Matched by name alone, regardless of dep_kinds, so a dependency that
     // exists only under a predicate or only as a dev-dependency is found
     // here and refused by the checks below rather than read as absent.
-    let extern_identifier = name.as_str().replace('-', "_");
+    let key_identifier = extern_identifier(key.as_str());
     let node_dependency = node
         .deps
         .iter()
-        .find(|dependency| dependency.name == extern_identifier);
+        .find(|dependency| dependency.name == key_identifier);
     let Some(node_dependency) = node_dependency else {
-        return Err(no_dependency_called(name, cli_package_name));
+        return DependencyFound::Absent;
     };
 
     let normal_kinds: Vec<&DepKind> = node_dependency
@@ -201,25 +270,20 @@ fn resolve_one(
         .filter(|kind| kind.kind.is_none())
         .collect();
     if normal_kinds.is_empty() {
-        // Every entry is a dev- or build-dependency: `name` is not a normal
-        // dependency at all, the same refusal as no entry matching by name.
-        return Err(no_dependency_called(name, cli_package_name));
+        return DependencyFound::DevelopmentOrBuildOnly;
     }
     if normal_kinds.iter().all(|kind| kind.target.is_some()) {
-        // Present as a normal dependency, but only under one or more
-        // `cfg(...)` predicates, never unconditionally: the composed CLI
-        // would fail to compile on every other target.
-        let predicates: Vec<String> = normal_kinds
+        let predicates = normal_kinds
             .iter()
             .filter_map(|kind| kind.target.clone())
             .collect();
-        return Err(conditional_dependency(name, cli_package_name, &predicates));
+        return DependencyFound::OnlyUnderTargets(predicates);
     }
 
     let resolved_package = packages
         .iter()
         .find(|package| package.id == node_dependency.pkg);
-    let Some(resolved_package) = resolved_package else {
+    let Some(package) = resolved_package else {
         // Every id a resolve node names as a dependency is guaranteed present
         // in packages[] by cargo metadata's own schema.
         unreachable!(
@@ -228,25 +292,336 @@ fn resolve_one(
         );
     };
 
-    match resolved_package
+    DependencyFound::Normal {
+        package,
+        extern_identifier: &node_dependency.name,
+    }
+}
+
+/// What a crate's own `[package.metadata.ritual] task` says about it.
+enum TaskDeclaration {
+    /// `task = true`.
+    Task,
+    /// `task = false`, or no such key.
+    NotATask,
+    /// `task` is there, but not a boolean.
+    NotABoolean,
+}
+
+/// Reads what `package` declares about itself. The one rule for what makes a
+/// crate a task, whichever way it is being asked.
+fn declaration(package: &Package) -> TaskDeclaration {
+    match package
         .metadata
         .get("ritual")
         .and_then(|ritual| ritual.get("task"))
     {
-        Some(serde_json::Value::Bool(true)) => {}
-        Some(serde_json::Value::Bool(false)) | None => {
-            return Err(not_marked(name.as_str(), &resolved_package.name));
-        }
-        Some(_wrong_shape) => {
-            return Err(Failure::new(format!(
-                "`{}` declares [package.metadata.ritual] task, but its value is not a boolean; \
-                 it reads `task = true`",
-                resolved_package.name
-            )));
+        Some(serde_json::Value::Bool(true)) => TaskDeclaration::Task,
+        Some(serde_json::Value::Bool(false)) | None => TaskDeclaration::NotATask,
+        Some(_wrong_shape) => TaskDeclaration::NotABoolean,
+    }
+}
+
+/// The crate every task is built on and every generated file names.
+const RITUALS: &str = "rituals";
+
+/// How a task fails to be built on the same `rituals` as the composed CLI
+/// that would mount it.
+///
+/// A task hands the command line a `rituals::Task`, and the generated file
+/// passes it to the CLI's own `rituals::run`. Two packages called `rituals`
+/// are two different crates to Rust, whatever their versions say, so the
+/// generated file compiles only when both resolve to the very same package.
+/// The task can only come from a `rituals` its crate is built with, which is
+/// one in its normal-dependency closure — its own, or one a crate it depends
+/// on re-exports a task from — so every `rituals` in that closure has to be
+/// the CLI's.
+enum RitualsDisagreement<'a> {
+    /// The composed CLI has no normal dependency on `rituals`, so no task
+    /// can be mounted in it.
+    CliHasNone,
+    /// Nothing in the task crate's normal-dependency closure is `rituals`,
+    /// so it has no task to hand over.
+    TaskHasNone { task: &'a Package },
+    /// A `rituals` in the task crate's closure is a different package from
+    /// the CLI's. `through` is the crate that depends on it, or `None` when
+    /// that is the task crate itself.
+    Differs {
+        cli: &'a Package,
+        task_rituals: &'a Package,
+        through: Option<&'a Package>,
+    },
+}
+
+/// Refuses unless every package called `rituals` in `task`'s
+/// normal-dependency closure is the same package, by id, as the composed
+/// CLI's, whose resolve node is `cli_node`, and there is at least one.
+///
+/// The closure is walked breadth first, so the crate a refusal names is the
+/// one nearest the task that carries another `rituals`, and the task crate's
+/// own dependencies are always looked at first. A `rituals` the task's tree
+/// holds but never hands over is refused too; nothing is written on a
+/// refusal, so that errs on the side that leaves a working command line.
+fn ensure_same_rituals<'a>(
+    metadata: &'a Metadata,
+    cli_node: &Node,
+    task: &'a Package,
+) -> Result<(), RitualsDisagreement<'a>> {
+    let Some(cli) = rituals_of(cli_node, &metadata.packages) else {
+        return Err(RitualsDisagreement::CliHasNone);
+    };
+
+    let nodes: BTreeMap<&str, &Node> = metadata
+        .resolve
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect();
+    let mut visited = BTreeSet::from([task.id.as_str()]);
+    let mut pending = VecDeque::from([resolve_node_of(metadata, task, &task.name)]);
+    let mut found_the_clis = false;
+
+    while let Some(node) = pending.pop_front() {
+        for dependency in node.deps.iter().filter(|dependency| is_normal(dependency)) {
+            let package = package_with_id(&metadata.packages, &dependency.pkg);
+            if package.name == RITUALS {
+                if package.id != cli.id {
+                    let through =
+                        (node.id != task.id).then(|| package_with_id(&metadata.packages, &node.id));
+                    return Err(RitualsDisagreement::Differs {
+                        cli,
+                        task_rituals: package,
+                        through,
+                    });
+                }
+                found_the_clis = true;
+            }
+            if visited.insert(dependency.pkg.as_str()) {
+                let Some(next) = nodes.get(dependency.pkg.as_str()) else {
+                    // Every package a resolve node depends on is itself a
+                    // resolve node — a cargo metadata invariant, not a
+                    // condition this framework's caller can act on.
+                    unreachable!("package id `{}` has no resolve node", dependency.pkg);
+                };
+                pending.push_back(next);
+            }
         }
     }
 
-    Ok(Entry::new(name.as_str(), node_dependency.name.clone()))
+    if found_the_clis {
+        Ok(())
+    } else {
+        Err(RitualsDisagreement::TaskHasNone { task })
+    }
+}
+
+/// Whether `dependency` is a normal dependency on any target, which is what
+/// is built into the crate that has it.
+fn is_normal(dependency: &NodeDependency) -> bool {
+    dependency.dep_kinds.iter().any(|kind| kind.kind.is_none())
+}
+
+/// The package `id` names.
+fn package_with_id<'a>(packages: &'a [Package], id: &str) -> &'a Package {
+    let Some(package) = packages.iter().find(|package| package.id == id) else {
+        // Every id the resolve graph names is guaranteed present in
+        // packages[] by cargo metadata's own schema.
+        unreachable!("resolve graph references package id `{id}` absent from packages[]");
+    };
+    package
+}
+
+/// The package called `rituals` that `node` depends on as a normal
+/// dependency, under whatever key.
+fn rituals_of<'a>(node: &Node, packages: &'a [Package]) -> Option<&'a Package> {
+    node.deps
+        .iter()
+        .filter(|dependency| is_normal(dependency))
+        .map(|dependency| package_with_id(packages, &dependency.pkg))
+        .find(|package| package.name == RITUALS)
+}
+
+/// Which question a refusal answers, which decides how it names the key and
+/// what it says to do.
+#[derive(Clone, Copy)]
+enum Asking {
+    /// Whether a dependency just declared under the key can be imported.
+    Import,
+    /// Whether a key already in `[package.metadata.ritual] tasks` resolves.
+    Listed,
+}
+
+/// The refusal for a task that is not built on the composed CLI's own
+/// `rituals`. Names both by version, and by where each comes from when the
+/// versions alone would not say why they differ.
+fn rituals_refusal(
+    disagreement: &RitualsDisagreement<'_>,
+    key: &Name,
+    cli_package_name: &str,
+    asking: Asking,
+) -> Failure {
+    // Where the key is already in the list, the refusal says so first and
+    // offers taking it out as well as putting it right.
+    let (listed, or_drop) = match asking {
+        Asking::Import => (String::new(), String::new()),
+        Asking::Listed => (
+            format!("`{key}` is named in [package.metadata.ritual] tasks, but "),
+            format!(", or drop `{key}` from the list"),
+        ),
+    };
+    match disagreement {
+        RitualsDisagreement::CliHasNone => Failure::new(format!(
+            "{listed}`{cli_package_name}` does not depend on rituals, which its generated file \
+             is built on; add `rituals` under its [dependencies]{or_drop}"
+        )),
+        RitualsDisagreement::TaskHasNone { task } => {
+            let crate_name = &task.name;
+            let subject = match asking {
+                Asking::Import if key.as_str() == crate_name => {
+                    format!("`{key}` declares `task = true` but")
+                }
+                Asking::Import => {
+                    format!("`{key}` resolves to `{crate_name}`, which declares `task = true` but")
+                }
+                Asking::Listed => format!("{listed}`{crate_name}`"),
+            };
+            Failure::new(format!(
+                "{subject} does not depend on rituals, directly or through another crate, so it \
+                 has no task to hand over; add `rituals` to its [dependencies]{or_drop}"
+            ))
+        }
+        RitualsDisagreement::Differs {
+            cli,
+            task_rituals,
+            through,
+        } => {
+            let subject = match asking {
+                Asking::Import => format!("`{key}`"),
+                Asking::Listed => format!("{listed}it"),
+            };
+            let (built, same_rituals) = through.map_or_else(
+                || {
+                    (
+                        format!("{subject} is built"),
+                        "build both on the same rituals".to_string(),
+                    )
+                },
+                |carrier| {
+                    (
+                        format!("{subject} depends on `{}`, which is built", carrier.name),
+                        format!(
+                            "build `{}` on the same rituals as this project",
+                            carrier.name
+                        ),
+                    )
+                },
+            );
+            let cli_series = release_series(&cli.version);
+            if release_series(&task_rituals.version) == cli_series {
+                Failure::new(format!(
+                    "{built} for rituals {} from {} and this project uses rituals {} from {}, \
+                     which Rust reads as two different crates; {same_rituals}{or_drop}",
+                    task_rituals.version,
+                    source_of(task_rituals),
+                    cli.version,
+                    source_of(cli),
+                ))
+            } else {
+                let remedy = match (through, asking) {
+                    (None, Asking::Import) => {
+                        format!("import a release of it made for {cli_series}")
+                    }
+                    (None, Asking::Listed) => {
+                        format!("depend on a release of it made for {cli_series}")
+                    }
+                    (Some(carrier), _) => format!(
+                        "`{key}` needs a release of `{}` made for {cli_series}",
+                        carrier.name
+                    ),
+                };
+                Failure::new(format!(
+                    "{built} for rituals {} and this project uses {}; {remedy}{or_drop}",
+                    task_rituals.version, cli.version,
+                ))
+            }
+        }
+    }
+}
+
+/// The releases of `version` that can share one `rituals` with it, as a
+/// person names them: `0.2` for any `0.2.x`, `1` for any `1.x.y`.
+fn release_series(version: &str) -> String {
+    match version.split_once('.') {
+        Some(("0", rest)) => {
+            let minor = rest.split_once('.').map_or(rest, |(minor, _patch)| minor);
+            format!("0.{minor}")
+        }
+        Some((major, _rest)) => major.to_string(),
+        None => version.to_string(),
+    }
+}
+
+/// Where `package` comes from, as a person would name it: crates.io,
+/// another registry, a git repository, or a directory.
+fn source_of(package: &Package) -> String {
+    const CRATES_IO: [&str; 2] = [
+        "registry+https://github.com/rust-lang/crates.io-index",
+        "sparse+https://index.crates.io/",
+    ];
+    match package.source.as_deref() {
+        None => package
+            .manifest_path
+            .parent()
+            .unwrap_or(&package.manifest_path)
+            .display()
+            .to_string(),
+        Some(source) if CRATES_IO.contains(&source) => "crates.io".to_string(),
+        Some(source) => match source.split_once('+') {
+            Some(("registry" | "sparse", url)) => format!("the registry at {url}"),
+            Some(("git", url)) => format!("git at {url}"),
+            _ => source.to_string(),
+        },
+    }
+}
+
+/// Resolves one already-validated task name to an [`Entry`]: matched to a
+/// real dependency, that dependency present on every target (not only under
+/// a `cfg(...)` predicate), that dependency resolved to a package, that
+/// package marked `task = true`, and built on the composed CLI's own
+/// `rituals` — each check running only once the one before it has
+/// succeeded.
+fn resolve_one(
+    name: &Name,
+    cli_package_name: &str,
+    node: &Node,
+    metadata: &Metadata,
+) -> Result<Entry, Failure> {
+    match find_dependency(name, node, &metadata.packages) {
+        // A dev- or build-dependency is not a normal dependency at all, the
+        // same refusal as no entry matching by name.
+        DependencyFound::Absent | DependencyFound::DevelopmentOrBuildOnly => {
+            Err(no_dependency_called(name, cli_package_name))
+        }
+        DependencyFound::OnlyUnderTargets(predicates) => {
+            Err(conditional_dependency(name, cli_package_name, &predicates))
+        }
+        DependencyFound::Normal {
+            package,
+            extern_identifier,
+        } => match declaration(package) {
+            TaskDeclaration::Task => ensure_same_rituals(metadata, node, package)
+                .map(|()| Entry::new(name.as_str(), extern_identifier))
+                .map_err(|disagreement| {
+                    rituals_refusal(&disagreement, name, cli_package_name, Asking::Listed)
+                }),
+            TaskDeclaration::NotATask => Err(not_marked(name.as_str(), &package.name)),
+            TaskDeclaration::NotABoolean => Err(Failure::new(format!(
+                "`{}` declares [package.metadata.ritual] task, but its value is not a boolean; \
+                 it reads `task = true`",
+                package.name
+            ))),
+        },
+    }
 }
 
 fn tasks_absent(package_name: &str, manifest_path: &Path) -> Failure {
@@ -308,11 +683,55 @@ fn not_marked(key: &str, resolved_name: &str) -> Failure {
     }
 }
 
+/// The refusal for a key no dependency of the composed CLI answers to.
+fn no_such_dependency(key: &Name, cli_package_name: &str) -> Failure {
+    Failure::new(format!(
+        "`{cli_package_name}` has no dependency called `{key}`"
+    ))
+}
+
+/// The refusal for a key whose dependency is only a dev- or build-dependency:
+/// the composed CLI's own build never has it, so a command could not run.
+fn only_a_dev_or_build_dependency(key: &Name, cli_package_name: &str) -> Failure {
+    Failure::new(format!(
+        "`{key}` is only a dev- or build-dependency of `{cli_package_name}`; a task has to be \
+         a dependency under [dependencies]"
+    ))
+}
+
+/// The refusal for a dependency whose crate does not declare `task = true`,
+/// for a key not in the list yet. It names the key as well when the key is
+/// not the crate's own name, since that is the name a person typed.
+fn not_a_task_crate(key: &Name, crate_name: &str) -> Failure {
+    let subject = if key.as_str() == crate_name {
+        format!("`{crate_name}` is not a task crate")
+    } else {
+        format!("`{key}` resolves to `{crate_name}`, which is not a task crate")
+    };
+    Failure::new(format!(
+        "{subject}: it does not declare `task = true` in its own [package.metadata.ritual], and \
+         only a task crate can be a command; choose a task crate, or, if `{crate_name}` is \
+         yours, declare `task = true` there first"
+    ))
+}
+
+/// The refusal for a dependency whose crate declares `task` as something
+/// other than a boolean, for a key not in the list yet.
+fn task_value_not_a_boolean(crate_name: &str) -> Failure {
+    Failure::new(format!(
+        "`{crate_name}` declares [package.metadata.ritual] task, but its value is not a \
+         boolean; choose a task crate, or, if `{crate_name}` is yours, make it read \
+         `task = true`"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
+    use rituals::Name;
+
     use super::{resolve, resolve_excluding};
     use crate::generated_file::Entry;
-    use crate::metadata::{DepKind, Metadata, Node, parse};
+    use crate::metadata::{DepKind, Metadata, Node, NodeDependency, parse};
     use crate::test_support::TestOutcome;
 
     const DEMO_WORKSPACE: &str = include_str!("metadata/fixtures/demo-workspace.json");
@@ -512,6 +931,684 @@ mod tests {
              accepted: {:?}",
             entries.err()
         );
+        Ok(())
+    }
+
+    /// The refusal `ensure_dependency_is_a_task` gives for `key` against the
+    /// fixture as edited by `edit`, or `None` when it accepts it.
+    fn refusal_for(
+        key: &str,
+        edit: impl FnOnce(&mut Metadata),
+    ) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        edit(&mut metadata);
+        let key = Name::new(key)?;
+        Ok(metadata
+            .ensure_dependency_is_a_task("demo-ritual", &key)
+            .err()
+            .map(|failure| failure.to_string()))
+    }
+
+    /// Sets the `[package.metadata]` of the fixture's package `package_name`.
+    fn set_package_metadata(
+        metadata: &mut Metadata,
+        package_name: &str,
+        metadata_value: serde_json::Value,
+    ) {
+        let package = metadata
+            .packages
+            .iter_mut()
+            .find(|package| package.name == package_name);
+        assert!(
+            package.is_some(),
+            "expected {package_name} among the fixture's packages"
+        );
+        if let Some(package) = package {
+            package.metadata = metadata_value;
+        }
+    }
+
+    #[test]
+    fn a_dependency_on_a_task_crate_is_accepted_under_its_own_name() -> TestOutcome {
+        assert_eq!(refusal_for("task-true", |_| {})?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn a_dependency_reached_through_a_rename_is_accepted_under_the_rename() -> TestOutcome {
+        assert_eq!(refusal_for("renamed", |_| {})?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn a_dependency_whose_key_is_a_keyword_is_accepted() -> TestOutcome {
+        assert_eq!(refusal_for("move", |_| {})?, None);
+        Ok(())
+    }
+
+    /// The tasks list is what an import is about to extend, so the check
+    /// must not read it: here the list is empty and the dependency is
+    /// accepted all the same.
+    #[test]
+    fn the_tasks_list_is_not_consulted() -> TestOutcome {
+        let outcome = refusal_for("task-true", |metadata| {
+            set_demo_ritual_metadata(metadata, serde_json::json!({ "ritual": { "tasks": [] } }));
+        })?;
+        assert_eq!(outcome, None);
+        Ok(())
+    }
+
+    #[test]
+    fn a_dependency_on_a_crate_with_no_ritual_table_is_refused_as_not_a_task() -> TestOutcome {
+        assert_eq!(
+            refusal_for("task-null", |_| {})?.as_deref(),
+            Some(
+                "`task-null` is not a task crate: it does not declare `task = true` in its own \
+                 [package.metadata.ritual], and only a task crate can be a command; choose a \
+                 task crate, or, if `task-null` is yours, declare `task = true` there first"
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_dependency_declaring_task_false_is_refused_as_not_a_task() -> TestOutcome {
+        let outcome = refusal_for("task-true", |metadata| {
+            set_package_metadata(
+                metadata,
+                "task-true",
+                serde_json::json!({ "ritual": { "task": false } }),
+            );
+        })?;
+        assert!(
+            outcome
+                .as_deref()
+                .is_some_and(|message| message.starts_with("`task-true` is not a task crate:")),
+            "expected the not-a-task refusal; got {outcome:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_renamed_dependency_that_is_not_a_task_names_both_the_key_and_the_crate() -> TestOutcome {
+        let outcome = refusal_for("renamed", |metadata| {
+            set_package_metadata(metadata, "task-renamed-source", serde_json::Value::Null);
+        })?;
+        assert_eq!(
+            outcome.as_deref(),
+            Some(
+                "`renamed` resolves to `task-renamed-source`, which is not a task crate: it does \
+                 not declare `task = true` in its own [package.metadata.ritual], and only a task \
+                 crate can be a command; choose a task crate, or, if `task-renamed-source` is \
+                 yours, declare `task = true` there first"
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_task_value_that_is_not_a_boolean_is_refused_saying_what_it_should_read() -> TestOutcome {
+        assert_eq!(
+            refusal_for("task-malformed", |_| {})?.as_deref(),
+            Some(
+                "`task-malformed` declares [package.metadata.ritual] task, but its value is not a \
+                 boolean; choose a task crate, or, if `task-malformed` is yours, make it read \
+                 `task = true`"
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_key_with_no_dependency_is_refused_naming_the_package_and_the_key() -> TestOutcome {
+        assert_eq!(
+            refusal_for("no-such-key", |_| {})?.as_deref(),
+            Some("`demo-ritual` has no dependency called `no-such-key`")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_dev_only_dependency_is_refused_saying_a_task_has_to_be_a_normal_one() -> TestOutcome {
+        assert_eq!(
+            refusal_for("task-dev-only", |_| {})?.as_deref(),
+            Some(
+                "`task-dev-only` is only a dev- or build-dependency of `demo-ritual`; a task has \
+                 to be a dependency under [dependencies]"
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_dependency_present_only_under_a_target_predicate_is_refused_naming_it() -> TestOutcome {
+        let outcome = refusal_for("task-true", |metadata| {
+            let node = demo_ritual_node(metadata);
+            let dependency = node.deps.iter_mut().find(|dep| dep.name == "task_true");
+            assert!(
+                dependency.is_some(),
+                "expected a task_true dependency edge in the fixture"
+            );
+            if let Some(dependency) = dependency {
+                for kind in &mut dependency.dep_kinds {
+                    kind.target = Some("cfg(windows)".to_string());
+                }
+            }
+        })?;
+        assert_eq!(
+            outcome.as_deref(),
+            Some(
+                "`task-true` is a dependency of `demo-ritual` only under `cfg(windows)`, but a \
+                 task has to be present on every target the command line builds for; declare it \
+                 under [dependencies]"
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_package_that_is_not_a_workspace_member_is_refused_before_any_dependency_is_read()
+    -> TestOutcome {
+        let metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+
+        let outcome = metadata.ensure_dependency_is_a_task("nonexistent", &Name::new("task-true")?);
+
+        assert!(
+            outcome.is_err(),
+            "expected an unknown package to be refused"
+        );
+        if let Err(failure) = outcome {
+            assert!(
+                failure
+                    .to_string()
+                    .contains("`nonexistent` is not a member of the workspace"),
+                "unexpected refusal: {failure}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The two checks share one rule: for every dependency key the fixture
+    /// offers, in every state it offers one, a key the import check accepts
+    /// is a key the resolver accepts once that key is in the list, and a key
+    /// it refuses is one the resolver refuses.
+    #[test]
+    fn the_import_check_and_the_resolver_accept_and_refuse_the_same_keys() -> TestOutcome {
+        let keys = [
+            "task-true",
+            "renamed",
+            "move",
+            "task-null",
+            "task-malformed",
+            "task-dev-only",
+            "no-such-key",
+            "std",
+            "core",
+        ];
+        for key in keys {
+            let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+            set_demo_ritual_metadata(
+                &mut metadata,
+                serde_json::json!({ "ritual": { "tasks": [key] } }),
+            );
+
+            let import_check =
+                metadata.ensure_dependency_is_a_task("demo-ritual", &Name::new(key)?);
+            let resolver = resolve(&metadata, "demo-ritual");
+
+            assert_eq!(
+                import_check.is_ok(),
+                resolver.is_ok(),
+                "`{key}`: import check said {import_check:?}, resolver said {resolver:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The fixture's resolve node for the package `package_name`.
+    fn node_of<'a>(
+        metadata: &'a mut Metadata,
+        package_name: &str,
+    ) -> Result<&'a mut Node, Box<dyn std::error::Error>> {
+        let id = metadata
+            .packages
+            .iter()
+            .find(|package| package.name == package_name)
+            .map(|package| package.id.clone())
+            .ok_or_else(|| format!("expected {package_name} among the fixture's packages"))?;
+        Ok(metadata
+            .resolve
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == id)
+            .ok_or_else(|| format!("expected a resolve node for {package_name}"))?)
+    }
+
+    /// Builds `task-true` on a second package called `rituals`, at `version`
+    /// and from `source`, beside the one the fixture's CLI uses: a copy of
+    /// that package under another id, with `task-true`'s `rituals` edge
+    /// pointed at it, as `cargo metadata` reports two copies of one crate.
+    fn build_task_true_on_another_rituals(
+        metadata: &mut Metadata,
+        version: &str,
+        source: Option<&str>,
+    ) -> TestOutcome {
+        let other_id = add_other_rituals(metadata, version, source)?;
+        let edge = node_of(metadata, "task-true")?
+            .deps
+            .iter_mut()
+            .find(|dependency| dependency.name == "rituals")
+            .ok_or("expected task-true to depend on rituals in the fixture")?;
+        edge.pkg = other_id;
+        Ok(())
+    }
+
+    /// What the import check and the resolver each say about `task-true`
+    /// once `edit` has been made to the fixture, with `task-true` the one
+    /// key in the list.
+    fn both_refusals(
+        edit: impl Fn(&mut Metadata) -> TestOutcome,
+    ) -> Result<(Option<String>, Option<String>), Box<dyn std::error::Error>> {
+        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        set_demo_ritual_metadata(
+            &mut metadata,
+            serde_json::json!({ "ritual": { "tasks": ["task-true"] } }),
+        );
+        edit(&mut metadata)?;
+        let import_check = metadata
+            .ensure_dependency_is_a_task("demo-ritual", &Name::new("task-true")?)
+            .err()
+            .map(|failure| failure.to_string());
+        let resolver = resolve(&metadata, "demo-ritual")
+            .err()
+            .map(|failure| failure.to_string());
+        Ok((import_check, resolver))
+    }
+
+    #[test]
+    fn every_fixture_task_shares_the_clis_rituals_and_is_accepted() -> TestOutcome {
+        let (import_check, resolver) = both_refusals(|_| Ok(()))?;
+        assert_eq!((import_check, resolver), (None, None));
+        Ok(())
+    }
+
+    #[test]
+    fn a_task_built_for_another_release_of_rituals_is_refused_naming_both_versions() -> TestOutcome
+    {
+        let (import_check, resolver) = both_refusals(|metadata| {
+            build_task_true_on_another_rituals(
+                metadata,
+                "0.2.0",
+                Some("registry+https://github.com/rust-lang/crates.io-index"),
+            )
+        })?;
+
+        assert_eq!(
+            import_check.as_deref(),
+            Some(
+                "`task-true` is built for rituals 0.2.0 and this project uses 0.1.2; import a \
+                 release of it made for 0.1"
+            )
+        );
+        assert_eq!(
+            resolver.as_deref(),
+            Some(
+                "`task-true` is named in [package.metadata.ritual] tasks, but it is built for \
+                 rituals 0.2.0 and this project uses 0.1.2; depend on a release of it made for \
+                 0.1, or drop `task-true` from the list"
+            )
+        );
+        Ok(())
+    }
+
+    /// The same version from two places is still two crates, so the versions
+    /// alone cannot say why: the refusal names where each comes from.
+    #[test]
+    fn a_task_built_on_the_same_version_from_elsewhere_is_refused_naming_both_sources()
+    -> TestOutcome {
+        let (import_check, resolver) = both_refusals(|metadata| {
+            build_task_true_on_another_rituals(
+                metadata,
+                "0.1.2",
+                Some("registry+https://github.com/rust-lang/crates.io-index"),
+            )
+        })?;
+
+        assert_eq!(
+            import_check.as_deref(),
+            Some(
+                "`task-true` is built for rituals 0.1.2 from crates.io and this project uses \
+                 rituals 0.1.2 from /scrubbed/checkout/rituals, which Rust reads as two different \
+                 crates; build both on the same rituals"
+            )
+        );
+        assert!(
+            resolver
+                .as_deref()
+                .is_some_and(|message| message.starts_with(
+                    "`task-true` is named in [package.metadata.ritual] tasks, but it is built for \
+                 rituals 0.1.2 from crates.io"
+                ) && message
+                    .ends_with(", or drop `task-true` from the list")),
+            "expected the resolver to refuse the same task; got {resolver:?}"
+        );
+        Ok(())
+    }
+
+    /// Adds a crate called `name` to the fixture, depending as a normal
+    /// dependency on the packages `dependency_ids` name, each under its own
+    /// package name, and returns its id. A copy of a fixture package under
+    /// another id, as `cargo metadata` reports any other crate.
+    fn add_crate(
+        metadata: &mut Metadata,
+        name: &str,
+        dependency_ids: &[&str],
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let mut added = parse(DEMO_WORKSPACE.as_bytes())?
+            .packages
+            .into_iter()
+            .find(|package| package.name == "task-keyword")
+            .ok_or("expected task-keyword among the fixture's packages")?;
+        added.id = format!("added#{name}");
+        added.name = name.to_string();
+        added.metadata = serde_json::Value::Null;
+        let id = added.id.clone();
+        metadata.packages.push(added);
+
+        let mut deps = Vec::new();
+        for dependency_id in dependency_ids {
+            let package_name = metadata
+                .packages
+                .iter()
+                .find(|package| package.id == *dependency_id)
+                .map(|package| package.name.replace('-', "_"))
+                .ok_or_else(|| format!("expected a package with id {dependency_id}"))?;
+            deps.push(normal_edge(&package_name, dependency_id));
+        }
+        metadata.resolve.nodes.push(Node {
+            id: id.clone(),
+            deps,
+        });
+        Ok(id)
+    }
+
+    /// A resolve edge to `pkg` under `name`, as a normal dependency on every
+    /// target.
+    fn normal_edge(name: &str, pkg: &str) -> NodeDependency {
+        NodeDependency {
+            name: name.to_string(),
+            pkg: pkg.to_string(),
+            dep_kinds: vec![DepKind {
+                kind: None,
+                target: None,
+            }],
+        }
+    }
+
+    /// Adds a second package called `rituals`, at `version` and from
+    /// `source`, beside the one the fixture's CLI uses, and returns its id.
+    fn add_other_rituals(
+        metadata: &mut Metadata,
+        version: &str,
+        source: Option<&str>,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let mut other = parse(DEMO_WORKSPACE.as_bytes())?
+            .packages
+            .into_iter()
+            .find(|package| package.name == "rituals")
+            .ok_or("expected rituals among the fixture's packages")?;
+        other.id = format!("other-rituals#{version}");
+        other.version = version.to_string();
+        other.source = source.map(str::to_string);
+        let id = other.id.clone();
+        metadata.packages.push(other);
+        metadata.resolve.nodes.push(Node {
+            id: id.clone(),
+            deps: Vec::new(),
+        });
+        Ok(id)
+    }
+
+    /// The id of the `rituals` the fixture's CLI and every task in it use.
+    fn clis_rituals_id(metadata: &Metadata) -> Result<String, Box<dyn std::error::Error>> {
+        Ok(metadata
+            .packages
+            .iter()
+            .find(|package| package.name == "rituals")
+            .map(|package| package.id.clone())
+            .ok_or("expected rituals among the fixture's packages")?)
+    }
+
+    /// A git source pinned to a revision, as `cargo metadata` reports one.
+    const PINNED_GIT: &str = "git+https://example.invalid/rituals?rev=8d646e9#8d646e9";
+
+    /// A facade: `task-true` keeps its own `rituals`, which is the CLI's, and
+    /// also depends on `other`, a crate built on a different `rituals` whose
+    /// task it could re-export. The task can only come from a `rituals` in
+    /// the closure, so the closure decides it, and the refusal names the
+    /// crate that carries the other one.
+    #[test]
+    fn a_facade_over_a_crate_on_another_rituals_is_refused_naming_that_crate() -> TestOutcome {
+        let (import_check, resolver) = both_refusals(|metadata| {
+            let other_rituals = add_other_rituals(metadata, "0.1.2", Some(PINNED_GIT))?;
+            let other = add_crate(metadata, "other", &[&other_rituals])?;
+            node_of(metadata, "task-true")?
+                .deps
+                .push(normal_edge("other", &other));
+            Ok(())
+        })?;
+
+        assert_eq!(
+            import_check.as_deref(),
+            Some(
+                "`task-true` depends on `other`, which is built for rituals 0.1.2 from git at \
+                 https://example.invalid/rituals?rev=8d646e9#8d646e9 and this project uses \
+                 rituals 0.1.2 from /scrubbed/checkout/rituals, which Rust reads as two different \
+                 crates; build `other` on the same rituals as this project"
+            )
+        );
+        assert_eq!(
+            resolver.as_deref(),
+            Some(
+                "`task-true` is named in [package.metadata.ritual] tasks, but it depends on \
+                 `other`, which is built for rituals 0.1.2 from git at \
+                 https://example.invalid/rituals?rev=8d646e9#8d646e9 and this project uses \
+                 rituals 0.1.2 from /scrubbed/checkout/rituals, which Rust reads as two different \
+                 crates; build `other` on the same rituals as this project, or drop `task-true` \
+                 from the list"
+            )
+        );
+        Ok(())
+    }
+
+    /// Where the release series differ, the version says why, so the refusal
+    /// names it rather than the sources — and names the crate deepest in the
+    /// chain, the one built on the other `rituals`, not the first step.
+    #[test]
+    fn a_crate_two_steps_away_on_another_release_is_refused_naming_it() -> TestOutcome {
+        let (import_check, resolver) = both_refusals(|metadata| {
+            let other_rituals = add_other_rituals(
+                metadata,
+                "0.2.0",
+                Some("registry+https://github.com/rust-lang/crates.io-index"),
+            )?;
+            let other = add_crate(metadata, "other", &[&other_rituals])?;
+            let middle = add_crate(metadata, "middle", &[&other])?;
+            node_of(metadata, "task-true")?
+                .deps
+                .push(normal_edge("middle", &middle));
+            Ok(())
+        })?;
+
+        assert_eq!(
+            import_check.as_deref(),
+            Some(
+                "`task-true` depends on `other`, which is built for rituals 0.2.0 and this \
+                 project uses 0.1.2; `task-true` needs a release of `other` made for 0.1"
+            )
+        );
+        assert_eq!(
+            resolver.as_deref(),
+            Some(
+                "`task-true` is named in [package.metadata.ritual] tasks, but it depends on \
+                 `other`, which is built for rituals 0.2.0 and this project uses 0.1.2; \
+                 `task-true` needs a release of `other` made for 0.1, or drop `task-true` from \
+                 the list"
+            )
+        );
+        Ok(())
+    }
+
+    /// A facade with no `rituals` of its own, over a crate built on the
+    /// CLI's: the only `rituals` its task can come from is the CLI's, so it
+    /// is accepted.
+    #[test]
+    fn a_facade_with_no_direct_rituals_over_a_task_on_the_clis_own_is_accepted() -> TestOutcome {
+        let (import_check, resolver) = both_refusals(|metadata| {
+            let clis_rituals = clis_rituals_id(metadata)?;
+            let inner = add_crate(metadata, "inner", &[&clis_rituals])?;
+            let task_true = node_of(metadata, "task-true")?;
+            task_true
+                .deps
+                .retain(|dependency| dependency.name != "rituals");
+            task_true.deps.push(normal_edge("inner", &inner));
+            Ok(())
+        })?;
+
+        assert_eq!((import_check, resolver), (None, None));
+        Ok(())
+    }
+
+    /// Only normal dependencies are built into the task, so another
+    /// `rituals` reached only as a dev-dependency is not one it can hand
+    /// over.
+    #[test]
+    fn another_rituals_reached_only_as_a_dev_dependency_is_not_the_tasks() -> TestOutcome {
+        let (import_check, resolver) = both_refusals(|metadata| {
+            let other_rituals = add_other_rituals(metadata, "0.1.2", Some(PINNED_GIT))?;
+            let other = add_crate(metadata, "other", &[&other_rituals])?;
+            let mut edge = normal_edge("other", &other);
+            edge.dep_kinds = vec![DepKind {
+                kind: Some("dev".to_string()),
+                target: None,
+            }];
+            node_of(metadata, "task-true")?.deps.push(edge);
+            Ok(())
+        })?;
+
+        assert_eq!((import_check, resolver), (None, None));
+        Ok(())
+    }
+
+    #[test]
+    fn a_task_crate_with_no_rituals_anywhere_is_refused() -> TestOutcome {
+        let (import_check, resolver) = both_refusals(|metadata| {
+            node_of(metadata, "task-true")?
+                .deps
+                .retain(|dependency| dependency.name != "rituals");
+            Ok(())
+        })?;
+
+        assert_eq!(
+            import_check.as_deref(),
+            Some(
+                "`task-true` declares `task = true` but does not depend on rituals, directly or \
+                 through another crate, so it has no task to hand over; add `rituals` to its \
+                 [dependencies]"
+            )
+        );
+        assert_eq!(
+            resolver.as_deref(),
+            Some(
+                "`task-true` is named in [package.metadata.ritual] tasks, but `task-true` does \
+                 not depend on rituals, directly or through another crate, so it has no task to \
+                 hand over; add `rituals` to its [dependencies], or drop `task-true` from the \
+                 list"
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_command_line_that_does_not_depend_on_rituals_mounts_no_task() -> TestOutcome {
+        let (import_check, resolver) = both_refusals(|metadata| {
+            node_of(metadata, "demo-ritual")?
+                .deps
+                .retain(|dependency| dependency.name != "rituals");
+            Ok(())
+        })?;
+
+        assert_eq!(
+            import_check.as_deref(),
+            Some(
+                "`demo-ritual` does not depend on rituals, which its generated file is built on; \
+                 add `rituals` under its [dependencies]"
+            )
+        );
+        assert!(
+            resolver
+                .as_deref()
+                .is_some_and(|message| message.contains("`demo-ritual` does not depend on rituals")),
+            "expected the resolver to refuse the same list; got {resolver:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_listed_key_that_would_hide_std_or_core_is_refused() -> TestOutcome {
+        for key in ["std", "core"] {
+            let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+            set_demo_ritual_metadata(
+                &mut metadata,
+                serde_json::json!({ "ritual": { "tasks": ["task-true", key] } }),
+            );
+
+            let failure = resolve(&metadata, "demo-ritual")
+                .err()
+                .map(|failure| failure.to_string());
+
+            assert_eq!(
+                failure,
+                Some(format!(
+                    "`{key}` would hide Rust's own `{key}` crate, which the generated command \
+                     line is built on, and it would no longer compile; give this task another key"
+                )),
+                "`{key}` must be refused before it is matched to a dependency"
+            );
+        }
+        Ok(())
+    }
+
+    /// A dependency that is a task in every other way, reached under the key
+    /// `std`, as `cargo add --rename std` writes one: the import check refuses
+    /// it for its key, as the resolver does, so neither accepts what the
+    /// other would refuse.
+    #[test]
+    fn a_task_under_a_key_that_would_hide_std_is_refused_by_both_checks() -> TestOutcome {
+        let mut metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        set_demo_ritual_metadata(
+            &mut metadata,
+            serde_json::json!({ "ritual": { "tasks": ["std"] } }),
+        );
+        let edge = demo_ritual_node(&mut metadata)
+            .deps
+            .iter_mut()
+            .find(|dependency| dependency.name == "task_true")
+            .ok_or("expected a task_true dependency edge in the fixture")?;
+        edge.name = "std".to_string();
+        let hides_std = "`std` would hide Rust's own `std` crate, which the generated command line \
+                         is built on, and it would no longer compile; give this task another key";
+
+        let import_check = metadata
+            .ensure_dependency_is_a_task("demo-ritual", &Name::new("std")?)
+            .err()
+            .map(|failure| failure.to_string());
+        let resolver = resolve(&metadata, "demo-ritual")
+            .err()
+            .map(|failure| failure.to_string());
+
+        assert_eq!(import_check.as_deref(), Some(hides_std));
+        assert_eq!(resolver.as_deref(), Some(hides_std));
         Ok(())
     }
 

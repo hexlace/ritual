@@ -107,7 +107,15 @@ fn a_nested_bundle_mounts_like_any_task_and_dispatches_through_every_level() -> 
         assert_help_lists(
             &project,
             &[],
-            &["add", "regenerate", "new", "create", "remove", "daily"],
+            &[
+                "add",
+                "regenerate",
+                "new",
+                "create",
+                "import",
+                "remove",
+                "daily",
+            ],
         )?;
         // Each bundle lists its immediate children, and not theirs.
         assert_help_lists(&project, &["daily"], &["chores", "pickup"])?;
