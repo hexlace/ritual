@@ -13,19 +13,22 @@ use std::process::{Command, Stdio};
 
 use super::{Outcome, ResultContext, RunOutput, TestOutcome};
 
-/// Runs `git <arguments…>` in `directory` with the machine's git
-/// configuration and any inherited repository location out of the way.
-pub(crate) fn git(directory: &Path, arguments: &[&str]) -> Outcome<RunOutput> {
-    let output = Command::new("git")
-        .args([
-            "-c",
-            "commit.gpgsign=false",
-            "-c",
-            "init.defaultBranch=main",
-        ])
-        .args(arguments)
-        .current_dir(directory)
-        .stdin(Stdio::null())
+// HC-ONE-WAY: `rituals-compose`'s `test-util` feature exports the same
+// isolated git (`rituals_compose::git::fixture::isolated_git`), and this
+// suite keeps its own on purpose. These stories judge ritual's shipped binary
+// from outside, the way a person would, and they import none of ritual's
+// library crates. An instrument taken from a crate under test changes whenever
+// that crate does, so a story could pass because its own fixture moved. This
+// module is the one place in the suite that says how git is isolated.
+
+/// Points `command` away from the machine it runs on: no global or system git
+/// configuration, an identity from the environment, and no inherited
+/// repository location.
+///
+/// Set on the command itself, so stories running side by side neither
+/// interfere with each other nor change the process's environment.
+pub(crate) fn isolate_from_the_machine(command: &mut Command) -> &mut Command {
+    command
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_AUTHOR_NAME", "Fixture")
@@ -35,8 +38,26 @@ pub(crate) fn git(directory: &Path, arguments: &[&str]) -> Outcome<RunOutput> {
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
-        .output()
-        .context(&format!("spawning `git {}` failed", arguments.join(" ")))?;
+}
+
+/// Runs `git <arguments…>` in `directory` with the machine's git
+/// configuration and any inherited repository location out of the way, and
+/// signing off for the commits a story makes alone.
+pub(crate) fn git(directory: &Path, arguments: &[&str]) -> Outcome<RunOutput> {
+    let output = isolate_from_the_machine(
+        Command::new("git")
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "init.defaultBranch=main",
+            ])
+            .args(arguments)
+            .current_dir(directory)
+            .stdin(Stdio::null()),
+    )
+    .output()
+    .context(&format!("spawning `git {}` failed", arguments.join(" ")))?;
     Ok(RunOutput {
         exit_code: output.status.code(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),

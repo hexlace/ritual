@@ -18,6 +18,8 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use rituals_compose::git::fixture;
+
 /// What a test in this crate returns — the error path carries only a setup
 /// failure (a filesystem operation, a TOML fixture that would not parse),
 /// never the property under test, which is always carried by an
@@ -61,47 +63,11 @@ impl Drop for ScratchDir {
     }
 }
 
-/// Runs `git <arguments>` in `directory` with nothing read from the machine
-/// it runs on and an identity of its own, and fails the test if git does.
-///
-/// The configuration is set on the command itself rather than the process's
-/// environment, so tests running side by side neither interfere nor need
-/// `unsafe`.
-pub(crate) fn git(directory: &Path, arguments: &[&str]) -> TestOutcome {
-    let output = std::process::Command::new("git")
-        .args([
-            "-c",
-            "commit.gpgsign=false",
-            "-c",
-            "init.defaultBranch=main",
-        ])
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_AUTHOR_NAME", "Fixture")
-        .env("GIT_AUTHOR_EMAIL", "fixture@example.invalid")
-        .env("GIT_COMMITTER_NAME", "Fixture")
-        .env("GIT_COMMITTER_EMAIL", "fixture@example.invalid")
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .arg("-C")
-        .arg(directory)
-        .args(arguments)
-        .output()?;
-    assert!(
-        output.status.success(),
-        "`git {}` failed: {}",
-        arguments.join(" "),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    Ok(())
-}
-
 /// Makes `directory` a repository and commits everything in it.
 pub(crate) fn init_and_commit(directory: &Path) -> TestOutcome {
-    git(directory, &["init", "--quiet"])?;
-    git(directory, &["add", "--all"])?;
-    git(directory, &["commit", "--quiet", "--message", "fixture"])
+    fixture::git(directory, &["init", "--quiet"])?;
+    fixture::commit_everything(directory)?;
+    Ok(())
 }
 
 /// Writes each `(path, contents)` under `root`, creating the directories

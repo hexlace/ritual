@@ -100,7 +100,8 @@ fn directories_holding_cargo_configuration_with(
 mod tests {
     use super::directories_holding_cargo_configuration_with;
     use crate::git::Unanswered;
-    use crate::git::test_support::{commit_everything, contained_in, git};
+    use crate::git::fixture::{commit_everything, git};
+    use crate::git::test_support::contained_in;
     use crate::test_support::{ScratchDir, TestOutcome};
 
     /// A `.cargo/config` or `.cargo/config.toml` anywhere under the root,

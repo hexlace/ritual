@@ -241,7 +241,8 @@ mod tests {
 
     use super::{Flag, IndexEntry, parse_attributes, parse_index, submodules_under_with};
     use crate::git::Unanswered;
-    use crate::git::test_support::{add_a_submodule, commit_everything, contained_in, git};
+    use crate::git::fixture::{commit_everything, git};
+    use crate::git::test_support::{add_a_submodule, contained_in};
     use crate::test_support::{ScratchDir, TestOutcome};
 
     #[test]

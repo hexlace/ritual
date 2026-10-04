@@ -159,17 +159,14 @@ pub(crate) fn printed_recovery_commands(message: &str) -> Vec<String> {
 /// a shell standing in the project's root, with git reading nothing from the
 /// machine it runs on.
 pub(crate) fn run_recovery_command(directory: &Path, command: &str) -> Outcome<RunOutput> {
-    let output = std::process::Command::new("sh")
-        .args(["-c", command])
-        .current_dir(directory)
-        .stdin(std::process::Stdio::null())
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .output()
-        .context(&format!("spawning `{command}` failed"))?;
+    let output = super::git::isolate_from_the_machine(
+        std::process::Command::new("sh")
+            .args(["-c", command])
+            .current_dir(directory)
+            .stdin(std::process::Stdio::null()),
+    )
+    .output()
+    .context(&format!("spawning `{command}` failed"))?;
     Ok(RunOutput {
         exit_code: output.status.code(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),

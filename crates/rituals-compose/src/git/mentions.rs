@@ -114,7 +114,8 @@ mod tests {
 
     use super::files_mentioning_with;
     use crate::git::Unanswered;
-    use crate::git::test_support::{commit_everything, contained_in, git};
+    use crate::git::fixture::{commit_everything, git};
+    use crate::git::test_support::contained_in;
     use crate::test_support::{ScratchDir, TestOutcome};
 
     /// The pattern a caller looking for `tasks/` as a path would hand over:

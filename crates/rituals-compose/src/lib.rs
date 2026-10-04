@@ -29,6 +29,12 @@
 //! files, through [`cargo_config`], for the paths a build reads that no
 //! manifest names.
 //!
+//! # Feature flags
+//!
+//! - `test-util` — adds `git::fixture`, a `git` that reads nothing from the
+//!   machine it runs on and the commands that build a fixture repository, for
+//!   a crate whose tests run against `git`. Nothing needs it at run time.
+//!
 //! # Examples
 //!
 //! Rendering the two files a new task crate starts as, the way `add` and

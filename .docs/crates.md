@@ -85,6 +85,10 @@ An ordinary task never depends on `rituals-compose`, and nothing from
 `rituals` is re-exported through it. A crate that needs `rituals` names it
 directly, so there is one path to each item.
 
+The `test-util` feature adds `git::fixture`, an isolated `git` for the tests of
+a crate that builds fixture repositories; the management tasks turn it on for
+their own tests, and no build needs it.
+
 Beyond `rituals`, its dependencies are here because of what the job is:
 
 - **`serde`** and **`serde_json`**, because `cargo metadata` speaks JSON

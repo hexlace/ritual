@@ -372,9 +372,8 @@ mod tests {
     use std::process::Command;
 
     use super::check_with;
-    use crate::git::test_support::{
-        add_a_submodule, commit_everything, committed_task, contained_in, git,
-    };
+    use crate::git::fixture::{commit_everything, git};
+    use crate::git::test_support::{add_a_submodule, committed_task, contained_in};
     use crate::git::{CannotGiveBack, Flag, Unanswered, Unwatched};
     use crate::test_support::{ScratchDir, TestOutcome};
 

@@ -1,59 +1,11 @@
-//! The helpers every test module under [`crate::git`] shares: a `git` that
-//! reads nothing from the machine it runs on, and the repositories the tests
-//! ask it about.
+//! The helpers every test module under [`crate::git`] shares: the
+//! repositories the tests ask `git` about, built with [`super::fixture`].
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use super::fixture::{commit_everything, git, isolated_git};
 use crate::test_support::{ScratchDir, TestOutcome};
-
-/// `git` configured to read nothing from the machine it runs on: no
-/// global or system configuration, an identity from the environment, and
-/// signing off for the commits these tests make alone.
-///
-/// Set on the `Command` itself rather than the process's environment, so
-/// tests running side by side neither interfere nor need `unsafe`.
-pub(super) fn isolated_git() -> Command {
-    let mut command = Command::new("git");
-    command
-        .args([
-            "-c",
-            "commit.gpgsign=false",
-            "-c",
-            "init.defaultBranch=main",
-        ])
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_AUTHOR_NAME", "Fixture")
-        .env("GIT_AUTHOR_EMAIL", "fixture@example.invalid")
-        .env("GIT_COMMITTER_NAME", "Fixture")
-        .env("GIT_COMMITTER_EMAIL", "fixture@example.invalid")
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE");
-    command
-}
-
-/// Runs `git <arguments>` in `directory` and fails the test if git does.
-pub(super) fn git(directory: &Path, arguments: &[&str]) -> TestOutcome {
-    let output = isolated_git()
-        .arg("-C")
-        .arg(directory)
-        .args(arguments)
-        .output()?;
-    assert!(
-        output.status.success(),
-        "`git {}` failed: {}",
-        arguments.join(" "),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    Ok(())
-}
-
-pub(super) fn commit_everything(directory: &Path) -> TestOutcome {
-    git(directory, &["add", "--all"])?;
-    git(directory, &["commit", "--message", "fixture"])
-}
 
 /// A repository at the root of a scratch directory with `task/`
 /// committed whole.
@@ -109,5 +61,6 @@ pub(super) fn add_a_submodule(project: &Path, at: &str) -> TestOutcome {
             at,
         ],
     )?;
-    git(project, &["commit", "--message", "add a submodule"])
+    git(project, &["commit", "--message", "add a submodule"])?;
+    Ok(())
 }

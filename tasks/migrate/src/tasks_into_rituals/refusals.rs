@@ -179,13 +179,15 @@ fn submodule_unknown(directory: &str, git_words: &str) -> Failure {
 mod tests {
     use std::path::{Path, PathBuf};
 
+    use rituals_compose::git::fixture::git;
+
     use super::{
         Member, destination_exists, destination_is_not_a_directory, ensure_destinations_are_free,
         ensure_none_holds_a_submodule, ensure_none_holds_other_members, holds_a_submodule,
         holds_members,
     };
     use crate::precondition::WorkTree;
-    use crate::test_support::{ScratchDir, TestOutcome, git, init_and_commit, write_files};
+    use crate::test_support::{ScratchDir, TestOutcome, init_and_commit, write_files};
 
     const MIGRATE: &str = "cargo ritual migrate";
 
@@ -433,7 +435,8 @@ mod tests {
                 "--cacheinfo",
                 &format!("160000,{},{path}", "1".repeat(40)),
             ],
-        )
+        )?;
+        Ok(())
     }
 
     #[test]

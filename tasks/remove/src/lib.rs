@@ -565,6 +565,7 @@ fn give_back_refusal(
 mod tests {
     use std::path::PathBuf;
 
+    use rituals_compose::git::fixture::{commit_everything, git};
     use rituals_compose::git::{self, CannotGiveBack, Unanswered};
 
     use super::{
@@ -823,39 +824,6 @@ mod tests {
         );
     }
 
-    /// `git` configured to read nothing from the machine it runs on, run in
-    /// `directory`: no global or system configuration, an identity from the
-    /// environment, and signing off for the commits this test makes alone.
-    fn git(directory: &std::path::Path, arguments: &[&str]) -> TestOutcome {
-        let output = std::process::Command::new("git")
-            .args([
-                "-c",
-                "commit.gpgsign=false",
-                "-c",
-                "init.defaultBranch=main",
-            ])
-            .arg("-C")
-            .arg(directory)
-            .args(arguments)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_AUTHOR_NAME", "Fixture")
-            .env("GIT_AUTHOR_EMAIL", "fixture@example.invalid")
-            .env("GIT_COMMITTER_NAME", "Fixture")
-            .env("GIT_COMMITTER_EMAIL", "fixture@example.invalid")
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
-            .output()?;
-        assert!(
-            output.status.success(),
-            "`git {}` failed: {}",
-            arguments.join(" "),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        Ok(())
-    }
-
     /// An `Unwatched` is only ever built from what git reports, so the
     /// refusal this test words is for the answer `git` itself gives for a
     /// task holding one file of each flag.
@@ -867,8 +835,7 @@ mod tests {
         std::fs::write(root.join("tasks/greet/local.toml"), "committed\n")?;
         std::fs::write(root.join("tasks/greet/src/lib.rs"), "committed\n")?;
         git(root, &["init"])?;
-        git(root, &["add", "--all"])?;
-        git(root, &["commit", "--message", "fixture"])?;
+        commit_everything(root)?;
         git(
             root,
             &[

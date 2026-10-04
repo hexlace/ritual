@@ -47,6 +47,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 mod configuration;
+#[cfg(any(test, feature = "test-util"))]
+pub mod fixture;
 mod give_back;
 mod index;
 mod mentions;
