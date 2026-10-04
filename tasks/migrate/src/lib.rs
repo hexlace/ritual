@@ -65,10 +65,10 @@ pub fn task() -> Task {
     )
 }
 
-// TS-PRECISE-NAMES: `run` is the name every task crate here (`add`, `create`,
-// `import`, `new`, `remove`) gives the body its `task()` mounts, and one name
-// for that role across the tasks is worth more than a more precise verb in one
-// of them.
+// TS-PRECISE-NAMES: `run` is a general verb, kept on purpose: every task crate
+// here (`add`, `create`, `import`, `new`, `remove`) gives the body its `task()`
+// mounts that name, and one name for that role across the tasks is worth more
+// than a more precise verb in one of them.
 fn run(command_line: &CommandLine) -> Outcome {
     let current_dir = std::env::current_dir()
         .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
