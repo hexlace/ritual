@@ -114,7 +114,8 @@ impl Relocation {
                 let directory = normalize(&directory);
                 assert!(
                     directory != from_directory,
-                    "{} is the directory everything moves out of, so it cannot be one of the moved directories",
+                    "{} is the directory everything moves out of, so it cannot be one of the moved \
+                     directories",
                     directory.display()
                 );
                 assert!(

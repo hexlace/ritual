@@ -275,7 +275,8 @@ mod tests {
             ))
             .as_deref(),
             Some(
-                "after the move, Cargo no longer reads .rituals/x and .rituals/y as workspace members"
+                "after the move, Cargo no longer reads .rituals/x and .rituals/y as workspace \
+                 members"
             )
         );
     }

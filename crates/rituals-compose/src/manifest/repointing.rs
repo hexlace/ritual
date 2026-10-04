@@ -461,7 +461,8 @@ mod tests {
                 "[dependencies] extra path `../tasks/greet/extra` is now `../.rituals/greet/extra`",
                 "[dev-dependencies] greet path `../tasks/greet` is now `../.rituals/greet`",
                 "[build_dependencies] greet path `../tasks/greet/` is now `../.rituals/greet`",
-                "[target.cfg(unix).dependencies] shout path `../tasks/shout` is now `../.rituals/shout`",
+                "[target.cfg(unix).dependencies] shout path `../tasks/shout` is now \
+                    `../.rituals/shout`",
             ]
         );
         assert_eq!(
@@ -637,14 +638,20 @@ mod tests {
                 "[package] workspace `tasks/greet` is now `.rituals/greet`",
                 "[lib] path `tasks/greet/src/lib.rs` is now `.rituals/greet/src/lib.rs`",
                 "[[bin]] tool path `tasks/shout/src/main.rs` is now `.rituals/shout/src/main.rs`",
-                "[[example]] path `tasks/greet/examples/hello.rs` is now `.rituals/greet/examples/hello.rs`",
-                "[[test]] flow path `tasks/greet/tests/flow.rs` is now `.rituals/greet/tests/flow.rs`",
-                "[[bench]] speed path `tasks/shout/benches/speed.rs` is now `.rituals/shout/benches/speed.rs`",
-                "[workspace.package] readme `tasks/greet/readme.md` is now `.rituals/greet/readme.md`",
-                "[workspace.package] license-file `tasks/shout/LICENSE` is now `.rituals/shout/LICENSE`",
+                "[[example]] path `tasks/greet/examples/hello.rs` is now \
+                    `.rituals/greet/examples/hello.rs`",
+                "[[test]] flow path `tasks/greet/tests/flow.rs` is now \
+                    `.rituals/greet/tests/flow.rs`",
+                "[[bench]] speed path `tasks/shout/benches/speed.rs` is now \
+                    `.rituals/shout/benches/speed.rs`",
+                "[workspace.package] readme `tasks/greet/readme.md` is now \
+                    `.rituals/greet/readme.md`",
+                "[workspace.package] license-file `tasks/shout/LICENSE` is now \
+                    `.rituals/shout/LICENSE`",
                 "[workspace.dependencies] greet path `tasks/greet` is now `.rituals/greet`",
                 "[patch.crates-io] shout path `tasks/shout` is now `.rituals/shout`",
-                "[patch.https://example.com/index] greet path `tasks/greet` is now `.rituals/greet`",
+                "[patch.https://example.com/index] greet path `tasks/greet` is now \
+                    `.rituals/greet`",
                 "[replace] `greet:0.1.0` path `tasks/greet` is now `.rituals/greet`",
             ]
         );

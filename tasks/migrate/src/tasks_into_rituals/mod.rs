@@ -357,8 +357,9 @@ mod tests {
             &[
                 (
                     "Cargo.toml",
-                    "[workspace]\nmembers = [\"ritual\", \"tasks/greet\", \"tasks/shout\", \"t*/orphan\"]\n\
-                     resolver = \"3\"\n\n[workspace.dependencies]\nrituals = { path = \"vendor/rituals\" }\n",
+                    "[workspace]\nmembers = [\"ritual\", \"tasks/greet\", \"tasks/shout\", \
+                     \"t*/orphan\"]\nresolver = \"3\"\n\n[workspace.dependencies]\n\
+                     rituals = { path = \"vendor/rituals\" }\n",
                 ),
                 (
                     "tasks/orphan/Cargo.toml",

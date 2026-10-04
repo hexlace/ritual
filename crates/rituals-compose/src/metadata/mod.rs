@@ -1413,8 +1413,20 @@ mod tests {
     #[test]
     fn a_package_with_a_source_is_not_a_path_package() -> TestOutcome {
         let from_a_registry = DEMO_WORKSPACE.replacen(
-            "\"id\": \"path+file:///scrubbed/checkout/rituals#0.1.2\",\n      \"license\": null,\n      \"license_file\": null,\n      \"description\": null,\n      \"source\": null,",
-            "\"id\": \"path+file:///scrubbed/checkout/rituals#0.1.2\",\n      \"license\": null,\n      \"license_file\": null,\n      \"description\": null,\n      \"source\": \"registry+https://github.com/rust-lang/crates.io-index\",",
+            concat!(
+                "\"id\": \"path+file:///scrubbed/checkout/rituals#0.1.2\",\n",
+                "      \"license\": null,\n",
+                "      \"license_file\": null,\n",
+                "      \"description\": null,\n",
+                "      \"source\": null,",
+            ),
+            concat!(
+                "\"id\": \"path+file:///scrubbed/checkout/rituals#0.1.2\",\n",
+                "      \"license\": null,\n",
+                "      \"license_file\": null,\n",
+                "      \"description\": null,\n",
+                "      \"source\": \"registry+https://github.com/rust-lang/crates.io-index\",",
+            ),
             1,
         );
         assert_ne!(from_a_registry, DEMO_WORKSPACE);
