@@ -588,8 +588,11 @@ pub fn declares_a_workspace(path: &Path) -> bool {
     document.get("workspace").is_some()
 }
 
-/// Computes the relative `path = "…"` value a dependency at `crate_dir`
-/// wants in the manifest at `manifest_path`. Both arguments are absolute.
+/// Computes the forward-slash `path = "…"` value a dependency at
+/// `crate_dir` wants in the manifest at `manifest_path`.
+///
+/// Both arguments are absolute, and the result is the same on every
+/// platform.
 ///
 /// # Examples
 ///
