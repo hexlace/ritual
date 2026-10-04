@@ -11,6 +11,7 @@
 //! too.
 
 mod schema;
+mod workspace_member;
 
 use std::path::Path;
 
@@ -23,6 +24,7 @@ use crate::workspace::{self, Located, locate_project};
 
 pub use schema::Metadata;
 pub(crate) use schema::{Declared, DepKind, Dependency, Node, NodeDependency, Package};
+pub use workspace_member::WorkspaceMember;
 
 /// A composed CLI crate, found among a workspace's members. Declared in the
 /// private `crate::project` module and re-exported here, at the path a
@@ -580,6 +582,77 @@ impl Metadata {
             .collect()
     }
 
+    /// Returns every member of this workspace, each as a package a task can
+    /// ask about, in the order the document lists its packages.
+    ///
+    /// A dependency pulled in from outside the workspace is not a member,
+    /// however it is reached.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    ///
+    /// use rituals_compose::metadata;
+    ///
+    /// // Reads a document `fetch` already produced from a real
+    /// // `cargo metadata` call, so this example stays `no_run`.
+    /// let document = metadata::fetch(Path::new("."))?;
+    /// for member in document.workspace_members() {
+    ///     if member.declares_a_task_crate() {
+    ///         println!("{} is a task", member.package_name());
+    ///     }
+    /// }
+    /// # Ok::<(), rituals::Failure>(())
+    /// ```
+    #[must_use]
+    pub fn workspace_members(&self) -> Vec<WorkspaceMember<'_>> {
+        self.packages
+            .iter()
+            .filter(|package| self.workspace_members.contains(&package.id))
+            .map(|package| WorkspaceMember { package })
+            .collect()
+    }
+
+    /// Returns the manifest of every package that lives at a path on disk and
+    /// whose manifest lies under `root`, sorted, each once.
+    ///
+    /// A path package is one with no source: a workspace member, and a path
+    /// dependency that is not a member, such as one reached from outside the
+    /// workspace's own directory. A manifest is under `root` by component, so
+    /// `tasks-extra/Cargo.toml` is not under `tasks`. A package from a
+    /// registry or a git repository is not the project's own, however its
+    /// files were unpacked, and is left out.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    ///
+    /// use rituals_compose::metadata;
+    ///
+    /// // Reads a document `fetch` already produced from a real
+    /// // `cargo metadata` call, so this example stays `no_run`.
+    /// let document = metadata::fetch(Path::new("."))?;
+    /// for manifest in document.path_package_manifests_under(Path::new(".")) {
+    ///     println!("the project's own manifest: {}", manifest.display());
+    /// }
+    /// # Ok::<(), rituals::Failure>(())
+    /// ```
+    #[must_use]
+    pub fn path_package_manifests_under(&self, root: &Path) -> Vec<&Path> {
+        let mut manifests: Vec<&Path> = self
+            .packages
+            .iter()
+            .filter(|package| package.source.is_none())
+            .map(|package| package.manifest_path.as_path())
+            .filter(|manifest| manifest.starts_with(root))
+            .collect();
+        manifests.sort_unstable();
+        manifests.dedup();
+        manifests
+    }
+
     /// Reports whether any workspace member in this document is already
     /// named `name` — a task's crate is named after the command, so this is
     /// what tells `add` a name is already taken by an unrelated package.
@@ -707,8 +780,8 @@ mod tests {
     use rituals::{Failure, Name};
 
     use super::{
-        Metadata, ensure_inside_a_project, fetch_in_its_own_project, outside_its_project_refusal,
-        parse,
+        Metadata, WorkspaceMember, ensure_inside_a_project, fetch_in_its_own_project,
+        outside_its_project_refusal, parse,
     };
     use crate::rollback::attempt;
     use crate::test_support::{ScratchDir, TestOutcome};
@@ -1205,5 +1278,155 @@ mod tests {
             assert!(metadata.has_workspace_member(&valid_name("task-true")));
             assert!(!metadata.has_workspace_member(&valid_name("no-such-package")));
         }
+    }
+
+    /// Every package in the fixture is a member, in the order the document
+    /// lists the packages; one taken out of `workspace_members` stands for a
+    /// dependency outside the workspace.
+    #[test]
+    fn workspace_members_are_the_member_packages_and_no_other() -> TestOutcome {
+        let metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+
+        let members: Vec<(&str, String, String)> = metadata
+            .workspace_members()
+            .iter()
+            .map(|member| {
+                (
+                    member.package_name(),
+                    member.manifest_path().display().to_string(),
+                    member.directory().display().to_string(),
+                )
+            })
+            .collect();
+
+        assert_eq!(
+            members,
+            [
+                "demo-ritual:cli",
+                "task-dev-only:task-dev-only",
+                "task-keyword:task-keyword",
+                "task-malformed:task-malformed",
+                "task-null:task-null",
+                "task-renamed-source:task-renamed-source",
+                "task-true:task-true",
+            ]
+            .map(|pair| {
+                let (name, directory) = pair.split_once(':').unwrap_or((pair, pair));
+                (
+                    name,
+                    format!("/scrubbed/checkout/{directory}/Cargo.toml"),
+                    format!("/scrubbed/checkout/{directory}"),
+                )
+            })
+        );
+
+        let task_true_outside = DEMO_WORKSPACE.replacen(
+            "task-null#0.1.0\",\n    \"path+file:///scrubbed/checkout/task-true#0.1.0\",",
+            "task-null#0.1.0\",",
+            1,
+        );
+        assert_ne!(task_true_outside, DEMO_WORKSPACE);
+        let without = parse(task_true_outside.as_bytes())?;
+        assert!(
+            without
+                .workspace_members()
+                .iter()
+                .all(|member| member.package_name() != "task-true"),
+            "a package outside the workspace is not one of its members"
+        );
+        Ok(())
+    }
+
+    /// Only `task = true` makes a crate a task: a missing table, a missing
+    /// key and a key that is not a boolean all say no, by the one rule the
+    /// task list is resolved with.
+    #[test]
+    fn a_member_declares_a_task_crate_only_with_task_true() -> TestOutcome {
+        let metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+
+        let tasks: Vec<&str> = metadata
+            .workspace_members()
+            .iter()
+            .filter(|member| member.declares_a_task_crate())
+            .map(WorkspaceMember::package_name)
+            .collect();
+
+        // `demo-ritual` declares `tasks`, not `task`; `task-malformed` has
+        // `task = "true"`, a string; `task-null` has no metadata at all.
+        assert_eq!(tasks, ["task-keyword", "task-renamed-source", "task-true"]);
+        Ok(())
+    }
+
+    /// Path packages, whether or not members: `rituals` is in the fixture's
+    /// graph but not one of its members.
+    #[test]
+    fn path_package_manifests_include_members_and_path_crates_that_are_not() -> TestOutcome {
+        let metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        let displayed = |manifests: Vec<&Path>| -> Vec<String> {
+            manifests
+                .iter()
+                .map(|manifest| manifest.display().to_string())
+                .collect()
+        };
+
+        assert_eq!(
+            displayed(metadata.path_package_manifests_under(Path::new("/scrubbed/checkout"))),
+            [
+                "cli",
+                "rituals",
+                "task-dev-only",
+                "task-keyword",
+                "task-malformed",
+                "task-null",
+                "task-renamed-source",
+                "task-true",
+            ]
+            .map(|directory| format!("/scrubbed/checkout/{directory}/Cargo.toml"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn path_package_manifests_are_only_those_under_the_root_by_component() -> TestOutcome {
+        let metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+
+        assert_eq!(
+            metadata.path_package_manifests_under(Path::new("/scrubbed/checkout/task-true")),
+            [Path::new("/scrubbed/checkout/task-true/Cargo.toml")]
+        );
+        // `task` is a prefix of `task-true`'s name, not one of its parents.
+        assert!(
+            metadata
+                .path_package_manifests_under(Path::new("/scrubbed/checkout/task"))
+                .is_empty()
+        );
+        assert!(
+            metadata
+                .path_package_manifests_under(Path::new("/elsewhere"))
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    /// A package from a registry or a git source is not the project's own,
+    /// whatever directory its sources were unpacked into.
+    #[test]
+    fn a_package_with_a_source_is_not_a_path_package() -> TestOutcome {
+        let from_a_registry = DEMO_WORKSPACE.replacen(
+            "\"id\": \"path+file:///scrubbed/checkout/rituals#0.1.2\",\n      \"license\": null,\n      \"license_file\": null,\n      \"description\": null,\n      \"source\": null,",
+            "\"id\": \"path+file:///scrubbed/checkout/rituals#0.1.2\",\n      \"license\": null,\n      \"license_file\": null,\n      \"description\": null,\n      \"source\": \"registry+https://github.com/rust-lang/crates.io-index\",",
+            1,
+        );
+        assert_ne!(from_a_registry, DEMO_WORKSPACE);
+        let metadata = parse(from_a_registry.as_bytes())?;
+
+        let manifests = metadata.path_package_manifests_under(Path::new("/scrubbed/checkout"));
+
+        assert!(
+            !manifests.contains(&Path::new("/scrubbed/checkout/rituals/Cargo.toml")),
+            "a package with a source is not a path package: {manifests:?}"
+        );
+        assert_eq!(manifests.len(), 7);
+        Ok(())
     }
 }

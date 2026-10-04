@@ -26,8 +26,9 @@ use serde::Deserialize;
 /// what it prints. Its fields are not public: a caller asks it questions
 /// through its methods — [`Metadata::locate_project`],
 /// [`Metadata::resolve_task_list`], [`Metadata::task_imports`],
-/// [`Metadata::dependents_outside_the_graph`] and
-/// [`Metadata::has_workspace_member`] — so the subset of Cargo's schema it
+/// [`Metadata::dependents_outside_the_graph`],
+/// [`Metadata::has_workspace_member`], [`Metadata::workspace_members`] and
+/// [`Metadata::path_package_manifests_under`] — so the subset of Cargo's schema it
 /// reads can change without breaking anyone.
 ///
 /// # Examples

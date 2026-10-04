@@ -299,7 +299,7 @@ fn find_dependency<'a>(key: &Name, node: &'a Node, packages: &'a [Package]) -> D
 }
 
 /// What a crate's own `[package.metadata.ritual] task` says about it.
-enum TaskDeclaration {
+pub(crate) enum TaskDeclaration {
     /// `task = true`.
     Task,
     /// `task = false`, or no such key.
@@ -310,7 +310,7 @@ enum TaskDeclaration {
 
 /// Reads what `package` declares about itself. The one rule for what makes a
 /// crate a task, whichever way it is being asked.
-fn declaration(package: &Package) -> TaskDeclaration {
+pub(crate) fn declaration(package: &Package) -> TaskDeclaration {
     match package
         .metadata
         .get("ritual")
