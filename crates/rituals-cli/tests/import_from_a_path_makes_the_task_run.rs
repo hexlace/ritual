@@ -10,7 +10,7 @@
 mod support;
 
 use support::help::assert_refuses_unrecognized_subcommand;
-use support::task_sources::{task_output, write_path_task};
+use support::task_sources::{task_output, write_facade_task, write_path_task};
 use support::{
     Project, TempDir, TestOutcome, in_checkout, lockfile, manifest, path_to_str, run_binary,
 };
@@ -47,6 +47,36 @@ fn a_task_imported_from_a_path_runs_under_its_crate_name() -> TestOutcome {
         assert!(
             ran.stdout.contains(&task_output(CRATE, VERSION)),
             "expected the imported crate to answer; stdout was:\n{}",
+            ran.stdout
+        );
+        Ok(())
+    })
+}
+
+/// A facade with no `rituals` of its own, handing over the task of a crate
+/// built on the project's `rituals`: the only `rituals` its task can come
+/// from is the project's, so it imports, and its command is the other
+/// crate's task answering.
+#[test]
+fn a_facade_with_no_rituals_of_its_own_over_a_task_on_the_projects_imports_and_runs() -> TestOutcome
+{
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("import-path-facade")?;
+        let project = Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
+        let task_dir = working_dir.path().join(CRATE);
+        write_path_task(&task_dir, checkout, CRATE, VERSION)?;
+        let facade_dir = working_dir.path().join("facade");
+        write_facade_task(&facade_dir, "facade", &task_dir, CRATE)?;
+
+        project
+            .run_cli(&["import", "facade", "--path", path_to_str(&facade_dir)?])?
+            .expect_success("`import facade --path <directory>`");
+
+        let ran = project.run_cli(&["facade"])?;
+        ran.expect_success("the imported `facade` command, with no step after the import");
+        assert!(
+            ran.stdout.contains(&task_output(CRATE, VERSION)),
+            "expected the re-exported task to answer; stdout was:\n{}",
             ran.stdout
         );
         Ok(())

@@ -219,8 +219,9 @@ cargo ritual import lint --path ../lint
 `import` adds the dependency to the CLI crate, lists its key in `tasks`, and
 regenerates, so the task runs as soon as it finishes. It refuses a crate that
 is not a task, or a task built on another `rituals` than the project uses,
-whether another release or the same release from another source, and leaves
-the project as it found it.
+whether another release or the same release from another source, and whether
+the crate depends on it directly or through a crate whose task it re-exports.
+A refusal leaves the project as it found it.
 
 To write a task crate that several projects can share, run this outside any
 Cargo workspace, since the crate has to build on its own:

@@ -426,12 +426,16 @@ The steps, in order:
    about itself, and the dependency under the key must be a task built on the
    very `rituals` package the CLI crate uses. Two packages called `rituals`
    are two crates to Rust, whatever their versions, and the generated file
-   hands one's `Task` to the other's `run`. The task crate has to name
-   `rituals` as a direct dependency, because that is the `rituals` ritual can
-   read. A crate that only re-exports another crate's task does build, but
-   the `rituals` that task is built on belongs to the crate it re-exports
-   from, which the check does not reach. A crate that is not one is
-   refused.
+   hands one's `Task` to the other's `run`. A task can only come from a
+   `rituals` in the crate's normal-dependency closure: its own, or the one
+   under a crate whose task it re-exports. So the check walks that closure
+   and refuses if any `rituals` in it is not the CLI's, naming the crate
+   that depends on the other one, and refuses a closure with no `rituals`
+   at all, which has no task to hand over. A facade with no `rituals` of
+   its own, over a task on the CLI's, passes. A tree that holds a second
+   `rituals` it never hands over is refused too; nothing has been written
+   by then, so that errs on the side of a command line that still builds.
+   A crate that is not a task is refused.
 5. **The append.** The key joins `[package.metadata.ritual] tasks`.
 6. **Regenerate**, once the run has committed. If it fails, the failure says
    the task is imported and names the `regenerate` command that finishes it.

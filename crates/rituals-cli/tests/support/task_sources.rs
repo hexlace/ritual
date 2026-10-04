@@ -112,6 +112,83 @@ pub(crate) fn write_facade_task(
     )
 }
 
+/// Writes a task crate at `directory` that depends on the `rituals` at
+/// `rituals_directory` by path, as its own, and also on the crate called
+/// `reexported` at `reexported_directory`, whose task it hands over as its
+/// own: a facade whose direct `rituals` says nothing about the task's.
+pub(crate) fn write_facade_task_with_own_rituals(
+    directory: &Path,
+    crate_name: &str,
+    rituals_directory: &Path,
+    reexported_directory: &Path,
+    reexported: &str,
+) -> TestOutcome {
+    crates::write_crate(
+        directory,
+        &format!(
+            "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+             [dependencies]\nrituals = {{ path = {:?} }}\n{reexported} = {{ path = {:?} }}\n\n\
+             [package.metadata.ritual]\ntask = true\n",
+            path_to_str(rituals_directory)?,
+            path_to_str(reexported_directory)?
+        ),
+        &format!("//! A task re-exported from `{reexported}`.\n\npub use {reexported}::task;\n"),
+    )
+}
+
+/// Writes a crate at `directory` that declares itself a task but depends
+/// on nothing, so no `rituals` is anywhere in what it is built with.
+pub(crate) fn write_task_crate_without_rituals(directory: &Path, crate_name: &str) -> TestOutcome {
+    crates::write_crate(
+        directory,
+        &format!(
+            "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+             [package.metadata.ritual]\ntask = true\n"
+        ),
+        "//! A crate that declares itself a task and depends on nothing.\n",
+    )
+}
+
+/// A git repository holding a crate called `rituals`, and the commit a
+/// dependency pins it to.
+pub(crate) struct GitRituals {
+    /// The `file://` URL that clones the repository.
+    pub(crate) url: String,
+    /// The full id of the one commit in it.
+    pub(crate) rev: String,
+}
+
+/// Creates a git repository at `directory` holding, at its root, a crate
+/// called `rituals` at `version` (see [`write_other_rituals`]), committed.
+pub(crate) fn write_git_rituals_repository(directory: &Path, version: &str) -> Outcome<GitRituals> {
+    write_other_rituals(directory, version)?;
+    git(directory, &["init", "--quiet", "--initial-branch", "main"])?;
+    git(directory, &["add", "--all"])?;
+    git(directory, &["commit", "--quiet", "--message", "a rituals"])?;
+    let rev_parse = super::git::git(directory, &["rev-parse", "HEAD"])?;
+    rev_parse.expect_success("`git rev-parse HEAD` in a rituals repository");
+    Ok(GitRituals {
+        url: format!("file://{}", path_to_str(directory)?),
+        rev: rev_parse.stdout.trim().to_string(),
+    })
+}
+
+/// Writes a task crate at `directory` that depends on the `rituals` in
+/// `rituals`'s repository, pinned to its commit with `rev`.
+pub(crate) fn write_task_built_on_git_rituals(
+    directory: &Path,
+    rituals: &GitRituals,
+    crate_name: &str,
+    version: &str,
+) -> TestOutcome {
+    let dependency = format!("{{ git = {:?}, rev = {:?} }}", rituals.url, rituals.rev);
+    crates::write_crate(
+        directory,
+        &task_manifest(crate_name, version, &dependency),
+        &task_lib(crate_name, version),
+    )
+}
+
 /// Writes a plain crate at `directory` that never declares itself a task:
 /// no `[package.metadata.ritual]` table, and no dependencies.
 pub(crate) fn write_unmarked_crate(directory: &Path, crate_name: &str) -> TestOutcome {
