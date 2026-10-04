@@ -33,6 +33,7 @@ fn a_project_with_tasks_in_tasks_builds_and_runs_them() -> TestOutcome {
                 "create",
                 "import",
                 "remove",
+                "migrate",
                 "greet",
                 "shout",
                 "help"

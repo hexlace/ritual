@@ -78,6 +78,7 @@ fn a_remove_that_cannot_write_the_workspace_manifest_puts_everything_back() -> T
                 "create",
                 "import",
                 "remove",
+                "migrate",
                 "greet",
                 "help",
             ],

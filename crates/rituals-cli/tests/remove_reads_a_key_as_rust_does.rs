@@ -44,6 +44,7 @@ fn a_key_spelled_with_a_hyphen_takes_its_underscored_dependency_line_with_it() -
                 "create",
                 "import",
                 "remove",
+                "migrate",
                 "chore-job",
                 "help",
             ],
@@ -83,6 +84,7 @@ fn a_key_spelled_with_a_hyphen_takes_its_underscored_dependency_line_with_it() -
                 "create",
                 "import",
                 "remove",
+                "migrate",
                 "help",
             ],
         )

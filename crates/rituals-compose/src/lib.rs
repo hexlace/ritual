@@ -2,8 +2,8 @@
 //! maintained.
 //!
 //! This is what a scaffolding task links against — such as `add`, `create`,
-//! `import`, `new`, `regenerate` and `remove`, the task crates ritual's own
-//! bundle groups — for the renderers that produce a task crate's own files and
+//! `import`, `migrate`, `new`, `regenerate` and `remove`, the task crates ritual's
+//! own bundle groups — for the renderers that produce a task crate's own files and
 //! a composed command line's generated file, for the metadata and manifest
 //! operations those tasks need, for the [`cargo`] a task that runs Cargo uses
 //! and the [`shell`] that renders a command for a person to copy, for the

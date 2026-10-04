@@ -1,6 +1,6 @@
 //! A project scaffolded with no `--cli` carries ritual's management bundle —
-//! `add`, `regenerate`, `new`, `create`, `import` and `remove` — as one import
-//! under the key `ritual`, flattened into its top level because the project's
+//! `add`, `regenerate`, `new`, `create`, `import`, `remove` and `migrate` — as
+//! one import under the key `ritual`, flattened into its top level because the project's
 //! own bin is named `ritual` too. Hand-renaming that `[[bin]]` and rebuilding
 //! nests the bundle under `ritual` on the next build, with no other file
 //! touched.
@@ -139,6 +139,7 @@ fn assert_an_added_task_sits_flat_beside_the_bundle(project: &Project) -> TestOu
             "create",
             "import",
             "remove",
+            "migrate",
             "my-task",
             "help"
         ],
@@ -180,6 +181,7 @@ fn assert_renaming_the_bin_nests_the_bundle(project: &Project) -> TestOutcome {
             "create",
             "import",
             "remove",
+            "migrate",
             "help"
         ],
         "stdout was:\n{}",

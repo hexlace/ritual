@@ -74,6 +74,7 @@ fn removing_a_scaffolded_task_by_key_deletes_it_and_leaves_a_project_that_builds
                 "create",
                 "import",
                 "remove",
+                "migrate",
                 "help",
             ],
         )?;

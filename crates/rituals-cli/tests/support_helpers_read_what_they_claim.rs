@@ -19,7 +19,9 @@ Commands:
   regenerate  rewrite src/main.rs from the imported tasks
   new         scaffold a project with a command line of its own
   create      scaffold a task crate on its own, for a project to import later
+  import      import a task crate from a registry, git or a path, and regenerate
   remove      take a task out of this project, in the order that keeps it building
+  migrate     bring this project up to the layout of the ritual it runs
   help        Print this message or the help of the given subcommand(s)
 
 Options:
@@ -31,7 +33,16 @@ Options:
 fn command_names_reads_exactly_the_commands_block_in_order() {
     assert_eq!(
         command_names(CAPTURED_HELP),
-        ["add", "regenerate", "new", "create", "remove", "help"]
+        [
+            "add",
+            "regenerate",
+            "new",
+            "create",
+            "import",
+            "remove",
+            "migrate",
+            "help"
+        ]
     );
 }
 

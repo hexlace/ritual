@@ -114,6 +114,7 @@ fn a_nested_bundle_mounts_like_any_task_and_dispatches_through_every_level() -> 
                 "create",
                 "import",
                 "remove",
+                "migrate",
                 "daily",
             ],
         )?;

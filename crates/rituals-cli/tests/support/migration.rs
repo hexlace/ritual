@@ -135,24 +135,46 @@ pub(crate) fn made_writable(path: &Path) -> TestOutcome {
         .context(&format!("making {} writable failed", path.display()))
 }
 
-/// The `git …` commands a message quotes in backticks, in the order it
-/// quotes them, with a quoted `a && b` taken as two. Each is returned as the
-/// arguments after `git`.
-///
-/// A recovery command is the one thing a failed `migrate` may print for the
-/// person to run, and the form it takes elsewhere in ritual: a command in
-/// backticks, starting `git `.
-pub(crate) fn printed_git_commands(message: &str) -> Vec<Vec<String>> {
+/// The recovery commands a message quotes in backticks, in the order it
+/// quotes them: each is a `git …` or an `mv …` command, which is exactly
+/// what a failed `migrate` may print for the person to run, and the form it
+/// takes elsewhere in ritual. A command is returned whole, as the person
+/// would paste it, `&&` and quoting included.
+pub(crate) fn printed_recovery_commands(message: &str) -> Vec<String> {
     message
         .split('`')
         .skip(1)
         .step_by(2)
-        .flat_map(|quoted| quoted.split("&&"))
-        .filter_map(|command| {
-            let mut words = command.split_whitespace();
-            (words.next() == Some("git")).then(|| words.map(str::to_string).collect())
+        .filter(|quoted| {
+            quoted
+                .split_whitespace()
+                .next()
+                .is_some_and(|program| program == "git" || program == "mv")
         })
+        .map(str::to_string)
         .collect()
+}
+
+/// Runs `command` with `sh -c` from `directory`, as a person pastes it into
+/// a shell standing in the project's root, with git reading nothing from the
+/// machine it runs on.
+pub(crate) fn run_recovery_command(directory: &Path, command: &str) -> Outcome<RunOutput> {
+    let output = std::process::Command::new("sh")
+        .args(["-c", command])
+        .current_dir(directory)
+        .stdin(std::process::Stdio::null())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .output()
+        .context(&format!("spawning `{command}` failed"))?;
+    Ok(RunOutput {
+        exit_code: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
 }
 
 /// What a story that failed `migrate` on purpose found afterwards.
@@ -160,15 +182,15 @@ pub(crate) fn printed_git_commands(message: &str) -> Vec<Vec<String>> {
 pub(crate) enum WayBack {
     /// The project was left byte-identical to what it was.
     LeftAsItWas,
-    /// The project was left changed, and the output gave a `git` command
-    /// that put it back byte-identically.
+    /// The project was left changed, and the output gave a recovery command,
+    /// `git` or `mv`, that put it back byte-identically.
     GivenBack(Vec<String>),
 }
 
 /// Checks a `migrate` that was made to fail kept its promise: it was refused
 /// by ritual, naming each of `names`, and the project is either as it was
-/// (`before`) or was put back by running the `git` commands the output
-/// printed, from the project's root. Says which.
+/// (`before`) or was put back by running the recovery commands, `git` or
+/// `mv`, the output printed, from the project's root. Says which.
 ///
 /// Whichever the output chose, a project that changed and printed no command
 /// fails here, and so does a command that does not restore every byte: the
@@ -218,18 +240,17 @@ pub(crate) fn assert_failure_kept_the_promise_reading(
         return Ok(WayBack::LeftAsItWas);
     }
 
-    let commands = printed_git_commands(&everything_written(failed));
+    let commands = printed_recovery_commands(&everything_written(failed));
     assert!(
         !commands.is_empty(),
-        "{what} left the project changed ({:?}) and printed no `git` command to put it back; \
-         it wrote:\n{}",
+        "{what} left the project changed ({:?}) and printed no `git` or `mv` command to put it \
+         back; it wrote:\n{}",
         super::tree::changed_paths(before, &after),
         everything_written(failed)
     );
     for command in &commands {
-        let arguments: Vec<&str> = command.iter().map(String::as_str).collect();
-        git::git(project.root(), &arguments)?
-            .expect_success(&format!("the printed recovery `git {}`", command.join(" ")));
+        run_recovery_command(project.root(), command)?
+            .expect_success(&format!("the printed recovery `{command}`"));
     }
     assert_trees_identical(
         &format!(
@@ -238,9 +259,7 @@ pub(crate) fn assert_failure_kept_the_promise_reading(
         before,
         &read_tree()?,
     );
-    Ok(WayBack::GivenBack(
-        commands.iter().map(|command| command.join(" ")).collect(),
-    ))
+    Ok(WayBack::GivenBack(commands))
 }
 
 /// A 0.1-layout project, committed, with the tasks `greet` and `shout`,

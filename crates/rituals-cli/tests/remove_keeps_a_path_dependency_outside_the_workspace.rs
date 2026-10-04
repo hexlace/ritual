@@ -68,6 +68,7 @@ fn a_task_imported_from_outside_the_workspace_loses_only_its_dependency_line() -
                 "create",
                 "import",
                 "remove",
+                "migrate",
                 "help",
             ],
         )
