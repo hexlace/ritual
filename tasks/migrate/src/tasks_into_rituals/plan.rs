@@ -170,33 +170,43 @@ pub(super) fn plan(
 
     Ok(Planned {
         root: migrating.root.to_path_buf(),
-        edited: repointed_manifests(before, migrating.root, &relocation)?,
+        edited: repointed_manifests(
+            before,
+            migrating.root,
+            &relocation,
+            migrating.migrate_command,
+        )?,
         relocation,
         moves,
     })
 }
 
-/// Every manifest of the project, each read once and repointed in memory:
-/// the workspace's own first, then every other package at a path under the
-/// root, in path order, so the order they are written and reported in is
-/// the same on every run. A manifest with nothing to change is left out.
+/// Every manifest Cargo reads, each read once and repointed in memory: the
+/// workspace's own first, then every other in path order, so the order they
+/// are written and reported in is the same on every run. A manifest with
+/// nothing to change is left out.
 ///
 /// A task can depend on another and any member can depend on a task, so the
 /// command line crate's manifest is not the only one that names a moved
-/// directory.
+/// directory. Nor is a member: a crate outside the workspace that Cargo
+/// still reads can reach a task, and so can one that crate reaches.
+///
+/// Git has to be able to give every manifest this edits back, so one that
+/// git does not track and that needs an edit is refused before anything is
+/// written.
 fn repointed_manifests(
     before: &Metadata,
     root: &Path,
     relocation: &Relocation,
+    migrate_command: &str,
 ) -> Result<Vec<Edited>, Failure> {
     let workspace_manifest = root.join("Cargo.toml");
     let mut paths = vec![workspace_manifest.clone()];
     paths.extend(
         before
-            .path_package_manifests_under(root)
+            .manifests_cargo_reads()?
             .into_iter()
-            .filter(|path| *path != workspace_manifest)
-            .map(Path::to_path_buf),
+            .filter(|path| *path != workspace_manifest),
     );
 
     let mut edited = Vec::new();
@@ -207,6 +217,14 @@ fn repointed_manifests(
             edited.push(Edited { manifest, changes });
         }
     }
+    let first_edits: Vec<(PathBuf, String)> = edited
+        .iter()
+        .filter_map(|edit| {
+            let change = edit.changes.first()?;
+            Some((edit.manifest.path().to_path_buf(), change.to_string()))
+        })
+        .collect();
+    refusals::ensure_git_tracks_every_edited_manifest(&first_edits, root, migrate_command)?;
     Ok(edited)
 }
 

@@ -28,7 +28,7 @@ use serde::Deserialize;
 /// [`Metadata::resolve_task_list`], [`Metadata::task_imports`],
 /// [`Metadata::dependents_outside_the_graph`],
 /// [`Metadata::has_workspace_member`], [`Metadata::workspace_members`] and
-/// [`Metadata::path_package_manifests_under`] — so the subset of Cargo's schema it
+/// [`Metadata::manifests_cargo_reads`] — so the subset of Cargo's schema it
 /// reads can change without breaking anyone.
 ///
 /// # Examples

@@ -14,19 +14,10 @@ use std::path::{Path, PathBuf};
 use rituals::Failure;
 use toml_edit::{DocumentMut, Item, TableLike, Value};
 
+use super::path_dependencies::DEPENDENCY_TABLES;
 use super::{Manifest, PathChange};
 use crate::paths::{lies_under, normalize};
 use crate::relocation::Relocation;
-
-/// The tables of dependencies a manifest, or one of its `[target.<t>]`
-/// tables, can hold, in both spellings Cargo accepts for the dashed ones.
-const DEPENDENCY_TABLES: [&str; 5] = [
-    "dependencies",
-    "dev-dependencies",
-    "build-dependencies",
-    "dev_dependencies",
-    "build_dependencies",
-];
 
 /// The arrays of tables that name a source file of a build target.
 const TARGET_ARRAYS: [&str; 4] = ["bin", "example", "test", "bench"];

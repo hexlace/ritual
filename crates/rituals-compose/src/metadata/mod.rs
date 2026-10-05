@@ -5,11 +5,14 @@
 //! about a project in one call: where the workspace is, which package is
 //! its composed CLI, what that package's dependencies resolve to, what each
 //! of those declares about itself, and what extern-crate name rustc gives
-//! each one. Ritual never reads a dependency's manifest itself: a manifest
-//! the graph did not load, such as a path crate behind an optional
-//! dependency no feature turns on, is read by `cargo metadata --no-deps`
-//! too.
+//! each one. A manifest the graph did not load, such as a path crate behind
+//! an optional dependency no feature turns on, is read by `cargo metadata
+//! --no-deps` too, except where every crate Cargo reads is wanted and not
+//! only the ones it lists: [`Metadata::manifests_cargo_reads`] follows path
+//! dependencies through the TOML itself, since `--no-deps` refuses a crate
+//! that sits under the workspace's root without being a member.
 
+mod manifests_cargo_reads;
 mod schema;
 mod workspace_member;
 
@@ -612,45 +615,6 @@ impl Metadata {
             .filter(|package| self.workspace_members.contains(&package.id))
             .map(|package| WorkspaceMember { package })
             .collect()
-    }
-
-    /// Returns the manifest of every package that lives at a path on disk and
-    /// whose manifest lies under `root`, sorted, each once.
-    ///
-    /// A path package is one with no source: a workspace member, and a path
-    /// dependency that is not a member, such as one reached from outside the
-    /// workspace's own directory. A manifest is under `root` by component, so
-    /// `tasks-extra/Cargo.toml` is not under `tasks`. A package from a
-    /// registry or a git repository is not the project's own, however its
-    /// files were unpacked, and is left out.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::path::Path;
-    ///
-    /// use rituals_compose::metadata;
-    ///
-    /// // Reads a document `fetch` already produced from a real
-    /// // `cargo metadata` call, so this example stays `no_run`.
-    /// let document = metadata::fetch(Path::new("."))?;
-    /// for manifest in document.path_package_manifests_under(Path::new(".")) {
-    ///     println!("the project's own manifest: {}", manifest.display());
-    /// }
-    /// # Ok::<(), rituals::Failure>(())
-    /// ```
-    #[must_use]
-    pub fn path_package_manifests_under(&self, root: &Path) -> Vec<&Path> {
-        let mut manifests: Vec<&Path> = self
-            .packages
-            .iter()
-            .filter(|package| package.source.is_none())
-            .map(|package| package.manifest_path.as_path())
-            .filter(|manifest| manifest.starts_with(root))
-            .collect();
-        manifests.sort_unstable();
-        manifests.dedup();
-        manifests
     }
 
     /// Reports whether any workspace member in this document is already
@@ -1370,7 +1334,7 @@ mod tests {
         };
 
         assert_eq!(
-            displayed(metadata.path_package_manifests_under(Path::new("/scrubbed/checkout"))),
+            displayed(metadata.path_package_manifests()),
             [
                 "cli",
                 "rituals",
@@ -1382,28 +1346,6 @@ mod tests {
                 "task-true",
             ]
             .map(|directory| format!("/scrubbed/checkout/{directory}/Cargo.toml"))
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn path_package_manifests_are_only_those_under_the_root_by_component() -> TestOutcome {
-        let metadata = parse(DEMO_WORKSPACE.as_bytes())?;
-
-        assert_eq!(
-            metadata.path_package_manifests_under(Path::new("/scrubbed/checkout/task-true")),
-            [Path::new("/scrubbed/checkout/task-true/Cargo.toml")]
-        );
-        // `task` is a prefix of `task-true`'s name, not one of its parents.
-        assert!(
-            metadata
-                .path_package_manifests_under(Path::new("/scrubbed/checkout/task"))
-                .is_empty()
-        );
-        assert!(
-            metadata
-                .path_package_manifests_under(Path::new("/elsewhere"))
-                .is_empty()
         );
         Ok(())
     }
@@ -1432,7 +1374,7 @@ mod tests {
         assert_ne!(from_a_registry, DEMO_WORKSPACE);
         let metadata = parse(from_a_registry.as_bytes())?;
 
-        let manifests = metadata.path_package_manifests_under(Path::new("/scrubbed/checkout"));
+        let manifests = metadata.path_package_manifests();
 
         assert!(
             !manifests.contains(&Path::new("/scrubbed/checkout/rituals/Cargo.toml")),

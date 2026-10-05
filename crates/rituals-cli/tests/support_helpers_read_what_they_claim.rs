@@ -148,6 +148,36 @@ fn removing_an_absent_task_or_dependency_is_refused() {
     assert!(matches!(manifest::tasks(&document).as_deref(), Ok([])));
 }
 
+/// An optional path dependency and an exclude list are written where Cargo
+/// reads them, and marking a dependency that is not there is refused.
+#[test]
+fn marking_a_dependency_optional_and_excluding_a_directory_write_what_cargo_reads() {
+    let mut document = parse(
+        "[workspace]\nmembers = [\"a\"]\n\n[dependencies]\nx = { path = \"../x\" }\ny = \"1\"\n",
+    );
+
+    assert!(manifest::mark_optional(&mut document, &["dependencies"], "x").is_ok());
+    assert!(manifest::set_workspace_exclude(&mut document, &["vendor/x"]).is_ok());
+
+    assert_eq!(
+        manifest::lookup(&document, &["dependencies", "x", "optional"])
+            .and_then(toml_edit::Item::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        manifest::lookup(&document, &["workspace", "exclude"])
+            .and_then(toml_edit::Item::as_array)
+            .map(|excluded| excluded
+                .iter()
+                .filter_map(toml_edit::Value::as_str)
+                .collect()),
+        Some(vec!["vendor/x"])
+    );
+    assert!(manifest::mark_optional(&mut document, &["dependencies"], "y").is_err());
+    assert!(manifest::mark_optional(&mut document, &["dependencies"], "absent").is_err());
+    assert!(manifest::set_workspace_exclude(&mut parse("[package]\n"), &["x"]).is_err());
+}
+
 #[test]
 fn changed_paths_names_added_removed_and_changed_files_once_each() {
     let file = |bytes: &str| Entry::File(bytes.as_bytes().to_vec());

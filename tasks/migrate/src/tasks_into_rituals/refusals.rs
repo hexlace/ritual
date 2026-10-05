@@ -118,6 +118,41 @@ pub(super) fn ensure_none_holds_a_submodule(
     Ok(())
 }
 
+/// Refuses when git does not track a manifest that needs an edit, because
+/// once migrate has edited it git could not give its old bytes back.
+///
+/// `edits` is each such manifest with the first change it needs, as a person
+/// reads one. A manifest git ignores or has never been told about is the
+/// case: the work tree is clean, so it is ignored. One git tracks is fine
+/// whatever a rule says about it.
+pub(super) fn ensure_git_tracks_every_edited_manifest(
+    edits: &[(PathBuf, String)],
+    root: &Path,
+    migrate_command: &str,
+) -> Outcome {
+    let manifests: Vec<PathBuf> = edits
+        .iter()
+        .map(|(manifest, _change)| manifest.clone())
+        .collect();
+    let untracked = git::files_git_does_not_track(&manifests, root).map_err(|unanswered| {
+        precondition::unanswered_refusal(&unanswered, migrate_command, |message| {
+            tracking_unknown(message)
+        })
+    })?;
+    let Some(manifest) = untracked.first() else {
+        return Ok(());
+    };
+    let change = edits
+        .iter()
+        .find(|(edited, _change)| edited == manifest)
+        .map_or("", |(_manifest, change)| change.as_str());
+    Err(manifest_is_not_tracked(
+        &from_the_root(manifest, root),
+        change,
+        migrate_command,
+    ))
+}
+
 /// The refusal for a git that could not say whether a directory holds a
 /// submodule.
 fn submodule_question_refusal(
@@ -168,6 +203,21 @@ fn holds_a_submodule(directory: &str, gitlink: &str, migrate_command: &str) -> F
     ))
 }
 
+fn manifest_is_not_tracked(manifest: &str, change: &str, migrate_command: &str) -> Failure {
+    Failure::new(format!(
+        "refusing to migrate: git does not track {manifest}, which Cargo reads and which would \
+         need editing ({change}); git could not give it back once migrate edits it, so commit \
+         it, or take that path out of it, then run `{migrate_command}` again"
+    ))
+}
+
+fn tracking_unknown(git_words: &str) -> Failure {
+    Failure::new(format!(
+        "refusing to migrate: git could not say which of the manifests migrate edits it \
+         tracks: {git_words}"
+    ))
+}
+
 fn submodule_unknown(directory: &str, git_words: &str) -> Failure {
     Failure::new(format!(
         "refusing to move {directory}: git could not say whether it holds a git submodule: \
@@ -183,8 +233,9 @@ mod tests {
 
     use super::{
         Member, destination_exists, destination_is_not_a_directory, ensure_destinations_are_free,
-        ensure_none_holds_a_submodule, ensure_none_holds_other_members, holds_a_submodule,
-        holds_members,
+        ensure_git_tracks_every_edited_manifest, ensure_none_holds_a_submodule,
+        ensure_none_holds_other_members, holds_a_submodule, holds_members, manifest_is_not_tracked,
+        tracking_unknown,
     };
     use crate::precondition::WorkTree;
     use crate::test_support::{ScratchDir, TestOutcome, init_and_commit, write_files};
@@ -226,6 +277,55 @@ mod tests {
             "refusing to move tasks/x: tasks/x/vendor is a git submodule, which migrate cannot \
              move; move tasks/x with `git mv`, update its members entry and every path to it, \
              then run `cargo ritual migrate` again"
+        );
+    }
+
+    #[test]
+    fn an_untracked_manifest_is_refused_with_the_edit_and_what_to_do() {
+        assert_eq!(
+            manifest_is_not_tracked(
+                "vendor/x/Cargo.toml",
+                "[dependencies] greet path `../../tasks/greet` is now `../../.rituals/greet`",
+                MIGRATE
+            )
+            .to_string(),
+            "refusing to migrate: git does not track vendor/x/Cargo.toml, which Cargo reads and \
+             which would need editing ([dependencies] greet path `../../tasks/greet` is now \
+             `../../.rituals/greet`); git could not give it back once migrate edits it, so \
+             commit it, or take that path out of it, then run `cargo ritual migrate` again"
+        );
+    }
+
+    #[test]
+    fn a_git_that_could_not_say_what_it_tracks_is_refused_in_its_own_words() {
+        assert_eq!(
+            tracking_unknown("bad object").to_string(),
+            "refusing to migrate: git could not say which of the manifests migrate edits it \
+             tracks: bad object"
+        );
+    }
+
+    #[test]
+    fn a_tracked_manifest_that_needs_an_edit_is_fine() -> TestOutcome {
+        let scratch = ScratchDir::new("refusals-tracked-manifest")?;
+        let root = scratch.path();
+        write_files(root, &[("Cargo.toml", "# committed\n")])?;
+        init_and_commit(root)?;
+
+        let checked = ensure_git_tracks_every_edited_manifest(
+            &[(root.join("Cargo.toml"), "a change".to_string())],
+            root,
+            MIGRATE,
+        );
+
+        assert!(checked.is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn nothing_to_edit_asks_git_nothing() {
+        assert!(
+            ensure_git_tracks_every_edited_manifest(&[], Path::new("/nowhere"), MIGRATE).is_ok()
         );
     }
 

@@ -54,8 +54,8 @@ crate asks it for the directory, the member entry and the path to report, so
 
 **Git is asked in one place.** `git` answers whether git can give back every
 file in a directory about to be deleted, whether the work tree is clean, which
-directories hold Cargo configuration, which entries are submodules and which
-files mention a pattern. `remove` and `migrate` ask the same code, and each
+directories hold Cargo configuration, which entries are submodules, which
+files mention a pattern and which files it does not track. `remove` and `migrate` ask the same code, and each
 words its own refusal from what it gets back: `Unanswered` when git could not
 answer at all, `NotClean` for the clean-tree question, and `CannotGiveBack` for
 the give-back one.

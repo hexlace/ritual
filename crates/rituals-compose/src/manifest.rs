@@ -13,6 +13,7 @@ use crate::rollback::Changes;
 mod entry_removal;
 mod member_globs;
 mod path_change;
+mod path_dependencies;
 mod removal;
 mod repointing;
 

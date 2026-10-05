@@ -337,12 +337,14 @@ tasks` list imports, it:
 - changes the workspace's `members`, `default-members` and `exclude`, keeping a
   glob a glob (`tasks/*` becomes `.rituals/*`) and keeping an explicit list
   explicit, each entry changed where it stands;
-- changes the `path` of every dependency on a moved task in every manifest of
-  the project, not only the CLI crate's, since tasks can depend on each other:
-  `[dependencies]` and the other dependency tables, `[workspace.dependencies]`,
-  `[patch]`, `[replace]`, and the other places Cargo reads a path. A path that
-  still leads where it led, such as a task's `../greet` to a task that moved
-  beside it, is left as you wrote it;
+- changes the `path` of every dependency on a moved task in every manifest
+  Cargo reads, crates outside the workspace included, not only the CLI crate's,
+  since tasks can depend on each other and a crate Cargo reaches through an
+  optional dependency can depend on a task: `[dependencies]` and the other
+  dependency tables, `[workspace.dependencies]`, `[patch]`, `[replace]`, and
+  the other places Cargo reads a path. A path that still leads where it led,
+  such as a task's `../greet` to a task that moved beside it, is left as you
+  wrote it;
 - leaves `tasks/` in place when something that is not one of those tasks is
   still in it, and says what is left.
 
@@ -378,7 +380,10 @@ anything when:
 - a task's directory holds other workspace members, or a git submodule, or
   its destination in `.rituals/` is taken, or `.rituals` is a file;
 - a path in a manifest reaches a task through a symbolic link or another
-  spelling of its directory, so there is no telling how to repoint it.
+  spelling of its directory, so there is no telling how to repoint it;
+- a manifest that needs one of those edits is one git does not track, such as
+  a crate outside the workspace in a directory git ignores, since git could not
+  give its old text back. Commit it, or take the path out of it.
 
 If anything fails while it is moving and editing, the project is put back as
 it was, ignored files included, and the failure says so. If a move cannot be

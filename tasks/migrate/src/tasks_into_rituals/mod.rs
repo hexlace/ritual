@@ -390,6 +390,90 @@ mod tests {
         Ok(())
     }
 
+    /// `legacy_project` with a crate `vendor/x`, which depends on `greet`, kept
+    /// out of the workspace by `exclude` and reached only through an
+    /// optional dependency of the command line: Cargo reads it, and
+    /// `cargo metadata` does not list it.
+    fn with_an_excluded_crate_that_reaches_greet(root: &Path) -> TestOutcome {
+        legacy_project(root)?;
+        let workspace = std::fs::read_to_string(root.join("Cargo.toml"))?
+            .replace("\"tasks/*\"]", "\"tasks/*\"]\nexclude = [\"vendor/x\"]");
+        let command_line = std::fs::read_to_string(root.join("ritual/Cargo.toml"))?.replace(
+            "[package.metadata.ritual]",
+            "x = { path = \"../vendor/x\", optional = true }\n\n[package.metadata.ritual]",
+        );
+        write_files(
+            root,
+            &[
+                ("Cargo.toml", &workspace),
+                ("ritual/Cargo.toml", &command_line),
+                (
+                    "vendor/x/Cargo.toml",
+                    &format!(
+                        "{}\n[dependencies]\ngreet = {{ path = \"../../tasks/greet\" }}\n",
+                        package("x", false)
+                    ),
+                ),
+                ("vendor/x/src/lib.rs", "//! A fixture.\n"),
+            ],
+        )
+    }
+
+    /// The crate is outside the workspace and reachable only through an
+    /// optional dependency, so `cargo metadata` never lists it, and Cargo
+    /// still reads its path to `greet`: it has to follow `greet`. It does not
+    /// move, so its own base is the same before and after.
+    #[test]
+    fn an_excluded_crate_reached_only_through_an_optional_dependency_is_repointed() -> TestOutcome {
+        let scratch = ScratchDir::new("step1-excluded")?;
+        let root = scratch.path();
+        with_an_excluded_crate_that_reaches_greet(root)?;
+
+        let lines = applied(root)??;
+
+        assert!(
+            lines.contains(
+                &"updated vendor/x/Cargo.toml ([dependencies] greet path `../../tasks/greet` is \
+                  now `../../.rituals/greet`)"
+                    .to_string()
+            ),
+            "{lines:?}"
+        );
+        let excluded = std::fs::read_to_string(root.join("vendor/x/Cargo.toml"))?;
+        assert!(
+            excluded.contains("greet = { path = \"../../.rituals/greet\" }"),
+            "{excluded}"
+        );
+        Ok(())
+    }
+
+    /// Git ignores `vendor/x`, so once migrate edits its manifest git could
+    /// not give the old bytes back: the step refuses, naming the file and the
+    /// edit, and writes nothing.
+    #[test]
+    fn an_untracked_manifest_that_needs_an_edit_is_refused() -> TestOutcome {
+        let scratch = ScratchDir::new("step1-untracked")?;
+        let root = scratch.path();
+        with_an_excluded_crate_that_reaches_greet(root)?;
+        write_files(root, &[(".gitignore", "/vendor/x/\n")])?;
+
+        let failure = applied(root)?
+            .err()
+            .ok_or("an untracked manifest that needs an edit must be refused")?;
+
+        assert_eq!(
+            failure,
+            "refusing to migrate: git does not track vendor/x/Cargo.toml, which Cargo reads and \
+             which would need editing ([dependencies] greet path `../../tasks/greet` is now \
+             `../../.rituals/greet`); git could not give it back once migrate edits it, so \
+             commit it, or take that path out of it, then run `cargo ritual migrate` again; \
+             ritual put the project back as it found it"
+        );
+        assert!(root.join("tasks/greet/Cargo.toml").is_file());
+        assert!(!root.join(".rituals").exists());
+        Ok(())
+    }
+
     /// Cargo reads a `paths` override in its configuration, which no manifest
     /// names: it is what the check after the move is for. The move is undone,
     /// manifests and directories both, and the failure says so.

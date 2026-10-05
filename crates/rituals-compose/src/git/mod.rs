@@ -2,8 +2,8 @@
 //!
 //! Whether it can give back every file in a directory that is about to be
 //! deleted or moved, whether the work tree is clean, which directories hold
-//! Cargo configuration, which entries are submodules, and which files mention
-//! a pattern.
+//! Cargo configuration, which entries are submodules, which files mention a
+//! pattern, and which files it does not track.
 //!
 //! Every function runs the `git` on `PATH`, answers from what git itself
 //! reports, and is read-only: none of them writes to the project or takes
@@ -55,12 +55,14 @@ mod mentions;
 mod status;
 #[cfg(test)]
 mod test_support;
+mod tracked;
 
 pub use configuration::directories_holding_cargo_configuration;
 pub use give_back::{CannotGiveBack, ensure_git_can_give_back};
 pub use index::{Flag, Unwatched, submodules_under};
 pub use mentions::files_mentioning;
 pub use status::{NotClean, ensure_work_tree_is_clean};
+pub use tracked::files_git_does_not_track;
 
 // RS-CANONICAL-ERRORS asks for a struct with a private kind and `is_*`
 // accessors. These are enums with public variants instead, and no

@@ -367,3 +367,37 @@ pub(crate) fn push_member_on_its_own_line(document: &mut DocumentMut, member: &s
     array.set_trailing("\n");
     Ok(())
 }
+
+/// Marks the path dependency `key` in the table at `table_keys` optional,
+/// the way `x = { path = "../x", optional = true }` is written; an error if
+/// there is no such dependency written as an inline table.
+pub(crate) fn mark_optional(
+    document: &mut DocumentMut,
+    table_keys: &[&str],
+    key: &str,
+) -> TestOutcome {
+    let mut keys = table_keys.to_vec();
+    keys.push(key);
+    let declaration = lookup_mut(document, &keys)
+        .and_then(Item::as_inline_table_mut)
+        .context(&format!(
+            "no `{key}` written as an inline table in [{}]",
+            table_keys.join(".")
+        ))?;
+    declaration.insert("optional", Value::from(true));
+    Ok(())
+}
+
+/// Sets `[workspace] exclude` to `entries`; an error if the manifest has no
+/// `[workspace]` table.
+pub(crate) fn set_workspace_exclude(document: &mut DocumentMut, entries: &[&str]) -> TestOutcome {
+    let workspace = lookup_mut(document, &["workspace"])
+        .and_then(Item::as_table_like_mut)
+        .context("no [workspace] table in the manifest")?;
+    let mut excluded = Array::new();
+    for entry in entries {
+        excluded.push(*entry);
+    }
+    workspace.insert("exclude", Item::Value(Value::Array(excluded)));
+    Ok(())
+}

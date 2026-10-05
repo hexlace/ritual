@@ -671,7 +671,8 @@ as it found it, or says exactly how to put it back.
 1. Refusals first, from reading only: a task directory that holds other
    workspace members, a destination that is taken (`.rituals` being a file
    counts), a git submodule at or inside a task directory, and a manifest that
-   reaches a task in a way that cannot be repointed.
+   reaches a task in a way that cannot be repointed, or that needs an edit
+   while git does not track it.
 2. Every manifest with edits is written in place.
 3. Each task directory is renamed.
 4. `cargo metadata` runs again, and the project must still resolve its task
@@ -692,10 +693,24 @@ something again, because that `mv` would move one inside the other.
 
 **What is repointed.** A task can depend on another, and any member can depend
 on a task, so the command line crate's manifest is not the only one that names
-a moved directory. Every manifest of the project, the workspace's own and
-every package at a path under its root, has every place Cargo reads a path
-repointed: dependency paths in every table and target,
-`[workspace.dependencies]`, `[patch]` and `[replace]`, a package's `build`,
+a moved directory, and a member's is not the last: a crate outside the
+workspace can too. Every manifest Cargo reads, the
+workspace's own, every package at a path on disk and every crate those reach
+through a path dependency of any kind, however far and wherever it sits, has
+every place Cargo reads a path repointed. Cargo reads more than `cargo
+metadata` lists: a crate excluded from the workspace and reached only through
+an optional dependency no feature turns on is read when it resolves the
+lockfile, and so is a crate that crate reaches. `cargo metadata --no-deps`
+cannot be asked about every one of them, since it refuses a crate that sits
+under the workspace's root without being a member, so the walk reads the
+TOML itself, following each manifest's path dependencies with a set of the
+manifests already read, which bounds it to the files on disk. A path
+dependency whose directory has no `Cargo.toml` is skipped, because Cargo did
+not need it to read the project, and a manifest that exists but does not parse
+is refused, naming it. A manifest that needs an edit and is not tracked by git
+is refused, because git could not give it back. The places repointed are:
+dependency paths in every table and target, `[workspace.dependencies]`,
+`[patch]` and `[replace]`, a package's `build`,
 `readme`, `license-file` and `workspace`, every target's `path`, and the lists
 in `[workspace]`. Moving `tasks/` to `.rituals/` keeps every depth, so only a
 path that crosses into or out of a moved directory changes. One that still
