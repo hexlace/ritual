@@ -214,13 +214,16 @@ pub(super) fn parse_index(output: &[u8]) -> Result<Vec<IndexEntry>, Unanswered> 
     Ok(entries)
 }
 
-/// Every path and its `filter` value in `git check-attr -z filter` output.
+/// Every answer in `git check-attr -z` output: the path, the attribute's
+/// name, and its value.
 ///
 /// Each answer is three NUL-ended fields: the path, the attribute's name,
 /// and its value — `unspecified`, `unset`, `set`, or the value it was given.
 /// Output that does not come in threes is a failure, since misreading it
-/// could pair a file with the wrong filter.
-pub(super) fn parse_attributes(output: &[u8]) -> Result<Vec<(PathBuf, String)>, Unanswered> {
+/// could pair a file with the wrong attribute.
+pub(super) fn parse_attributes(
+    output: &[u8],
+) -> Result<Vec<(PathBuf, String, String)>, Unanswered> {
     let text = String::from_utf8_lossy(output);
     let fields: Vec<&str> = text.split_terminator('\0').collect();
     let answers = fields.chunks_exact(3);
@@ -230,7 +233,13 @@ pub(super) fn parse_attributes(output: &[u8]) -> Result<Vec<(PathBuf, String)>, 
         )));
     }
     Ok(answers
-        .map(|answer| (PathBuf::from(answer[0]), answer[2].to_string()))
+        .map(|answer| {
+            (
+                PathBuf::from(answer[0]),
+                answer[1].to_string(),
+                answer[2].to_string(),
+            )
+        })
         .collect())
 }
 
@@ -292,8 +301,16 @@ mod tests {
         assert_eq!(
             parse_attributes(output).map_err(|error| format!("{error:?}"))?,
             [
-                (PathBuf::from("a.cfg"), "strip".to_string()),
-                (PathBuf::from("b.rs"), "unspecified".to_string()),
+                (
+                    PathBuf::from("a.cfg"),
+                    "filter".to_string(),
+                    "strip".to_string()
+                ),
+                (
+                    PathBuf::from("b.rs"),
+                    "filter".to_string(),
+                    "unspecified".to_string()
+                ),
             ]
         );
         let result = parse_attributes(b"a.cfg\0filter\0");

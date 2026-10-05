@@ -3,17 +3,19 @@
 //! Whether it can give back every file in a directory that is about to be
 //! deleted or moved, whether the work tree is clean, which directories hold
 //! Cargo configuration, which entries are submodules, which files mention a
-//! pattern, and which files it does not track.
+//! pattern, which files it does not track, and whether moving directories
+//! would change what it sees of the files in them.
 //!
 //! Every function runs the `git` on `PATH`, answers from what git itself
 //! reports, and is read-only: none of them writes to the project or takes
-//! the repository's locks. Each function returns the narrowest of three types
+//! the repository's locks. Each function returns the narrowest of four types
 //! that holds every failure it has: [`Unanswered`] when git could not answer
-//! at all; [`NotClean`], which adds the files a commit would carry; and
+//! at all; [`NotClean`], which adds the files a commit would carry;
 //! [`CannotGiveBack`], which adds everything that stops git giving back a
-//! directory. Each states git's facts and no remedy, so a task words its own
-//! refusal from the variant it receives and names the command that suits its
-//! own run.
+//! directory; and [`SeenDifferently`], which adds what a move would change
+//! about how git sees the files that move. Each states git's facts and no
+//! remedy, so a task words its own refusal from the variant it receives and
+//! names the command that suits its own run.
 //!
 //! Paths git reports are spelled from git's top level, the form the `:/`
 //! pathspec takes, so a person can hand one to git from any directory of
@@ -52,6 +54,7 @@ pub mod fixture;
 mod give_back;
 mod index;
 mod mentions;
+mod sight;
 mod status;
 #[cfg(test)]
 mod test_support;
@@ -61,6 +64,10 @@ pub use configuration::directories_holding_cargo_configuration;
 pub use give_back::{CannotGiveBack, ensure_git_can_give_back};
 pub use index::{Flag, Unwatched, submodules_under};
 pub use mentions::files_mentioning;
+pub use sight::{
+    Attribute, AttributeChange, AttributeState, IgnoreRule, IgnoredFile, MovedFile,
+    SeenDifferently, ensure_a_move_keeps_what_git_sees,
+};
 pub use status::{NotClean, ensure_work_tree_is_clean};
 pub use tracked::files_git_does_not_track;
 
@@ -273,7 +280,7 @@ fn canonical(path: &Path) -> Result<PathBuf, Unanswered> {
 mod tests {
     use std::path::Path;
 
-    use super::{CannotGiveBack, NotClean, Unanswered, top_level_pathspec};
+    use super::{CannotGiveBack, NotClean, SeenDifferently, Unanswered, top_level_pathspec};
 
     /// Every variant renders as git's fact, in lowercase, with no remedy and
     /// no trailing full stop, so a caller can build a sentence around it.
@@ -311,5 +318,6 @@ mod tests {
         assert_send_sync_error::<Unanswered>();
         assert_send_sync_error::<NotClean>();
         assert_send_sync_error::<CannotGiveBack>();
+        assert_send_sync_error::<SeenDifferently>();
     }
 }

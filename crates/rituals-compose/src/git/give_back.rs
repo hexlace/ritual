@@ -271,13 +271,13 @@ fn ensure_none_filtered(
     )?)?;
     let filtered: Vec<(PathBuf, String)> = filters
         .into_iter()
-        .filter(|(_path, value)| {
+        .filter(|(_path, _name, value)| {
             !matches!(
                 value.as_str(),
                 "unspecified" | "unset" | GIVES_BACK_ITS_BYTES
             )
         })
-        .map(|(path, value)| (from_top_level.join(path), value))
+        .map(|(path, _name, value)| (from_top_level.join(path), value))
         .collect();
     if filtered.is_empty() {
         Ok(())
