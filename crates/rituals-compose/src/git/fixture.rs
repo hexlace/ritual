@@ -27,6 +27,11 @@ use std::process::Command;
 /// `XDG_CONFIG_HOME` is `/dev/null`, which holds no `git` directory, so git
 /// has nothing to read there and no other place to look.
 ///
+/// Configuration a parent hands git in the environment is cleared as well:
+/// `GIT_CONFIG_COUNT` says how many `GIT_CONFIG_KEY_<n>` and
+/// `GIT_CONFIG_VALUE_<n>` pairs to read, and none are read without it, and
+/// `GIT_CONFIG_PARAMETERS` is removed too.
+///
 /// # Examples
 ///
 /// ```no_run
@@ -60,6 +65,8 @@ pub fn isolated_git() -> Command {
         .env("GIT_AUTHOR_EMAIL", "fixture@example.invalid")
         .env("GIT_COMMITTER_NAME", "Fixture")
         .env("GIT_COMMITTER_EMAIL", "fixture@example.invalid")
+        .env_remove("GIT_CONFIG_COUNT")
+        .env_remove("GIT_CONFIG_PARAMETERS")
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE");
@@ -174,6 +181,118 @@ mod tests {
             "isolating git must not make it warn; it said:\n{}",
             String::from_utf8_lossy(&output.stderr)
         );
+        Ok(())
+    }
+
+    /// The environment variable that tells this test binary, started again
+    /// by the test below, to run as the git-asking child and which git to
+    /// ask: `control` for a plain `git`, `isolated` for [`isolated_git`].
+    const CHILD_MODE: &str = "FIXTURE_INJECTED_CONFIGURATION_CHILD";
+    /// The repository the child asks, as a path.
+    const CHILD_REPOSITORY: &str = "FIXTURE_INJECTED_CONFIGURATION_REPOSITORY";
+    /// The file the child writes `ignored=true` or `ignored=false` to, which
+    /// the parent reads; a child that never ran leaves no file to read.
+    const CHILD_ANSWER: &str = "FIXTURE_INJECTED_CONFIGURATION_ANSWER";
+    const CHILD_TEST: &str =
+        "isolated_git_does_not_read_configuration_injected_through_the_environment";
+
+    /// Git also reads configuration a parent process hands it in the
+    /// environment, through `GIT_CONFIG_COUNT` with its key and value pairs
+    /// or through `GIT_CONFIG_PARAMETERS`. An isolated command has to ignore
+    /// what it inherits, and this crate forbids `unsafe`, so the test cannot
+    /// change its own process's environment: it starts this same test binary
+    /// again, as a child whose environment carries an injected
+    /// `core.excludesFile`, and the child asks git whether it ignores a file
+    /// only that file's rule names. A plain `git` is the positive control;
+    /// `isolated_git` must not.
+    #[test]
+    fn isolated_git_does_not_read_configuration_injected_through_the_environment() -> TestOutcome {
+        if let Ok(mode) = std::env::var(CHILD_MODE) {
+            return ask_whether_git_ignores_the_file(&mode);
+        }
+        let home = ScratchDir::new("fixture-injected-home")?;
+        let ignore_file = home.path().join("ignore");
+        std::fs::write(&ignore_file, "machine-only.txt\n")?;
+        let repository = ScratchDir::new("fixture-injected-repository")?;
+        git(repository.path(), &["init", "--quiet"])?;
+        std::fs::write(repository.path().join("machine-only.txt"), "x\n")?;
+
+        let answers = ScratchDir::new("fixture-injected-answers")?;
+        let by_count = |command: &mut Command| {
+            command
+                .env("GIT_CONFIG_COUNT", "1")
+                .env("GIT_CONFIG_KEY_0", "core.excludesFile")
+                .env("GIT_CONFIG_VALUE_0", &ignore_file);
+        };
+        let by_parameters = |command: &mut Command| {
+            command.env(
+                "GIT_CONFIG_PARAMETERS",
+                format!("'core.excludesFile'='{}'", ignore_file.display()),
+            );
+        };
+        for (way, inject) in [
+            ("GIT_CONFIG_COUNT", &by_count as &dyn Fn(&mut Command)),
+            ("GIT_CONFIG_PARAMETERS", &by_parameters),
+        ] {
+            let control = answer_of(&answers, repository.path(), "control", inject)?;
+            assert_eq!(
+                control, "ignored=true",
+                "expected an unisolated git to read an excludesFile injected through {way}"
+            );
+
+            let isolated = answer_of(&answers, repository.path(), "isolated", inject)?;
+            assert_eq!(
+                isolated, "ignored=false",
+                "an isolated git must not read configuration injected through {way}"
+            );
+        }
+        Ok(())
+    }
+
+    /// Starts this test binary to run only the test above in `mode`, with
+    /// `inject` setting the configuration the child inherits, and returns
+    /// what the child wrote as its answer.
+    fn answer_of(
+        answers: &ScratchDir,
+        repository: &Path,
+        mode: &str,
+        inject: &dyn Fn(&mut Command),
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let answer = answers.path().join(mode);
+        let mut command = Command::new(std::env::current_exe()?);
+        command
+            .args([CHILD_TEST, "--test-threads=1"])
+            .env(CHILD_MODE, mode)
+            .env(CHILD_REPOSITORY, repository)
+            .env(CHILD_ANSWER, &answer);
+        inject(&mut command);
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "the child test run failed:\n{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        Ok(std::fs::read_to_string(&answer)?)
+    }
+
+    /// The child's half: runs the git `mode` names against the repository
+    /// and writes `ignored=true` or `ignored=false` for the parent to read.
+    fn ask_whether_git_ignores_the_file(mode: &str) -> TestOutcome {
+        let repository = std::env::var(CHILD_REPOSITORY)
+            .map_err(|error| io::Error::other(format!("{CHILD_REPOSITORY}: {error}")))?;
+        let mut command = match mode {
+            "control" => Command::new("git"),
+            "isolated" => isolated_git(),
+            other => return Err(io::Error::other(format!("unknown child mode {other}")).into()),
+        };
+        let output = command
+            .arg("-C")
+            .arg(repository)
+            .args(["check-ignore", "--no-index", "machine-only.txt"])
+            .output()?;
+        let answer = std::env::var(CHILD_ANSWER)
+            .map_err(|error| io::Error::other(format!("{CHILD_ANSWER}: {error}")))?;
+        std::fs::write(answer, format!("ignored={}", !output.stdout.is_empty()))?;
         Ok(())
     }
 }

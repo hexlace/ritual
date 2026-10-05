@@ -550,3 +550,86 @@ fn a_story_can_give_its_binary_one_global_git_configuration_of_its_own() -> Test
     );
     Ok(())
 }
+
+/// A `GIT_CONFIG_COUNT` environment, with the injected `core.excludesFile`
+/// naming `ignore_file`, the way a tool that starts a developer's shell can
+/// hand git a configuration no file holds.
+fn inject_excludes_file_by_count(command: &mut std::process::Command, ignore_file: &Path) {
+    command
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "core.excludesFile")
+        .env("GIT_CONFIG_VALUE_0", ignore_file);
+}
+
+/// `git check-ignore` reads configuration that arrives in the environment as
+/// well as in files, and a `GIT_CONFIG_GLOBAL` of `/dev/null` does not stop
+/// it. The positive control hands an unisolated git an `excludesFile` through
+/// `GIT_CONFIG_COUNT` and it matches; the same environment on an isolated
+/// command does not.
+#[test]
+fn isolating_git_stops_configuration_injected_through_a_count() -> TestOutcome {
+    let machine = MachineWithAGlobalIgnore::new("isolation-count")?;
+    let ignore_file = machine.home.path().join(".config/git/ignore");
+
+    let mut unisolated = machine.check_ignore();
+    unisolated
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("XDG_CONFIG_HOME", "/dev/null");
+    inject_excludes_file_by_count(&mut unisolated, &ignore_file);
+    let control = unisolated.output().context("spawning git failed")?;
+    assert!(
+        ignored_by_the_machine(&control),
+        "expected git to read an excludesFile injected through GIT_CONFIG_COUNT; \
+         stdout was:\n{}",
+        String::from_utf8_lossy(&control.stdout)
+    );
+
+    let mut isolated = machine.check_ignore();
+    inject_excludes_file_by_count(&mut isolated, &ignore_file);
+    support::git::isolate_from_the_machine(&mut isolated);
+    let output = isolated.output().context("spawning git failed")?;
+    assert!(
+        !ignored_by_the_machine(&output),
+        "an isolated git must not read configuration injected through \
+         GIT_CONFIG_COUNT; stdout was:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    Ok(())
+}
+
+/// `GIT_CONFIG_PARAMETERS` is the older way a parent hands git configuration,
+/// and git also reads it. Same shape as the count test: unisolated matches,
+/// isolated does not.
+#[test]
+fn isolating_git_stops_configuration_injected_through_parameters() -> TestOutcome {
+    let machine = MachineWithAGlobalIgnore::new("isolation-parameters")?;
+    let ignore_file = machine.home.path().join(".config/git/ignore");
+    let parameters = format!("'core.excludesFile'='{}'", ignore_file.display());
+
+    let mut unisolated = machine.check_ignore();
+    unisolated
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("XDG_CONFIG_HOME", "/dev/null")
+        .env("GIT_CONFIG_PARAMETERS", &parameters);
+    let control = unisolated.output().context("spawning git failed")?;
+    assert!(
+        ignored_by_the_machine(&control),
+        "expected git to read an excludesFile injected through \
+         GIT_CONFIG_PARAMETERS; stdout was:\n{}",
+        String::from_utf8_lossy(&control.stdout)
+    );
+
+    let mut isolated = machine.check_ignore();
+    isolated.env("GIT_CONFIG_PARAMETERS", &parameters);
+    support::git::isolate_from_the_machine(&mut isolated);
+    let output = isolated.output().context("spawning git failed")?;
+    assert!(
+        !ignored_by_the_machine(&output),
+        "an isolated git must not read configuration injected through \
+         GIT_CONFIG_PARAMETERS; stdout was:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    Ok(())
+}

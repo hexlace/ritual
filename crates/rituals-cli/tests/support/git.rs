@@ -23,14 +23,20 @@ use super::{Outcome, ResultContext, RunOutput, TestOutcome};
 // module is the one place in the suite that says how git is isolated.
 
 /// Points `command` away from the machine it runs on: no global or system git
-/// configuration, no global ignore or attributes file, an identity from the
-/// environment, and no inherited repository location.
+/// configuration, no global ignore or attributes file, no configuration
+/// injected through the environment, an identity from the environment, and no
+/// inherited repository location.
 ///
 /// `GIT_CONFIG_GLOBAL` replaces the user's configuration files but not the
 /// global ignore and attributes files, which git finds under
 /// `$XDG_CONFIG_HOME/git`, or `$HOME/.config/git` when that is unset.
 /// Pointing `XDG_CONFIG_HOME` at `/dev/null`, which holds no `git`
 /// directory, leaves git nothing to read there and no other place to look.
+///
+/// Git also reads configuration a parent hands it in the environment.
+/// `GIT_CONFIG_COUNT` says how many `GIT_CONFIG_KEY_<n>` and
+/// `GIT_CONFIG_VALUE_<n>` pairs to read, and none are read without it, so
+/// removing it is enough for them; `GIT_CONFIG_PARAMETERS` is removed too.
 ///
 /// Set on the command itself, so stories running side by side neither
 /// interfere with each other nor change the process's environment.
@@ -46,6 +52,8 @@ pub(crate) fn isolate_from_the_machine(command: &mut Command) -> &mut Command {
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_CONFIG_COUNT")
+        .env_remove("GIT_CONFIG_PARAMETERS")
 }
 
 /// Runs `git <arguments…>` in `directory` with the machine's git

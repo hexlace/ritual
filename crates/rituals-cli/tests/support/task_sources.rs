@@ -19,6 +19,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use super::git::isolate_from_the_machine;
 use super::{
     Checkout, Outcome, Project, ResultContext, TestOutcome, crates, path_to_str, read_text,
     write_text,
@@ -206,20 +207,20 @@ fn registry_dependency() -> String {
     format!("{:?}", rituals::VERSION)
 }
 
-/// Runs `git <arguments…>` in `directory`, with no user or system git
-/// configuration, so a story's repository is the same on every machine and
-/// never waits on a signing prompt.
+/// Runs `git <arguments…>` in `directory`, reading nothing from the machine
+/// (see [`isolate_from_the_machine`]), so a story's repository is the same on
+/// every machine and never waits on a signing prompt.
 fn git(directory: &Path, arguments: &[&str]) -> TestOutcome {
-    let output = Command::new("git")
-        .args(["-c", "user.name=ritual-tests"])
-        .args(["-c", "user.email=ritual-tests@example.invalid"])
-        .args(arguments)
-        .current_dir(directory)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .context("spawning git failed")?;
+    let output = isolate_from_the_machine(
+        Command::new("git")
+            .args(["-c", "user.name=ritual-tests"])
+            .args(["-c", "user.email=ritual-tests@example.invalid"])
+            .args(arguments)
+            .current_dir(directory)
+            .stdin(std::process::Stdio::null()),
+    )
+    .output()
+    .context("spawning git failed")?;
     assert!(
         output.status.success(),
         "`git {}` failed: {}",
