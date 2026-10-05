@@ -1,7 +1,8 @@
 //! The directories a manifest's path dependencies lead to.
 //!
 //! Cargo reads a path dependency from a good many places, and a crate it
-//! reaches that way can be one the workspace never lists. The places are the
+//! reaches that way can be one the workspace never lists. Some of those
+//! places it reads only in the workspace's root manifest. The places are the
 //! one list in [`super::dependency_places`], shared by this and by what
 //! repoints them.
 
@@ -11,21 +12,23 @@ use std::path::PathBuf;
 use toml_edit::{Item, TableLike};
 
 use super::Manifest;
-use super::dependency_places::PLACES;
+use super::dependency_places::{ManifestRole, places_cargo_reads};
 use crate::paths::normalize;
 
 impl Manifest {
-    /// Lists the directory every path dependency of this manifest leads to,
-    /// each spelled from this manifest's own directory and normalised,
-    /// sorted, each once.
+    /// Lists the directory every path dependency Cargo reads in this
+    /// manifest leads to, when the manifest is `role` to its workspace, each
+    /// spelled from this manifest's own directory and normalised, sorted,
+    /// each once.
     ///
     /// A path dependency is read wherever Cargo reads one: a dependency's
     /// `path` in `dependencies`, `dev-dependencies` and `build-dependencies`
     /// and their underscore spellings, at the top level and in every
-    /// `[target.<t>]` table, optional or not; `[workspace.dependencies]`;
-    /// every `[patch.<source>]` entry and every `[replace]` entry. A
-    /// dependency with no `path`, or one that is not a string, leads nowhere
-    /// and is left out.
+    /// `[target.<t>]` table, optional or not; and, in the workspace's root
+    /// manifest alone, `[workspace.dependencies]`, every `[patch.<source>]`
+    /// entry and every `[replace]` entry, which Cargo ignores anywhere else.
+    /// A dependency with no `path`, or one that is not a string, leads
+    /// nowhere and is left out.
     ///
     /// The directories are those the manifest names. Whether anything is
     /// there is not asked.
@@ -35,7 +38,7 @@ impl Manifest {
     /// ```
     /// use std::path::PathBuf;
     ///
-    /// use rituals_compose::manifest::Manifest;
+    /// use rituals_compose::manifest::{Manifest, ManifestRole};
     ///
     /// # let directory = std::env::temp_dir().join(format!(
     /// #     "rituals-compose-doctest-path-dependencies-{}",
@@ -52,19 +55,19 @@ impl Manifest {
     /// let manifest = Manifest::read(&manifest_path)?;
     ///
     /// assert_eq!(
-    ///     manifest.path_dependency_directories(),
+    ///     manifest.path_dependency_directories(ManifestRole::Other),
     ///     [directory.join("tasks/greet"), directory.join("tasks/shout")]
     /// );
     /// # std::fs::remove_dir_all(&directory)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[must_use]
-    pub fn path_dependency_directories(&self) -> Vec<PathBuf> {
+    pub fn path_dependency_directories(&self, role: ManifestRole) -> Vec<PathBuf> {
         let base = self.directory();
         let root = self.document.as_table();
         let mut written: Vec<&str> = Vec::new();
 
-        for place in PLACES {
+        for place in places_cargo_reads(role) {
             for located in place.tables(root) {
                 paths_of(located.table, &mut written);
             }
@@ -94,21 +97,23 @@ fn paths_of<'a>(declarations: &'a dyn TableLike, written: &mut Vec<&'a str>) {
 
 #[cfg(test)]
 mod tests {
-    use super::Manifest;
+    use super::{Manifest, ManifestRole};
     use crate::test_support::{ScratchDir, TestOutcome};
 
     /// The directories a manifest holding `content`, at `at` in a scratch
-    /// directory, leads to, each spelled from the scratch directory.
+    /// directory and `role` to its workspace, leads to, each spelled from the
+    /// scratch directory.
     fn led_to(
         tag: &str,
         at: &str,
+        role: ManifestRole,
         content: &str,
     ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         let scratch = ScratchDir::new(tag)?;
         let path = scratch.path().join(at);
         std::fs::create_dir_all(path.parent().ok_or("a manifest has a directory")?)?;
         std::fs::write(&path, content)?;
-        let directories = Manifest::read(&path)?.path_dependency_directories();
+        let directories = Manifest::read(&path)?.path_dependency_directories(role);
         directories
             .iter()
             .map(|directory| {
@@ -118,16 +123,10 @@ mod tests {
             .collect()
     }
 
-    /// Verifies that every place Cargo reads a dependency's `path` from is
-    /// read here, by writing one dependency in each and listing them all:
-    /// each table, a `[target.<t>]` table, the workspace's, a patch and a
-    /// replacement, and the three shapes a dependency is written in.
-    #[test]
-    fn every_place_cargo_reads_a_path_dependency_from_is_read() -> TestOutcome {
-        let directories = led_to(
-            "path-dependencies-every-place",
-            "Cargo.toml",
-            "[dependencies]\n\
+    /// A dependency in every place a manifest writes one: each table, a
+    /// `[target.<t>]` table, the workspace's, a patch and a replacement, and
+    /// the three shapes a dependency is written in.
+    const EVERY_PLACE: &str = "[dependencies]\n\
              normal = { path = \"normal\" }\n\
              dotted.path = \"dotted\"\n\
              serde = \"1\"\n\
@@ -154,7 +153,18 @@ mod tests {
              patched = { path = \"patched\" }\n\
              \n\
              [replace]\n\
-             \"replaced:0.1.0\" = { path = \"replaced\" }\n",
+             \"replaced:0.1.0\" = { path = \"replaced\" }\n";
+
+    /// Verifies that every place Cargo reads a dependency's `path` from in
+    /// the workspace's root manifest is read here, by writing one dependency
+    /// in each and listing them all.
+    #[test]
+    fn every_place_cargo_reads_in_the_root_manifest_is_read() -> TestOutcome {
+        let directories = led_to(
+            "path-dependencies-every-place",
+            "Cargo.toml",
+            ManifestRole::WorkspaceRoot,
+            EVERY_PLACE,
         )?;
 
         assert_eq!(
@@ -175,11 +185,39 @@ mod tests {
         Ok(())
     }
 
+    /// The same manifest anywhere but the workspace's root: Cargo ignores its
+    /// `[workspace.dependencies]`, `[patch]` and `[replace]`, so nothing they
+    /// name is reached through it.
+    #[test]
+    fn a_manifest_other_than_the_root_leads_nowhere_through_the_root_only_places() -> TestOutcome {
+        let directories = led_to(
+            "path-dependencies-not-the-root",
+            "Cargo.toml",
+            ManifestRole::Other,
+            EVERY_PLACE,
+        )?;
+
+        assert_eq!(
+            directories,
+            [
+                "built",
+                "developed",
+                "dotted",
+                "normal",
+                "targeted",
+                "targeted_dev",
+                "underscored",
+            ]
+        );
+        Ok(())
+    }
+
     #[test]
     fn an_optional_dependency_is_read_like_any_other() -> TestOutcome {
         let directories = led_to(
             "path-dependencies-optional",
             "Cargo.toml",
+            ManifestRole::Other,
             "[dependencies]\nx = { path = \"vendor/x\", optional = true }\n",
         )?;
 
@@ -194,6 +232,7 @@ mod tests {
         let directories = led_to(
             "path-dependencies-normalised",
             "crates/cli/Cargo.toml",
+            ManifestRole::Other,
             "[dependencies]\n\
              a = { path = \"../../tasks/greet\" }\n\
              b = { path = \"../cli/../../tasks/./greet\" }\n\
@@ -211,6 +250,7 @@ mod tests {
         let directories = led_to(
             "path-dependencies-none",
             "Cargo.toml",
+            ManifestRole::Other,
             "[dependencies]\n\
              serde = \"1\"\n\
              versioned = { version = \"1\" }\n\
@@ -232,6 +272,7 @@ mod tests {
         let directories = led_to(
             "path-dependencies-empty",
             "Cargo.toml",
+            ManifestRole::Other,
             "[package]\nname = \"x\"\n",
         )?;
 

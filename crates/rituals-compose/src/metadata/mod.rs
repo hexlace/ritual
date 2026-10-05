@@ -458,7 +458,9 @@ impl Metadata {
     }
 
     /// Names every package this document did not load that declares a path
-    /// dependency under `directory`, of any kind, target or optional status.
+    /// dependency under `directory` that Cargo reads, of any kind, target or
+    /// optional status. A `[patch]` or `[replace]` in a manifest other than
+    /// the workspace's root is not one: Cargo ignores it.
     ///
     /// Completes [`TaskImport::other_dependents`], which reads only the
     /// packages this document holds. Cargo reads the manifest of every

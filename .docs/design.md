@@ -544,10 +544,11 @@ breaks. Dependents come from what each package declares, not from the
 resolved graph, which holds only the edges the active features reach; and
 a path crate `cargo metadata` did not load at all, such as one behind an
 optional dependency nothing turns on, is asked about by reading its manifest,
-because Cargo still reads it when it resolves the lockfile. That is the walk
-`migrate` makes to find every manifest to repoint, not `cargo metadata
---no-deps`, which refuses a crate that sits under the workspace's root
-without being a member.
+because Cargo still reads it when it resolves the lockfile, and a `[patch]`
+or `[replace]` in such a crate, which Cargo ignores, does not make it a
+dependent. That is the walk `migrate` makes to find every manifest to
+repoint, not `cargo metadata --no-deps`, which refuses a crate that sits
+under the workspace's root without being a member.
 
 Cargo's configuration is read the way Cargo reads it: the `.cargo/config`
 file, or `.cargo/config.toml` when there is none, in every directory a
@@ -775,7 +776,10 @@ lockfile, and so is a crate that crate reaches. `cargo metadata --no-deps`
 cannot be asked about every one of them, since it refuses a crate that sits
 under the workspace's root without being a member, so the walk reads the
 TOML itself, following each manifest's path dependencies with a set of the
-manifests already read, which bounds it to the files on disk. A path
+manifests already read, which bounds it to the files on disk. It follows
+`[workspace.dependencies]`, `[patch]` and `[replace]` from the workspace's
+root manifest alone, because Cargo ignores them in any other, so a crate
+only a member's `[patch]` reaches is not read, repointed or refused. A path
 dependency whose directory has no `Cargo.toml` is skipped, because Cargo did
 not need it to read the project, and a manifest that exists but does not parse
 is refused, naming it. A manifest that needs an edit and is not tracked by git

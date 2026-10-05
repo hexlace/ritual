@@ -7,12 +7,15 @@ use rituals::Failure;
 
 use super::Metadata;
 use super::manifest_walk::walk_manifests;
+use crate::paths::normalize;
 
 impl Metadata {
     /// Lists the manifest of every crate Cargo reads to understand this
     /// project, sorted, each once: the workspace's own, every package at a
     /// path on disk, and every crate those reach through a path dependency
-    /// of any kind, however far.
+    /// of any kind, however far. A `[workspace.dependencies]`, `[patch]` or
+    /// `[replace]` entry is followed only from the workspace's own manifest,
+    /// because Cargo ignores one written anywhere else.
     ///
     /// Cargo reads more than `cargo metadata` lists. A crate outside the
     /// workspace, reached only through an optional dependency no feature
@@ -49,7 +52,8 @@ impl Metadata {
     /// # Ok::<(), rituals::Failure>(())
     /// ```
     pub fn manifests_cargo_reads(&self) -> Result<Vec<PathBuf>, Failure> {
-        let mut starts: Vec<PathBuf> = vec![self.workspace_root.join("Cargo.toml")];
+        let root_manifest = normalize(&self.workspace_root.join("Cargo.toml"));
+        let mut starts: Vec<PathBuf> = vec![root_manifest.clone()];
         starts.extend(
             self.path_package_manifests()
                 .into_iter()
@@ -57,7 +61,7 @@ impl Metadata {
         );
 
         let mut read: BTreeSet<PathBuf> = BTreeSet::new();
-        walk_manifests(starts, BTreeSet::new(), None, |reached| {
+        walk_manifests(&root_manifest, starts, BTreeSet::new(), None, |reached| {
             read.insert(reached.path.to_path_buf());
         })?;
         Ok(read.into_iter().collect())
@@ -271,6 +275,51 @@ mod tests {
         assert!(
             read_in(root)?.contains(&"patches/unused/Cargo.toml".to_string()),
             "a patch crate is read"
+        );
+        Ok(())
+    }
+
+    /// Cargo reads `[patch]` and `[replace]` in the workspace's root manifest
+    /// alone, and ignores them in a member's and in a crate outside the
+    /// workspace, so the crates only those reach are not read.
+    #[test]
+    fn a_patch_or_replace_outside_the_root_manifest_is_not_followed() -> TestOutcome {
+        let scratch = ScratchDir::new("reads-ignored-patch")?;
+        let root = scratch.path();
+        project_with_an_excluded_optional_crate(root)?;
+        write(
+            root,
+            &[
+                (
+                    "cli/Cargo.toml",
+                    &package(
+                        "cli",
+                        "\n[dependencies]\nx = { path = \"../vendor/x\", optional = true }\n\
+                         \n[patch.crates-io]\npatched = { path = \"../ignored/patched\" }\n",
+                    ),
+                ),
+                (
+                    "vendor/x/Cargo.toml",
+                    &package(
+                        "x",
+                        "\n[replace]\n\"replaced:0.1.0\" = { path = \"../../ignored/replaced\" }\n",
+                    ),
+                ),
+                ("ignored/patched/Cargo.toml", &package("patched", "")),
+                ("ignored/patched/src/lib.rs", ""),
+                ("ignored/replaced/Cargo.toml", &package("replaced", "")),
+                ("ignored/replaced/src/lib.rs", ""),
+            ],
+        )?;
+
+        assert_eq!(
+            read_in(root)?,
+            [
+                "Cargo.toml",
+                "cli/Cargo.toml",
+                "tasks/greet/Cargo.toml",
+                "vendor/x/Cargo.toml"
+            ]
         );
         Ok(())
     }

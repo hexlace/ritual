@@ -381,7 +381,8 @@ pub(crate) fn dependents_outside_the_graph(
     }
 
     let mut dependents: Vec<String> = Vec::new();
-    walk_manifests(starts, asked, Some(directory), |reached| {
+    let root_manifest = crate::paths::normalize(&metadata.workspace_root.join("Cargo.toml"));
+    walk_manifests(&root_manifest, starts, asked, Some(directory), |reached| {
         let declares_it = reached
             .leads_to
             .iter()

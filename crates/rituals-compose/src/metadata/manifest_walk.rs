@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use rituals::Failure;
 
-use crate::manifest::Manifest;
+use crate::manifest::{Manifest, ManifestRole};
 use crate::paths::{lies_under, normalize};
 
 /// A manifest the walk has read.
@@ -23,14 +23,19 @@ pub(crate) struct Reached<'a> {
     /// Where the manifest is, normalised.
     pub(crate) path: &'a Path,
     pub(crate) manifest: &'a Manifest,
-    /// The directories its path dependencies of any kind lead to, as
-    /// [`Manifest::path_dependency_directories`] lists them.
+    /// The directories the path dependencies Cargo reads in it lead to, as
+    /// [`Manifest::path_dependency_directories`] lists them for what it is
+    /// to the workspace.
     pub(crate) leads_to: &'a [PathBuf],
 }
 
 /// Reads the manifest at each of `starts`, then the manifest of every crate
-/// those reach through a path dependency of any kind, however far, and hands
-/// each manifest to `visit` once.
+/// those reach through a path dependency of any kind Cargo reads, however
+/// far, and hands each manifest to `visit` once.
+///
+/// `workspace_root_manifest` is the workspace's root manifest, normalised:
+/// it is the one manifest whose `[workspace.dependencies]`, `[patch]` and
+/// `[replace]` are followed, since Cargo ignores them in any other.
 ///
 /// A manifest in `already_read` is not read, nor are the crates only it
 /// reaches. A crate whose directory lies under `keeping_out_of` is not
@@ -42,6 +47,7 @@ pub(crate) struct Reached<'a> {
 /// Returns a [`Failure`] naming the manifest when one exists but cannot be
 /// read or does not parse as TOML.
 pub(crate) fn walk_manifests(
+    workspace_root_manifest: &Path,
     starts: Vec<PathBuf>,
     already_read: BTreeSet<PathBuf>,
     keeping_out_of: Option<&Path>,
@@ -57,7 +63,12 @@ pub(crate) fn walk_manifests(
             continue;
         }
         let manifest = Manifest::read(&path)?;
-        let leads_to = manifest.path_dependency_directories();
+        let role = if path == workspace_root_manifest {
+            ManifestRole::WorkspaceRoot
+        } else {
+            ManifestRole::Other
+        };
+        let leads_to = manifest.path_dependency_directories(role);
         visit(&Reached {
             path: &path,
             manifest: &manifest,

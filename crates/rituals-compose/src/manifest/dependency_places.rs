@@ -2,9 +2,35 @@
 //!
 //! The one list of those places, read by what finds the directories a
 //! manifest's path dependencies lead to and by what repoints them, so a place
-//! added here is found by one and repointed by the other.
+//! added here is found by one and repointed by the other. Each place says
+//! whether Cargo reads it in every manifest or only in the workspace's root,
+//! and the places Cargo reads are asked for by saying which manifest is held.
 
 use toml_edit::{Item, TableLike};
+
+/// Which manifest of a workspace is being read, which decides which of its
+/// places Cargo reads.
+///
+/// Cargo reads `[workspace.dependencies]`, `[patch]` and `[replace]` only in
+/// the workspace's root manifest. A member's `[patch]` or `[replace]` is
+/// ignored with a warning, and those of a crate outside the workspace are
+/// ignored without one; a member cannot hold `[workspace.dependencies]` at
+/// all, since that makes it a second workspace root.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManifestRole {
+    /// The manifest at the workspace's root.
+    WorkspaceRoot,
+    /// Any other manifest Cargo reads: a member's, or that of a crate a path
+    /// dependency reaches.
+    Other,
+}
+
+/// Which manifests Cargo reads a [`Place`] in.
+#[derive(Clone, Copy)]
+enum ReadIn {
+    EveryManifest,
+    WorkspaceRootOnly,
+}
 
 /// One step from a table to a table inside it.
 enum Segment {
@@ -19,6 +45,7 @@ enum Segment {
 /// its steps.
 pub(super) struct Place {
     segments: &'static [Segment],
+    read_in: ReadIn,
     /// Whether a report names each declaration's key in backticks, as it
     /// names the specification of a `[replace]` entry.
     quote_keys: bool,
@@ -38,10 +65,16 @@ const fn key(name: &'static str) -> Segment {
     Segment::Key(name)
 }
 
-/// Every place Cargo reads a dependency's `path` from: the dependency tables
-/// at the top level, in both spellings Cargo accepts for the dashed ones, the
-/// same tables in every `[target.<t>]` table, `[workspace.dependencies]`,
-/// every `[patch.<source>]` and `[replace]`.
+/// Every place a manifest writes a dependency's `path` in: the dependency
+/// tables at the top level, in both spellings Cargo accepts for the dashed
+/// ones, and the same tables in every `[target.<t>]` table, which Cargo reads
+/// in every manifest; then `[workspace.dependencies]`, every
+/// `[patch.<source>]` and `[replace]`, which it reads in the workspace's root
+/// manifest alone.
+///
+/// Read whole by what rewrites a path that names a moved directory, since a
+/// path the manifest writes stays true whether Cargo reads it or not. What
+/// follows a path Cargo reads asks [`places_cargo_reads`] instead.
 pub(super) const PLACES: [Place; 13] = [
     Place::new(&[key("dependencies")]),
     Place::new(&[key("dev-dependencies")]),
@@ -53,10 +86,22 @@ pub(super) const PLACES: [Place; 13] = [
     Place::new(&[key("target"), Segment::EveryKey, key("build-dependencies")]),
     Place::new(&[key("target"), Segment::EveryKey, key("dev_dependencies")]),
     Place::new(&[key("target"), Segment::EveryKey, key("build_dependencies")]),
-    Place::new(&[key("workspace"), key("dependencies")]),
-    Place::new(&[key("patch"), Segment::EveryKey]),
-    Place::quoting_keys(&[key("replace")]),
+    Place::root_only(&[key("workspace"), key("dependencies")]),
+    Place::root_only(&[key("patch"), Segment::EveryKey]),
+    Place {
+        quote_keys: true,
+        ..Place::root_only(&[key("replace")])
+    },
 ];
+
+/// The places of [`PLACES`] Cargo reads in a manifest that is `role` to its
+/// workspace.
+pub(super) fn places_cargo_reads(role: ManifestRole) -> impl Iterator<Item = &'static Place> {
+    PLACES.iter().filter(move |place| match place.read_in {
+        ReadIn::EveryManifest => true,
+        ReadIn::WorkspaceRootOnly => role == ManifestRole::WorkspaceRoot,
+    })
+}
 
 /// The label of a table one step further from the root than `parent`.
 fn deeper(parent: &str, step: &str) -> String {
@@ -71,14 +116,16 @@ impl Place {
     const fn new(segments: &'static [Segment]) -> Self {
         Self {
             segments,
+            read_in: ReadIn::EveryManifest,
             quote_keys: false,
         }
     }
 
-    const fn quoting_keys(segments: &'static [Segment]) -> Self {
+    const fn root_only(segments: &'static [Segment]) -> Self {
         Self {
             segments,
-            quote_keys: true,
+            read_in: ReadIn::WorkspaceRootOnly,
+            quote_keys: false,
         }
     }
 

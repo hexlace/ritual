@@ -19,6 +19,7 @@ mod path_dependencies;
 mod removal;
 mod repointing;
 
+pub use dependency_places::ManifestRole;
 pub use path_change::PathChange;
 
 /// A manifest a task is about to edit.
