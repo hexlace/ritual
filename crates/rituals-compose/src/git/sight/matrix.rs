@@ -13,7 +13,7 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::prediction::{Prediction, predict, relative_to};
+use super::prediction::{Prediction, predict};
 use super::{attributes, ensure_with, ignore, sparse};
 use crate::git::fixture::{commit_everything, git};
 use crate::git::test_support::contained_in;
@@ -21,20 +21,15 @@ use crate::git::{Flag, SeenDifferently, run_git, top_level_of};
 use crate::relocation::Relocation;
 use crate::test_support::{ScratchDir, TestOutcome};
 
-/// What building a case's repository hands the test: the global git
-/// configuration file the check must be run with, for a case about what a
-/// developer's own configuration says.
-type Built = Result<Option<PathBuf>, Box<dyn Error>>;
-
 /// A repository, and how the check should judge moving `tasks/greet` out of
 /// it.
 struct Case {
     name: &'static str,
     /// Builds the repository at the path, which does not exist yet.
-    build: fn(&Path) -> Built,
+    build: fn(&Path) -> TestOutcome,
     /// The kind of difference the check should find, then one line for each
     /// file, in the order git lists them; nothing at all for a move that
-    /// changes nothing. A path inside the scratch directory is `<scratch>`.
+    /// changes nothing.
     expected: &'static [&'static str],
 }
 
@@ -42,7 +37,6 @@ struct Case {
 fn cases() -> Vec<Case> {
     let mut cases = ignore_cases_that_change_what_git_sees();
     cases.extend(ignore_cases_that_keep_what_git_sees());
-    cases.extend(rules_outside_the_project_cases());
     cases.extend(attribute_cases());
     cases.extend(index_and_checkout_cases());
     cases
@@ -131,40 +125,6 @@ fn ignore_cases_that_keep_what_git_sees() -> Vec<Case> {
     ]
 }
 
-/// The cases about ignore rules that are not in a file of the project: the
-/// repository's own `info/exclude`, and a developer's global file.
-fn rules_outside_the_project_cases() -> Vec<Case> {
-    vec![
-        Case {
-            name: "a rule in info/exclude",
-            build: a_rule_in_info_exclude,
-            expected: &[
-                "ignored afterwards",
-                ".rituals/greet/Cargo.toml (`/.rituals` in .git/info/exclude:1)",
-                ".rituals/greet/src/lib.rs (`/.rituals` in .git/info/exclude:1)",
-            ],
-        },
-        Case {
-            name: "a rule in info/exclude of a linked work tree",
-            build: a_rule_in_info_exclude_of_a_linked_work_tree,
-            expected: &[
-                "ignored afterwards",
-                ".rituals/greet/Cargo.toml (`/.rituals` in <scratch>/main/.git/info/exclude:1)",
-                ".rituals/greet/src/lib.rs (`/.rituals` in <scratch>/main/.git/info/exclude:1)",
-            ],
-        },
-        Case {
-            name: "a rule in the global excludes file",
-            build: a_rule_in_the_global_excludes_file,
-            expected: &[
-                "ignored afterwards",
-                ".rituals/greet/Cargo.toml (`/.rituals` in <scratch>/global-ignore:1)",
-                ".rituals/greet/src/lib.rs (`/.rituals` in <scratch>/global-ignore:1)",
-            ],
-        },
-    ]
-}
-
 /// The cases about which attributes git gives.
 fn attribute_cases() -> Vec<Case> {
     vec![
@@ -174,24 +134,6 @@ fn attribute_cases() -> Vec<Case> {
             expected: &[
                 "attributes",
                 "tasks/greet/assets/logo.bin: diff=lfs, filter=lfs, merge=lfs, -text => none",
-            ],
-        },
-        Case {
-            name: "a rule in info/attributes",
-            build: a_rule_in_info_attributes,
-            expected: &[
-                "attributes",
-                "tasks/greet/Cargo.toml: export-ignore => none",
-                "tasks/greet/src/lib.rs: export-ignore => none",
-            ],
-        },
-        Case {
-            name: "a rule in the global attributes file",
-            build: a_rule_in_the_global_attributes_file,
-            expected: &[
-                "attributes",
-                "tasks/greet/Cargo.toml: export-ignore => none",
-                "tasks/greet/src/lib.rs: export-ignore => none",
             ],
         },
         Case {
@@ -284,7 +226,7 @@ fn committed(root: &Path, files: &[(&str, &str)]) -> TestOutcome {
 
 /// A rule that ignores every dot directory, but for the ones a project needs
 /// tracked. `.rituals` is a dot directory.
-fn dot_directories_with_negations(root: &Path) -> Built {
+fn dot_directories_with_negations(root: &Path) -> TestOutcome {
     committed(
         root,
         &[(
@@ -292,13 +234,13 @@ fn dot_directories_with_negations(root: &Path) -> Built {
             "/target\n.*\n!.gitignore\n!.github\n!.cargo\n",
         )],
     )?;
-    Ok(None)
+    Ok(())
 }
 
 /// A file a rule ignores at both places is still tracked while it is
 /// force-added, and a commit after the move would drop it: the new place is
 /// ignored, so `git add --all` would not add it.
-fn a_force_added_file_a_rule_matches_at_both_places(root: &Path) -> Built {
+fn a_force_added_file_a_rule_matches_at_both_places(root: &Path) -> TestOutcome {
     repository(
         root,
         &[
@@ -309,10 +251,10 @@ fn a_force_added_file_a_rule_matches_at_both_places(root: &Path) -> Built {
     git(root, &["add", "--all"])?;
     git(root, &["add", "--force", "tasks/greet/secret.txt"])?;
     git(root, &["commit", "--message", "fixture"])?;
-    Ok(None)
+    Ok(())
 }
 
-fn an_ignored_file_the_new_place_would_not_ignore(root: &Path) -> Built {
+fn an_ignored_file_the_new_place_would_not_ignore(root: &Path) -> TestOutcome {
     committed(
         root,
         &[
@@ -320,10 +262,10 @@ fn an_ignored_file_the_new_place_would_not_ignore(root: &Path) -> Built {
             ("tasks/greet/.env", "SECRET=1\n"),
         ],
     )?;
-    Ok(None)
+    Ok(())
 }
 
-fn a_rule_in_the_directory_the_task_moves_out_of(root: &Path) -> Built {
+fn a_rule_in_the_directory_the_task_moves_out_of(root: &Path) -> TestOutcome {
     committed(
         root,
         &[
@@ -331,13 +273,13 @@ fn a_rule_in_the_directory_the_task_moves_out_of(root: &Path) -> Built {
             ("tasks/greet/a.env", "SECRET=1\n"),
         ],
     )?;
-    Ok(None)
+    Ok(())
 }
 
 /// The task's own ignore file moves with it, so the file it ignores is
 /// ignored at both places: before the move, nothing can see the file at the
 /// new place, which is why the check asks a work tree that has it there.
-fn an_ignore_file_inside_the_task(root: &Path) -> Built {
+fn an_ignore_file_inside_the_task(root: &Path) -> TestOutcome {
     committed(
         root,
         &[
@@ -345,10 +287,10 @@ fn an_ignore_file_inside_the_task(root: &Path) -> Built {
             ("tasks/greet/.env", "SECRET=1\n"),
         ],
     )?;
-    Ok(None)
+    Ok(())
 }
 
-fn a_pattern_that_matches_at_both_places(root: &Path) -> Built {
+fn a_pattern_that_matches_at_both_places(root: &Path) -> TestOutcome {
     committed(
         root,
         &[
@@ -356,60 +298,23 @@ fn a_pattern_that_matches_at_both_places(root: &Path) -> Built {
             ("tasks/greet/build.log", "output\n"),
         ],
     )?;
-    Ok(None)
+    Ok(())
 }
 
 /// `-v` reports a negation as the rule that decided, and a path it names is
 /// not ignored.
-fn a_negation_that_re_includes_the_new_directory(root: &Path) -> Built {
+fn a_negation_that_re_includes_the_new_directory(root: &Path) -> TestOutcome {
     committed(
         root,
         &[(".gitignore", "/target\n.*\n!.rituals\n!.gitignore\n")],
     )?;
-    Ok(None)
-}
-
-fn a_rule_in_info_exclude(root: &Path) -> Built {
-    committed(root, &[])?;
-    write(root, ".git/info/exclude", "/.rituals\n")?;
-    Ok(None)
-}
-
-/// The repository under test is a linked work tree of one beside it, whose
-/// `info/exclude` is the main repository's, outside the work tree.
-fn a_rule_in_info_exclude_of_a_linked_work_tree(root: &Path) -> Built {
-    let scratch = root.parent().ok_or("a fixture root has a parent")?;
-    let main = scratch.join("main");
-    committed(&main, &[])?;
-    write(&main, ".git/info/exclude", "/.rituals\n")?;
-    let linked = root.to_str().ok_or("a scratch path that is not UTF-8")?;
-    git(
-        &main,
-        &["worktree", "add", "--quiet", linked, "-b", "linked"],
-    )?;
-    Ok(None)
-}
-
-/// The rule lives in a file a developer's own configuration names, which
-/// the repository knows nothing about.
-fn a_rule_in_the_global_excludes_file(root: &Path) -> Built {
-    committed(root, &[])?;
-    let scratch = std::fs::canonicalize(root.parent().ok_or("a fixture root has a parent")?)?;
-    write(&scratch, "global-ignore", "/.rituals\n")?;
-    let ignore = scratch.join("global-ignore");
-    let configuration = scratch.join("global-gitconfig");
-    write(
-        &scratch,
-        "global-gitconfig",
-        &format!("[core]\n\texcludesFile = {}\n", ignore.display()),
-    )?;
-    Ok(Some(configuration))
+    Ok(())
 }
 
 /// Git LFS stores a file it filters as a pointer and the file's bytes
 /// elsewhere. No driver is installed here, so the commit stores the file as
 /// it is, which is all the check needs: the attributes decide by path.
-fn an_attributes_rule_keyed_on_tasks(root: &Path) -> Built {
+fn an_attributes_rule_keyed_on_tasks(root: &Path) -> TestOutcome {
     repository(
         root,
         &[
@@ -421,33 +326,12 @@ fn an_attributes_rule_keyed_on_tasks(root: &Path) -> Built {
         ],
     )?;
     commit_everything(root)?;
-    Ok(None)
-}
-
-fn a_rule_in_info_attributes(root: &Path) -> Built {
-    committed(root, &[])?;
-    write(root, ".git/info/attributes", "tasks/** export-ignore\n")?;
-    Ok(None)
-}
-
-/// The rule lives in a file a developer's own configuration names.
-fn a_rule_in_the_global_attributes_file(root: &Path) -> Built {
-    committed(root, &[])?;
-    let scratch = std::fs::canonicalize(root.parent().ok_or("a fixture root has a parent")?)?;
-    write(&scratch, "global-attributes", "tasks/** export-ignore\n")?;
-    let attributes = scratch.join("global-attributes");
-    let configuration = scratch.join("global-gitconfig");
-    write(
-        &scratch,
-        "global-gitconfig",
-        &format!("[core]\n\tattributesFile = {}\n", attributes.display()),
-    )?;
-    Ok(Some(configuration))
+    Ok(())
 }
 
 /// An attributes file inside the task moves with it, and the macro it uses
 /// gives the same attributes at the new place.
-fn an_attributes_file_inside_the_task(root: &Path) -> Built {
+fn an_attributes_file_inside_the_task(root: &Path) -> TestOutcome {
     committed(
         root,
         &[
@@ -455,49 +339,49 @@ fn an_attributes_file_inside_the_task(root: &Path) -> Built {
             ("tasks/greet/logo.bin", "bin\n"),
         ],
     )?;
-    Ok(None)
+    Ok(())
 }
 
-fn a_cone_sparse_checkout_without_the_new_directory(root: &Path) -> Built {
+fn a_cone_sparse_checkout_without_the_new_directory(root: &Path) -> TestOutcome {
     committed(root, &[])?;
     git(root, &["sparse-checkout", "set", "--cone", "tasks"])?;
-    Ok(None)
+    Ok(())
 }
 
 /// `git sparse-checkout disable` turns the setting off and leaves the
 /// patterns file, which `check-rules` would still read.
-fn a_sparse_checkout_turned_off(root: &Path) -> Built {
+fn a_sparse_checkout_turned_off(root: &Path) -> TestOutcome {
     committed(root, &[])?;
     git(root, &["sparse-checkout", "set", "--cone", "tasks"])?;
     git(root, &["sparse-checkout", "disable"])?;
-    Ok(None)
+    Ok(())
 }
 
 /// A repository of its own inside the task, which git lists as one entry and
 /// a rule ignores now only because of where it is.
-fn an_ignored_nested_repository_the_new_place_would_not_ignore(root: &Path) -> Built {
+fn an_ignored_nested_repository_the_new_place_would_not_ignore(root: &Path) -> TestOutcome {
     repository(root, &[(".gitignore", "/target\ntasks/greet/vendor/\n")])?;
     let nested = root.join("tasks/greet/vendor/up");
     write(&nested, "up.txt", "a repository of its own\n")?;
     git(&nested, &["init", "--quiet"])?;
     commit_everything(&nested)?;
     commit_everything(root)?;
-    Ok(None)
+    Ok(())
 }
 
 /// A file a commit would carry, not yet committed: git sees it now, so a
 /// rule at the new place that ignores it changes what a commit carries.
-fn an_untracked_file_the_new_place_would_ignore(root: &Path) -> Built {
+fn an_untracked_file_the_new_place_would_ignore(root: &Path) -> TestOutcome {
     committed(
         root,
         &[(".gitignore", "/target\n.rituals/greet/notes.txt\n")],
     )?;
     write(root, "tasks/greet/notes.txt", "not committed\n")?;
-    Ok(None)
+    Ok(())
 }
 
 /// Git is asked in NUL-separated form, so a name is never quoted or split.
-fn file_names_with_a_space_and_non_ascii_letters(root: &Path) -> Built {
+fn file_names_with_a_space_and_non_ascii_letters(root: &Path) -> TestOutcome {
     committed(
         root,
         &[
@@ -506,10 +390,10 @@ fn file_names_with_a_space_and_non_ascii_letters(root: &Path) -> Built {
             ("tasks/greet/caf\u{e9}.rs", "//! A name with an accent.\n"),
         ],
     )?;
-    Ok(None)
+    Ok(())
 }
 
-fn an_assume_unchanged_file(root: &Path) -> Built {
+fn an_assume_unchanged_file(root: &Path) -> TestOutcome {
     committed(root, &[])?;
     git(
         root,
@@ -519,28 +403,28 @@ fn an_assume_unchanged_file(root: &Path) -> Built {
             "tasks/greet/src/lib.rs",
         ],
     )?;
-    Ok(None)
+    Ok(())
 }
 
-fn a_skip_worktree_file_on_disk(root: &Path) -> Built {
+fn a_skip_worktree_file_on_disk(root: &Path) -> TestOutcome {
     committed(root, &[])?;
     git(
         root,
         &["update-index", "--skip-worktree", "tasks/greet/src/lib.rs"],
     )?;
-    Ok(None)
+    Ok(())
 }
 
 /// A rename leaves behind a file that is not on disk, so there is nothing
 /// to say about where it would be.
-fn a_skip_worktree_file_not_on_disk(root: &Path) -> Built {
+fn a_skip_worktree_file_not_on_disk(root: &Path) -> TestOutcome {
     committed(root, &[])?;
     git(
         root,
         &["update-index", "--skip-worktree", "tasks/greet/src/lib.rs"],
     )?;
     std::fs::remove_file(root.join("tasks/greet/src/lib.rs"))?;
-    Ok(None)
+    Ok(())
 }
 
 /// The task directory is a link to a directory beside `tasks/`. Git keeps a
@@ -560,49 +444,37 @@ fn a_linked_task(root: &Path, ignore: &str) -> TestOutcome {
     Ok(())
 }
 
-fn a_symbolic_link_a_rule_would_ignore(root: &Path) -> Built {
+fn a_symbolic_link_a_rule_would_ignore(root: &Path) -> TestOutcome {
     a_linked_task(root, "/target\n.rituals/\n")?;
-    Ok(None)
+    Ok(())
 }
 
-fn a_symbolic_link_nothing_differs_for(root: &Path) -> Built {
+fn a_symbolic_link_nothing_differs_for(root: &Path) -> TestOutcome {
     a_linked_task(root, "/target\n")?;
-    Ok(None)
+    Ok(())
 }
 
-/// A built repository: where it is, which global configuration to ask with,
-/// and the scratch directory that holds it, which goes when this does.
+/// A built repository, and the scratch directory that holds it, which goes
+/// when this does.
 struct Fixture {
-    scratch: ScratchDir,
+    _scratch: ScratchDir,
     root: PathBuf,
-    global_configuration: Option<PathBuf>,
 }
 
 impl Fixture {
     fn new(case: &Case) -> Result<Self, Box<dyn Error>> {
         let scratch = ScratchDir::new("sight-matrix")?;
         let root = scratch.path().join("project");
-        let global_configuration = (case.build)(&root)
-            .map_err(|error| format!("building {:?} failed: {error}", case.name))?;
+        (case.build)(&root).map_err(|error| format!("building {:?} failed: {error}", case.name))?;
         Ok(Self {
-            scratch,
+            _scratch: scratch,
             root,
-            global_configuration,
         })
     }
 
-    /// `git`, kept to the scratch directory and reading the case's global
-    /// configuration, when it has one.
+    /// `git`, kept to the scratch directory.
     fn new_git(&self) -> impl Fn() -> Command + use<'_> {
-        let contained = contained_in(&self.root);
-        let global_configuration = self.global_configuration.clone();
-        move || {
-            let mut command = contained();
-            if let Some(configuration) = &global_configuration {
-                command.env("GIT_CONFIG_GLOBAL", configuration);
-            }
-            command
-        }
+        contained_in(&self.root)
     }
 
     fn relocation(&self) -> Relocation {
@@ -612,18 +484,10 @@ impl Fixture {
             [self.root.join("tasks/greet")],
         )
     }
-
-    /// The scratch directory as git spells it, resolved through symbolic
-    /// links.
-    fn scratch_as_git_spells_it(&self) -> Result<String, Box<dyn Error>> {
-        Ok(std::fs::canonicalize(self.scratch.path())?
-            .to_string_lossy()
-            .into_owned())
-    }
 }
 
 /// What the check said, as the case's `expected` lines say it.
-fn described(result: &Result<(), SeenDifferently>, scratch: &str) -> Vec<String> {
+fn described(result: &Result<(), SeenDifferently>) -> Vec<String> {
     let lines: Vec<String> = match result {
         Ok(()) => return Vec::new(),
         Err(SeenDifferently::Unanswered(unanswered)) => {
@@ -682,9 +546,6 @@ fn described(result: &Result<(), SeenDifferently>, scratch: &str) -> Vec<String>
             .collect(),
     };
     lines
-        .into_iter()
-        .map(|line| line.replace(scratch, "<scratch>"))
-        .collect()
 }
 
 /// Every case in the table is judged as it says it should be.
@@ -700,7 +561,7 @@ fn every_case_is_judged_as_it_should_be() -> TestOutcome {
         let built = Fixture::new(&case)?;
         let result = ensure_with(built.new_git(), &built.relocation(), &built.root);
 
-        let said = described(&result, &built.scratch_as_git_spells_it()?);
+        let said = described(&result);
         if said != case.expected {
             disagreements.push(format!(
                 "{}:\n  expected {:?}\n  said     {said:?}",
@@ -778,7 +639,6 @@ fn disagreements_with_git(
     let to_paths: Vec<String> = files.iter().map(|file| file.to.clone()).collect();
     let ignored = ignore::ask(new_git, top_level, &[], &to_paths)?;
     for (file, rule) in files.iter().zip(ignored) {
-        let rule = rule.map(|rule| relative_to(rule, top_level));
         if rule != file.ignored_afterwards {
             disagreements.push(format!(
                 "{}: the check predicted the rule {:?} and git said {rule:?}",

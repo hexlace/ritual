@@ -9,9 +9,7 @@ use support::generated::mounted_entries;
 use support::help::{command_names, lists_command};
 use support::manifest;
 use support::tree::{Entry, changed_paths};
-use support::{
-    ResultContext, TempDir, TestOutcome, process, run_binary, snapshot_tree, write_text,
-};
+use support::{ResultContext, TempDir, TestOutcome, run_binary, snapshot_tree, write_text};
 
 /// `ritual --help`, captured from this repository's own `ritual` binary:
 /// a `Usage:` line naming the bin, a `Commands:` block, and an `Options:`
@@ -511,41 +509,6 @@ fn a_binary_started_by_a_story_does_not_read_the_machines_global_ignore_file() -
     assert!(
         !output.stdout.contains(MACHINE_ONLY_PATH),
         "a binary run by a story must not see the machine's global ignore file; stdout was:\n{}",
-        output.stdout
-    );
-    Ok(())
-}
-
-/// The one global configuration a story chooses for itself is read, and is
-/// the only one: its `core.excludesFile` ignores the file, and the machine's
-/// own ignore file, which would name the same path, is not what answered.
-#[test]
-fn a_story_can_give_its_binary_one_global_git_configuration_of_its_own() -> TestOutcome {
-    let machine = MachineWithAGlobalIgnore::new("isolation-chosen-configuration")?;
-    let chosen = TempDir::new("isolation-chosen-ignore")?;
-    let chosen_ignore = chosen.path().join("chosen-ignore");
-    write_text(&chosen_ignore, "**/machine-only.txt\n")?;
-    let configuration = chosen.path().join("gitconfig");
-    write_text(
-        &configuration,
-        &format!("[core]\n\texcludesFile = {}\n", chosen_ignore.display()),
-    )?;
-
-    let output = process::run_binary_with_global_git_configuration(
-        Path::new("sh"),
-        machine.repository.path(),
-        &["-c", &check_ignore_script(&machine)],
-        &configuration,
-    )?;
-
-    assert!(
-        output.stdout.contains(&chosen_ignore.display().to_string()),
-        "expected the story's own excludesFile to answer; stdout was:\n{}",
-        output.stdout
-    );
-    assert!(
-        !output.stdout.contains(".config/git/ignore"),
-        "the machine's own ignore file must not answer; stdout was:\n{}",
         output.stdout
     );
     Ok(())

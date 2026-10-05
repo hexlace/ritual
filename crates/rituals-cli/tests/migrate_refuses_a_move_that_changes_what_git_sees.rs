@@ -16,9 +16,7 @@
 
 mod support;
 
-use support::migration::{
-    assert_migrate_is_refused_and_writes_nothing, assert_refusal_wrote_nothing, exists,
-};
+use support::migration::{assert_migrate_is_refused_and_writes_nothing, exists};
 use support::{
     Checkout, Project, TempDir, TestOutcome, git, in_checkout, legacy, read_text, snapshot_tree,
     write_text,
@@ -96,43 +94,6 @@ fn a_project_gitignore_that_ignores_dot_directories_is_refused() -> TestOutcome 
 
         append_and_commit(&project, ".gitignore", "!.rituals\n")?;
         assert_migrate_now_moves_greet(&project)
-    })
-}
-
-#[test]
-fn the_same_rule_only_in_a_global_excludes_file_is_refused() -> TestOutcome {
-    in_checkout(|checkout| {
-        let working_dir = TempDir::new("migrate-sight-global-excludes")?;
-        let project = committed_project(checkout, &working_dir)?;
-        let global_ignore = working_dir.path().join("global-ignore");
-        write_text(&global_ignore, DOT_DIRECTORIES_IGNORED)?;
-        let configuration = working_dir.path().join("global-gitconfig");
-        write_text(
-            &configuration,
-            &format!("[core]\n\texcludesFile = {}\n", global_ignore.display()),
-        )?;
-        let global_ignore = support::path_to_str(&global_ignore)?;
-        let before = snapshot_tree(project.root())?;
-
-        let refused =
-            project.run_cli_with_global_git_configuration(&["migrate"], &configuration)?;
-
-        assert_refusal_wrote_nothing(
-            &project,
-            &before,
-            &refused,
-            &[&format!("{global_ignore}:2"), "`.*`"],
-        )?;
-
-        commit_with_gitignore(&project, "/target\n!.rituals\n")?;
-        let migrated =
-            project.run_cli_with_global_git_configuration(&["migrate"], &configuration)?;
-        migrated.expect_success("`migrate` once the project's own rule re-includes .rituals");
-        assert!(
-            exists(&project.root().join(".rituals/greet/Cargo.toml")),
-            "expected .rituals/greet to exist once `migrate` could run"
-        );
-        Ok(())
     })
 }
 

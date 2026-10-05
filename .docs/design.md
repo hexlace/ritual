@@ -709,10 +709,13 @@ tree of copies in the system's temporary directory, named for the process and
 removed when the check returns, that holds the project's ignore and attribute
 files where they will be: every one in the directories above each new place,
 and every one under a task at its new place. Git is given the repository's own
-git directory beside it, so `info/exclude`, the configuration, a global
-`core.excludesFile` and the index are read exactly as for the real tree. Only
-regular files are copied, because git does not follow a link for these files.
-Nothing is written to the project or the repository. The alternatives were
+git directory beside it, so the repository's configuration and the index are
+read exactly as for the real tree. Only regular files are copied, because git does not follow a link for these files.
+Nothing is written to the project or the repository. Only rules the project
+carries count: a rule that lives outside the repository, such as a global
+excludes file or `.git/info/exclude`, is not considered, because a project has
+to work from a fresh clone, and that configuration is the person's own. The
+alternatives were
 asking the real tree before the move, which gets that wrong, and reproducing
 git's precedence by hand, which is a second reading of git's rules that could
 only disagree with the first.

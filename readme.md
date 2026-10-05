@@ -388,10 +388,9 @@ anything when:
   that names `tasks/`). The same goes for a file that would be outside a
   sparse checkout, and for a tracked file git has been told not to look at
   (`assume-unchanged` or `skip-worktree`), whose edits a commit would carry
-  without `git status` showing them. The rules count wherever they are:
-  your `.gitignore` and `.gitattributes`, `.git/info/exclude`, and a global
-  file such as the one `core.excludesFile` names. An ignore file inside a task
-  moves with it and counts at its new place. The refusal names the file and
+  without `git status` showing them. The rules that count are the ones the
+  project carries: its `.gitignore` and `.gitattributes` files. An ignore file
+  inside a task moves with it and counts at its new place. The refusal names the file and
   the rule, and what to change;
 - a task's directory holds other workspace members, or a git submodule, or
   its destination in `.rituals/` is taken, or `.rituals` is a file;

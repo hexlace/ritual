@@ -320,14 +320,9 @@ fn ignored_at(
 }
 
 /// A rule as `` `pattern` in source:line``, the source spelled from the
-/// project's root when it is in the repository, and as git gave it, which is
-/// absolute, when it is not.
+/// project's root.
 fn rule_named(rule: &IgnoreRule, repository: &Repository) -> String {
-    let source = if rule.source().is_absolute() {
-        rule.source().display().to_string()
-    } else {
-        repository.shown(rule.source())
-    };
+    let source = repository.shown(rule.source());
     format!("`{}` in {source}:{}", rule.pattern(), rule.line())
 }
 

@@ -194,24 +194,6 @@ pub(crate) fn run_binary(
     run_to_completion(&mut command, &binary.display().to_string())
 }
 
-/// Runs `binary` as [`run_binary`] does, except that the `git` it starts
-/// reads `global_git_configuration` as its global configuration, and nothing
-/// else from the machine.
-///
-/// For a story whose subject is what ritual does when a developer's global
-/// configuration says something, such as an `excludesFile`: the story writes
-/// that configuration itself, so the answer is the same on every machine.
-pub(crate) fn run_binary_with_global_git_configuration(
-    binary: &Path,
-    current_dir: &Path,
-    arguments: &[&str],
-    global_git_configuration: &Path,
-) -> Outcome<RunOutput> {
-    let mut command = isolated_binary(binary, current_dir, arguments);
-    command.env("GIT_CONFIG_GLOBAL", global_git_configuration);
-    run_to_completion(&mut command, &binary.display().to_string())
-}
-
 /// `binary` with `arguments` in `current_dir`, building into its own
 /// `target/` and with `git` isolated from the machine.
 fn isolated_binary(binary: &Path, current_dir: &Path, arguments: &[&str]) -> Command {

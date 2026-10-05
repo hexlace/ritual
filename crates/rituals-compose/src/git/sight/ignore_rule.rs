@@ -47,9 +47,7 @@ impl IgnoreRule {
         }
     }
 
-    /// The file the rule is written in: spelled from git's top level when it
-    /// is inside the repository's work tree, and as git reports it when it is
-    /// not, such as a global excludes file.
+    /// The file the rule is written in, spelled from git's top level.
     ///
     /// # Examples
     ///

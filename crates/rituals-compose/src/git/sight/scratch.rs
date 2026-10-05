@@ -5,9 +5,8 @@
 //! files in the work tree, and a moved directory's own `.gitignore` and
 //! `.gitattributes` move with it. Asked before the move, git cannot see them
 //! at the new place, so it is asked about a work tree that already holds them
-//! there, with the repository's own git directory beside it: its
-//! `info/exclude`, its configuration and its index are read exactly as they
-//! are for the real tree.
+//! there, with the repository's own git directory beside it: its configuration
+//! and its index are read exactly as they are for the real tree.
 
 use std::io::ErrorKind;
 use std::os::unix::fs::DirBuilderExt as _;

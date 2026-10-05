@@ -14,8 +14,12 @@
 //! at its place afterwards, in a work tree of copies that holds the
 //! `.gitignore` and `.gitattributes` files where they will be, so that the
 //! ones that move with a directory are seen at the new place. Git's own
-//! reading of its configuration, `info/exclude` and the index is the same for
+//! reading of the repository's configuration and the index is the same for
 //! both. Nothing is written to the project or the repository.
+//!
+//! Only rules the project carries count. A rule outside the repository, in a
+//! global excludes file or `.git/info/exclude`, is not considered, because a
+//! project has to work from a fresh clone.
 //!
 //! # Examples
 //!

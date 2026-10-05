@@ -112,34 +112,7 @@ pub(super) fn predict(
     }
     attributes_at_both_places(new_git, &top_level, &scope, &scratch, &mut files)?;
     sparse_checkout_at_new_places(new_git, &top_level, &mut files)?;
-
-    for file in &mut files {
-        file.ignored_now = file
-            .ignored_now
-            .take()
-            .map(|rule| relative_to(rule, &top_level));
-        file.ignored_afterwards = file
-            .ignored_afterwards
-            .take()
-            .map(|rule| relative_to(rule, &top_level));
-    }
     Ok(Prediction { places, files })
-}
-
-/// `rule` with its source spelled from `top_level` when it is inside it.
-///
-/// Git spells the source of a rule in the repository's own `info/exclude`
-/// relative to the top level when asked from the real tree, and absolute
-/// when asked of the stand-in, where the git directory is named in full. It
-/// is the same file, so it is spelled one way.
-pub(super) fn relative_to(rule: IgnoreRule, top_level: &Path) -> IgnoreRule {
-    match rule.source().strip_prefix(top_level) {
-        Ok(inside) => {
-            let source = inside.to_path_buf();
-            IgnoreRule::new(source, rule.line(), rule.pattern().to_string())
-        }
-        Err(_) => rule,
-    }
 }
 
 /// The entries that move: every file under the directories, less the ones
