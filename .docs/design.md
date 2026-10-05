@@ -646,8 +646,11 @@ resolved with, and the project's own command line imports it, in its
 `[package.metadata.ritual] tasks` list. "Member" is what `cargo metadata` says,
 since Cargo's membership is glob expansion, `exclude` and path dependencies
 that become members on their own, and a second reading of that could only
-disagree with Cargo. A project with no such task under `tasks/` has nothing to
-migrate, whatever its list holds. Each task the command line imports moves to
+disagree with Cargo. A project with no member under `tasks/` that declares
+itself a task has nothing to migrate, and its list is not read. When there is
+one, the list is read, and a list that cannot be read is a failure, not
+`nothing to migrate`; a list that imports none of them is nothing to migrate.
+Each task the command line imports moves to
 the same place under `.rituals/`, so `tasks/greet` becomes `.rituals/greet`.
 Anything else in `tasks/` stays where it is, with the directory that holds it:
 a crate that is not a task, a task that only another task depends on, and the

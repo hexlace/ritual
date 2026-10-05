@@ -382,7 +382,7 @@ fn would_no_longer_be_ignored(
 ) -> Failure {
     let them = it_or_them(files.len());
     Failure::new(format!(
-        "refusing to migrate: git ignores {}, and nothing would ignore {them} under \
+        "refusing to migrate: git ignores {} now, but nothing would ignore {them} under \
          {to_directory}/, so a commit after the move would add {them}; add a rule that ignores \
          {them} there, then run `{migrate_command}` again",
         listed(files)
@@ -854,9 +854,9 @@ mod tests {
                 MIGRATE
             )
             .to_string(),
-            "refusing to migrate: git ignores tasks/greet/.env (`.env` in .gitignore:2), and \
-             nothing would ignore it under .rituals/, so a commit after the move would add it; \
-             add a rule that ignores it there, then run `cargo ritual migrate` again"
+            "refusing to migrate: git ignores tasks/greet/.env (`.env` in .gitignore:2) now, \
+             but nothing would ignore it under .rituals/, so a commit after the move would add \
+             it; add a rule that ignores it there, then run `cargo ritual migrate` again"
         );
     }
 
@@ -870,9 +870,9 @@ mod tests {
             )
             .to_string(),
             "refusing to migrate: git ignores a (`x` in .gitignore:1), b (`x` in \
-             .gitignore:1), and nothing would ignore them under .rituals/, so a commit after the \
-             move would add them; add a rule that ignores them there, then run `cargo ritual \
-             migrate` again"
+             .gitignore:1) now, but nothing would ignore them under .rituals/, so a commit \
+             after the move would add them; add a rule that ignores them there, then run `cargo \
+             ritual migrate` again"
         );
     }
 
