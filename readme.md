@@ -330,8 +330,7 @@ in step and a project that needs nothing is told `nothing to migrate`. It runs
 from the new version, which is why the bump comes first. This release has one
 migration, from `tasks/` to `.rituals/`.
 
-For each task under `tasks/` that the CLI crate's `[package.metadata.ritual]
-tasks` list imports, it:
+For each workspace member under `tasks/` that is a task, it:
 
 - moves the directory to the same place under `.rituals/`, ignored files
   included, once git would see every file there as it does now (see below);
@@ -346,12 +345,8 @@ tasks` list imports, it:
   the other places Cargo reads a path. A path that still leads where it led,
   such as a task's `../greet` to a task that moved beside it, is left as you
   wrote it;
-- leaves `tasks/` in place when something that is not one of those tasks is
-  still in it, and says what is left.
-
-A task in `tasks/` that only another task depends on stays where it is, and the
-paths that reach it are repointed. The children of a bundle stay too, when your
-command line imports the bundle and not them.
+- leaves `tasks/` in place when something that is not a task is still in it,
+  and says what is left.
 
 It edits manifests in place, so your comments and formatting stay. It then
 checks that Cargo still reads the project, and prints what it did, then every

@@ -19,7 +19,7 @@ use crate::tidy::Vacated;
 /// A change a ritual release made to what a project should look like.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Step {
-    /// 0.2.0: a project's own tasks move from `tasks/` to `.rituals/`.
+    /// 0.2.0: every task in `tasks/` moves to `.rituals/`.
     TasksIntoRituals,
 }
 
@@ -29,23 +29,11 @@ impl Step {
     pub(crate) const IN_RELEASE_ORDER: [Self; 1] = [Self::TasksIntoRituals];
 
     /// What this step would do to the project `document` describes, or
-    /// `None` when the project is already as the step leaves it. `package` is
-    /// the one whose command line is running `migrate`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`Failure`] when the step has to read what the command line
-    /// imports and cannot.
-    pub(crate) fn applies(
-        self,
-        document: &Metadata,
-        root: &Path,
-        package: &str,
-    ) -> Result<Option<Migration>, Failure> {
+    /// `None` when the project is already as the step leaves it.
+    pub(crate) fn applies(self, document: &Metadata, root: &Path) -> Option<Migration> {
         match self {
             Self::TasksIntoRituals => {
-                Ok(tasks_into_rituals::find(document, root, package)?
-                    .map(Migration::TasksIntoRituals))
+                tasks_into_rituals::find(document, root).map(Migration::TasksIntoRituals)
             }
         }
     }
@@ -106,9 +94,7 @@ mod tests {
 
     fn applies(root: &std::path::Path) -> Result<bool, Box<dyn std::error::Error>> {
         let document = metadata::fetch(root)?;
-        Ok(Step::TasksIntoRituals
-            .applies(&document, root, "ritual")?
-            .is_some())
+        Ok(Step::TasksIntoRituals.applies(&document, root).is_some())
     }
 
     #[test]
@@ -133,6 +119,19 @@ mod tests {
             &[".rituals/greet"],
             &[],
         )?;
+        assert!(!applies(scratch.path())?);
+        Ok(())
+    }
+
+    /// A ritual anywhere under `.rituals/` is already in the layout this step
+    /// leaves, whatever the directories between it and `.rituals/` are called.
+    /// Two levels down are checked as well as one, because the step must not
+    /// stop at the first.
+    #[test]
+    fn a_task_nested_at_any_depth_in_dot_rituals_does_not_apply() -> TestOutcome {
+        let scratch = ScratchDir::new("step-nested-new-layout")?;
+        let members = [".rituals/private/lint", ".rituals/a/b/format"];
+        workspace(scratch.path(), &members, &members, &[])?;
         assert!(!applies(scratch.path())?);
         Ok(())
     }
@@ -176,23 +175,7 @@ mod tests {
     #[test]
     fn a_project_with_no_members_but_its_own_package_does_not() -> TestOutcome {
         let scratch = ScratchDir::new("step-no-tasks")?;
-        workspace(scratch.path(), &[], &[], &[])?;
-        assert!(!applies(scratch.path())?);
-        Ok(())
-    }
-
-    /// A task in `tasks/` that no command line imports is another task's
-    /// dependency, left where it is.
-    #[test]
-    fn a_task_in_tasks_the_command_line_does_not_import_does_not_apply() -> TestOutcome {
-        let scratch = ScratchDir::new("step-not-imported")?;
-        workspace(scratch.path(), &["tasks/helper"], &["tasks/helper"], &[])?;
-        let manifest = scratch.path().join("cli/Cargo.toml");
-        let without_import = std::fs::read_to_string(&manifest)?
-            .replace("helper = { path = \"../tasks/helper\" }\n", "")
-            .replace("tasks = [\"helper\"]", "tasks = []");
-        std::fs::write(&manifest, without_import)?;
-
+        workspace(scratch.path(), &["ritual"], &["ritual"], &["ritual"])?;
         assert!(!applies(scratch.path())?);
         Ok(())
     }

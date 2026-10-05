@@ -135,7 +135,7 @@ fn run_every_step_that_applies<'a>(
         metadata::fetch_in_its_own_project(changes, current_dir, package, "migrate", "")?;
     let mut done: Option<Done<'a>> = None;
     for step in Step::IN_RELEASE_ORDER {
-        let Some(migration) = step.applies(&document, invocation.root, package)? else {
+        let Some(migration) = step.applies(&document, invocation.root) else {
             continue;
         };
         let repository = invocation
