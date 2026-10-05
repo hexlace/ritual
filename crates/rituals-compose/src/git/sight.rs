@@ -52,21 +52,31 @@ use std::process::Command;
 
 use crate::relocation::Relocation;
 
+mod attribute;
+mod attribute_change;
+mod attribute_state;
 mod attributes;
 mod ignore;
+mod ignore_rule;
+mod ignored_file;
 mod listing;
 #[cfg(test)]
 mod matrix;
-mod outcome;
+mod moved_file;
 mod places;
 mod prediction;
 mod scratch;
+mod seen_differently;
 mod sparse;
 mod verdict;
 
-pub use outcome::{
-    Attribute, AttributeChange, AttributeState, IgnoreRule, IgnoredFile, MovedFile, SeenDifferently,
-};
+pub use attribute::Attribute;
+pub use attribute_change::AttributeChange;
+pub use attribute_state::AttributeState;
+pub use ignore_rule::IgnoreRule;
+pub use ignored_file::IgnoredFile;
+pub use moved_file::MovedFile;
+pub use seen_differently::SeenDifferently;
 
 /// The arguments of a question put to git about `scope`'s tree: `scope`'s
 /// options, which choose the tree, ahead of `command`.

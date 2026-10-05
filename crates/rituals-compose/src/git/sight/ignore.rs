@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::outcome::IgnoreRule;
+use super::IgnoreRule;
 use super::scoped;
 use crate::git::{Unanswered, failure_of, nul_terminated, run_git_for_output};
 
@@ -98,7 +98,7 @@ mod tests {
 
     use super::parse_answers;
     use crate::git::Unanswered;
-    use crate::git::sight::outcome::IgnoreRule;
+    use crate::git::sight::IgnoreRule;
 
     fn asked(paths: &[&str]) -> Vec<String> {
         paths.iter().map(ToString::to_string).collect()

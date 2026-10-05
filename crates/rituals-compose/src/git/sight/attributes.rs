@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
-use super::outcome::Attribute;
+use super::Attribute;
 use super::scoped;
 use crate::git::index::parse_attributes;
 use crate::git::{Unanswered, nul_terminated, run_git_with_input};

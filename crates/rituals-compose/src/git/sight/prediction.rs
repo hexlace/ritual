@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::listing::{self, Entry, Standing};
-use super::outcome::{Attribute, IgnoreRule, MovedFile};
 use super::places::Places;
 use super::scratch::{Scratch, rule_file_copies};
+use super::{Attribute, IgnoreRule, MovedFile};
 use super::{attributes, ignore, sparse};
 use crate::git::{Flag, Unanswered, run_git, top_level_of};
 use crate::relocation::Relocation;

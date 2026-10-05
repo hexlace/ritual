@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 use super::listing::Standing;
-use super::outcome::{AttributeChange, IgnoredFile, SeenDifferently};
 use super::prediction::{Predicted, Prediction};
+use super::{AttributeChange, IgnoredFile, SeenDifferently};
 use crate::git::Unwatched;
 
 /// Judges `prediction`: nothing differs, or the first kind that does, in the
@@ -24,7 +24,7 @@ pub(super) fn judge(prediction: &Prediction) -> Result<(), SeenDifferently> {
             let source = prediction.places.at_its_current_place(rule.source());
             Some(IgnoredFile::new(
                 file.moved_file(),
-                super::outcome::IgnoreRule::new(source, rule.line(), rule.pattern().to_string()),
+                super::IgnoreRule::new(source, rule.line(), rule.pattern().to_string()),
             ))
         })
         .collect();
