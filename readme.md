@@ -388,10 +388,11 @@ anything when:
   that names `tasks/`). The same goes for a file that would be outside a
   sparse checkout, and for a tracked file git has been told not to look at
   (`assume-unchanged` or `skip-worktree`), whose edits a commit would carry
-  without `git status` showing them. The rules that count are the ones the
-  project carries: its `.gitignore` and `.gitattributes` files. An ignore file
-  inside a task moves with it and counts at its new place. The refusal names the file and
-  the rule, and what to change;
+  without `git status` showing them. The check is for the rules your project
+  carries, its `.gitignore` and `.gitattributes` files; configuration outside
+  the repository is yours to keep in step. An ignore file inside a task moves
+  with it and counts at its new place. The refusal names the file and the
+  rule, and what to change;
 - a task's directory holds other workspace members, or a git submodule, or
   its destination in `.rituals/` is taken, or `.rituals` is a file;
 - a path in a manifest reaches a task through a symbolic link or another

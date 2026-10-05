@@ -17,9 +17,10 @@
 //! reading of the repository's configuration and the index is the same for
 //! both. Nothing is written to the project or the repository.
 //!
-//! Only rules the project carries count. A rule outside the repository, in a
-//! global excludes file or `.git/info/exclude`, is not considered, because a
-//! project has to work from a fresh clone.
+//! The check is for the rules the project carries. Configuration outside the
+//! repository, such as a global excludes file or `.git/info/exclude`, is out
+//! of scope, because a project has to work from a fresh clone: git still reads
+//! it when asked, and nothing here sets it aside or promises anything about it.
 //!
 //! # Examples
 //!
