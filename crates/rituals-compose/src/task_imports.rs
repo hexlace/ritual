@@ -386,10 +386,11 @@ pub(crate) fn dependents_outside_the_graph(
             .leads_to
             .iter()
             .any(|path| lies_under(path, directory));
-        let declaring = reached.manifest.package_name().filter(|_| declares_it);
-        if let Some(name) = declaring
-            && !dependents.iter().any(|dependent| dependent == name)
-        {
+        let declaring = reached
+            .manifest
+            .package_name()
+            .filter(|name| declares_it && !dependents.iter().any(|dependent| dependent == name));
+        if let Some(name) = declaring {
             dependents.push(name.to_string());
         }
     })?;
