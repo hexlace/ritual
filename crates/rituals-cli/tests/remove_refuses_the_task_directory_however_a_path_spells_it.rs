@@ -146,9 +146,7 @@ fn project_with_lint_and_fmt(
     working_dir: &TempDir,
 ) -> support::Outcome<Project> {
     let project = project_with_a_committed_task(checkout, working_dir, "lint")?;
-    project
-        .alias(&["add", "fmt"])?
-        .expect_success("`cargo ritual add fmt`");
+    support::legacy::add_task(&project, "fmt")?;
     write_text(
         &project.root().join("tasks/lint/settings.toml"),
         "[alias]\n",

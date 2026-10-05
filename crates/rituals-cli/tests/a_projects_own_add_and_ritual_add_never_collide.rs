@@ -59,9 +59,9 @@ fn assert_the_two_scaffolders_never_collide(project: &Project) -> TestOutcome {
     assert!(
         project
             .root()
-            .join("tasks/a-real-task/Cargo.toml")
+            .join(".rituals/a-real-task/Cargo.toml")
             .is_file(),
-        "expected `ritual add a-real-task` to scaffold tasks/a-real-task/Cargo.toml — the \
+        "expected `ritual add a-real-task` to scaffold .rituals/a-real-task/Cargo.toml — the \
          project's own leaf never writes files"
     );
     assert!(

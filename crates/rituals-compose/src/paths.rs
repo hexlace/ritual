@@ -1,24 +1,32 @@
-//! Comparing paths the way Cargo reaches them: spelled as Cargo spells
-//! them, then followed through the filesystem.
+//! Comparing and spelling paths: comparing them the way Cargo reaches them,
+//! spelled as Cargo spells them and then followed through the filesystem, and
+//! spelling one from another directory.
 //!
 //! Cargo joins most relative paths onto a base and removes `.` and `..`
-//! components as text before it opens anything, so `tasks/./lint` and
-//! `x/../tasks/lint` are one directory to it whatever `x` is. Then it opens
-//! the result, and the filesystem decides what that names: `Tasks/Lint` on a
-//! file system that folds case, `alias/lint` when `alias` is a link to
-//! `tasks`, `/tmp/w/tasks/lint` when `/tmp` is a link to `/private/tmp`. So
-//! whether a path reaches a directory is asked of the filesystem, by file
+//! components as text before it opens anything, so `.rituals/./lint` and
+//! `x/../.rituals/lint` are one directory to it whatever `x` is. Then it opens
+//! the result, and the filesystem decides what that names: `.Rituals/Lint` on
+//! a file system that folds case, `alias/lint` when `alias` is a link to
+//! `.rituals`, `/tmp/w/.rituals/lint` when `/tmp` is a link to `/private/tmp`.
+//! So whether a path reaches a directory is asked of the filesystem, by file
 //! identity, while the directory still exists.
-//
-// `redundant_pub_crate` (clippy nursery) wants `pub` here because this
-// module is private, but `pub(crate)` is the visibility that is actually
-// true — it stays correct if this module is ever re-exported at a different
-// level — so the nursery lint gives way.
-#![expect(
-    clippy::redundant_pub_crate,
-    reason = "pub(crate) reflects this module's actual visibility even though the enclosing \
-              module is private; see the note above"
-)]
+//!
+//! [`relative`] is the one way to spell the path that leads from one
+//! directory to another, wherever a path is written for a person or a
+//! manifest to read.
+//!
+//! # Examples
+//!
+//! Spelling where a task's directory is from a crate that depends on it:
+//!
+//! ```
+//! use std::path::Path;
+//!
+//! use rituals_compose::paths::relative;
+//!
+//! let path = relative(Path::new("/w/ritual"), Path::new("/w/.rituals/greet"));
+//! assert_eq!(path, "../.rituals/greet");
+//! ```
 
 use std::ffi::OsString;
 use std::fs::Metadata;
@@ -52,6 +60,74 @@ pub(crate) fn normalize(path: &Path) -> PathBuf {
         }
     }
     result
+}
+
+/// The forward-slash path that leads from `from_directory` to `to`, both
+/// absolute, spelled the same on every platform because its separator is
+/// always `/`.
+///
+/// Climbs out of `from_directory` to the directory the two share, then
+/// descends to `to`; the same directory is `.`, since nothing else can be
+/// written where a manifest wants a path. Both are compared by component and
+/// taken as they are, so a caller that wants `.` and `..` resolved first
+/// normalises them first.
+///
+/// # Panics
+///
+/// Panics if either path is not absolute, since a relative path between two
+/// relative paths depends on a working directory neither carries.
+///
+/// # Examples
+///
+/// The same directory is `.`, and a directory that only shares a name prefix
+/// with another is not inside it:
+///
+/// ```
+/// use std::path::Path;
+///
+/// use rituals_compose::paths::relative;
+///
+/// assert_eq!(relative(Path::new("/w/demo"), Path::new("/w/demo")), ".");
+/// assert_eq!(
+///     relative(Path::new("/w/demo"), Path::new("/w/demo-extra/x")),
+///     "../demo-extra/x"
+/// );
+/// ```
+#[must_use]
+pub fn relative(from_directory: &Path, to: &Path) -> String {
+    assert!(
+        from_directory.is_absolute(),
+        "from_directory must be absolute, got {}",
+        from_directory.display()
+    );
+    assert!(
+        to.is_absolute(),
+        "to must be absolute, got {}",
+        to.display()
+    );
+
+    let from_components: Vec<_> = from_directory.components().collect();
+    let to_components: Vec<_> = to.components().collect();
+
+    let shared = from_components
+        .iter()
+        .zip(to_components.iter())
+        .take_while(|(from, to)| from == to)
+        .count();
+
+    let ascents = from_components.len() - shared;
+    let mut segments: Vec<String> = std::iter::repeat_n("..".to_string(), ascents).collect();
+    segments.extend(
+        to_components[shared..]
+            .iter()
+            .map(|component| component.as_os_str().to_string_lossy().into_owned()),
+    );
+
+    if segments.is_empty() {
+        ".".to_string()
+    } else {
+        segments.join("/")
+    }
 }
 
 /// Whether `path` is `directory` or lies under it, for a path Cargo
@@ -180,7 +256,7 @@ mod tests {
     use std::os::unix::fs::symlink;
     use std::path::{Path, PathBuf};
 
-    use super::{lies_under, normalize, opens_through};
+    use super::{lies_under, normalize, opens_through, relative};
     use crate::test_support::{ScratchDir, TestOutcome, report_skip};
 
     /// A scratch directory holding `tasks/lint/src` and `tasks/fmt`, and the
@@ -348,5 +424,71 @@ mod tests {
 
         assert!(!lies_under(&root.join("loop/x"), &root.join("tasks/lint")));
         Ok(())
+    }
+
+    #[test]
+    fn a_relative_path_climbs_to_the_shared_directory_then_descends() {
+        for (from, to, expected) in [
+            ("/w/ritual", "/w/.rituals/greet", "../.rituals/greet"),
+            ("/w/crates/cli", "/w/tasks/new", "../../tasks/new"),
+            ("/w", "/w/tasks/lint", "tasks/lint"),
+            ("/w/tasks/shout", "/w/tasks/greet", "../greet"),
+            ("/w/.rituals/shout", "/w/tasks/helper", "../../tasks/helper"),
+            ("/w/tasks/lint", "/w", "../.."),
+            ("/w/tasks/lint", "/w/tasks", ".."),
+            // Nothing in common but the root.
+            ("/a/b", "/c/d", "../../c/d"),
+            ("/", "/c/d", "c/d"),
+            ("/a/b", "/", "../.."),
+            // A directory is not inside another that only shares its prefix.
+            ("/w/demo", "/w/demo-extra/x", "../demo-extra/x"),
+            ("/w/demo", "/w/demo/.github/ci.yml", ".github/ci.yml"),
+        ] {
+            assert_eq!(
+                relative(Path::new(from), Path::new(to)),
+                expected,
+                "{from} -> {to}"
+            );
+        }
+    }
+
+    /// The same directory is `.`, not the empty string, which no manifest
+    /// can use as a path.
+    #[test]
+    fn a_relative_path_from_a_directory_to_itself_is_a_dot() {
+        assert_eq!(relative(Path::new("/w/tasks"), Path::new("/w/tasks")), ".");
+        assert_eq!(relative(Path::new("/"), Path::new("/")), ".");
+    }
+
+    /// Joined back to the directory it was made from, a relative path leads
+    /// to where it was made to.
+    #[test]
+    fn a_relative_path_joined_back_leads_to_its_target() {
+        for (from, to) in [
+            ("/w/ritual", "/w/.rituals/greet"),
+            ("/w/tasks/shout", "/w/tasks/greet"),
+            ("/w/tasks/lint", "/w"),
+            ("/a/b", "/c/d"),
+            ("/w/tasks", "/w/tasks"),
+        ] {
+            let back = relative(Path::new(from), Path::new(to));
+            assert_eq!(
+                normalize(&Path::new(from).join(&back)),
+                Path::new(to),
+                "{from} + {back}"
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "from_directory must be absolute")]
+    fn a_relative_origin_has_no_relative_path() {
+        let _ = relative(Path::new("tasks"), Path::new("/w/tasks"));
+    }
+
+    #[test]
+    #[should_panic(expected = "to must be absolute")]
+    fn a_relative_target_has_no_relative_path() {
+        let _ = relative(Path::new("/w"), Path::new("tasks"));
     }
 }

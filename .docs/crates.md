@@ -9,7 +9,7 @@ principles themselves are in [design.md](design.md).
 |---|---|---|
 | `rituals` | what a task needs | — |
 | `rituals-compose` | the composition library | `rituals` |
-| `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import`, `-remove` | the management tasks | `rituals`, `rituals-compose` |
+| `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import`, `-remove`, `-migrate` | the management tasks | `rituals`, `rituals-compose` |
 | `rituals-core` | the bundle of those tasks | `rituals`, the leaves |
 | `rituals-cli` | the `ritual` binary | `rituals`, `rituals-core` |
 | `xtask` | release tooling, never published | — |
@@ -42,8 +42,30 @@ The composition library: reading `cargo metadata`, resolving a `tasks` list,
 editing manifests in place, rendering a task crate's files and a command
 line's generated file, checking whether a directory can hold a standalone
 crate, running the `cargo` that launched the process, rendering a command for
-a person to copy, and putting a project back when a run does not finish. The
-management tasks depend on it because it is the library their job needs.
+a person to copy, putting a project back when a run does not finish, saying
+where a project keeps its tasks, asking git what it can give back, and working
+out where paths go when directories move. The management tasks depend on it
+because it is the library their job needs.
+
+**The layout is shared.** `layout` is the one place that says where a
+project's own tasks live, `.rituals/<name>`. A task that scaffolds a task
+crate asks it for the directory, the member entry and the path to report, so
+`add` and any scaffolder after it agree and a change of directory is one edit.
+
+**Git is asked in one place.** `git` answers whether git can give back every
+file in a directory about to be deleted, whether the work tree is clean, which
+directories hold Cargo configuration, which entries are submodules, which
+files mention a pattern, which files it does not track, and whether moving
+directories would change what it sees of the files in them. `remove` and
+`migrate` ask the same code, and each words its own refusal from what it gets
+back: `Unanswered` when git could not answer at all, `NotClean` for the
+clean-tree question, `CannotGiveBack` for the give-back one, and
+`SeenDifferently` for the move one.
+
+**A move is worked out in one place.** A `relocation::Relocation` is built once
+from the directories that move and says where any path at or under one of them
+goes; `Manifest::repoint` applies it to every path a manifest writes, keeping
+the person's own spelling wherever it still reaches the same place.
 
 **The rollback is shared.** A task that writes to a project promises that a
 run which fails partway leaves the project as it found it, and says so when
@@ -54,7 +76,9 @@ is TOML, a file the run created is removed, a directory it created goes, and
 anything that could not be put back is named, with the caller's own words
 for trying again. The failure's own full stop is dropped so the report
 continues its sentence, and a run can ask what it found when it first
-recorded a file, to say "created" rather than "updated". A manifest can only
+recorded a file, to say "created" rather than "updated". A directory the run
+moved goes back whole, ignored files included, which no version control could
+give back. A manifest can only
 be written through a run's record, so none is changed without one. One
 rollback means one set of rules about what "put back" means, rather than one
 per task drifting apart.
@@ -62,6 +86,10 @@ per task drifting apart.
 An ordinary task never depends on `rituals-compose`, and nothing from
 `rituals` is re-exported through it. A crate that needs `rituals` names it
 directly, so there is one path to each item.
+
+The `test-util` feature adds `git::fixture`, an isolated `git` for the tests of
+a crate that builds fixture repositories; the management tasks turn it on for
+their own tests, and no build needs it.
 
 Beyond `rituals`, its dependencies are here because of what the job is:
 
@@ -73,7 +101,7 @@ Beyond `rituals`, its dependencies are here because of what the job is:
   their comments; `toml_edit` edits in place. It is the crate Cargo's own
   `cargo add` uses.
 
-## `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import`, `-remove` — the leaves
+## `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import`, `-remove`, `-migrate` — the leaves
 
 Ordinary task crates, one per management task. Each depends on
 `rituals` like any task, and on `rituals-compose` for the work. Each is
@@ -81,6 +109,9 @@ marked `task = true` and exposes `task()`. None depends on another. `add`,
 `import` and `remove` finish by regenerating through the same rendering
 `regenerate` uses, `remove` inside its rollback. That rendering lives in
 `rituals-compose`, so each can reach it without depending on another.
+`migrate` regenerates nothing: it moves directories and repoints manifests,
+through the rollback, git and relocation code in `rituals-compose`, and
+keeps its steps in its own crate.
 
 ## `rituals-core` — a pure bundle
 

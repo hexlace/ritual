@@ -9,7 +9,7 @@ use std::io::{self, Write};
 /// # Examples
 ///
 /// ```
-/// rituals::report("created tasks/lint/Cargo.toml");
+/// rituals::report("created .rituals/lint/Cargo.toml");
 /// rituals::report(format!("updated {} (tasks: {})", "src/main.rs", "ritual, lint"));
 /// ```
 //

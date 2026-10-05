@@ -15,7 +15,8 @@
 //! `Cargo.lock` included, and then the cause is cleared and the same
 //! `remove` succeeds and leaves a project that builds with `--locked`. An
 //! `optional` include whose file is missing is no reason to refuse, and is
-//! not one.
+//! not one; nor is a `[patch]` into the directory in a manifest other than
+//! the workspace's root, which Cargo ignores.
 //!
 //! A `members` entry spelled the way Cargo reads it but not the way it was
 //! written by `add` — `tasks/./lint`, `tasks//lint`, `x/../tasks/lint`, the
@@ -40,11 +41,10 @@ fn assert_it_builds(project: &Project, when: &str) -> TestOutcome {
     Ok(())
 }
 
-/// Adds the task `name` with `add`, then commits everything.
+/// Adds the task `name` in `tasks/`, as 0.1's `add` did, then commits
+/// everything.
 fn add_and_commit(project: &Project, name: &str) -> TestOutcome {
-    project
-        .alias(&["add", name])?
-        .expect_success(&format!("`cargo ritual add {name}`"));
+    support::legacy::add_task(project, name)?;
     git::commit_everything(project.root())
 }
 
@@ -158,6 +158,52 @@ fn a_dependent_outside_the_workspace_is_refused_by_name() -> TestOutcome {
             manifest::remove_dependency(document, "helper")
         })?;
         git::commit_everything(project.root())?;
+        assert_remove_succeeds_and_it_builds(&project, "lint")
+    })
+}
+
+/// A crate Cargo reads that names `lint` only in a `[patch]` of its own:
+/// Cargo applies `[patch]` from the workspace's root manifest alone, so that
+/// one is ignored and nothing depends on `lint` through it. Not a refusal:
+/// `remove` goes through and the project builds.
+#[test]
+fn a_patch_cargo_ignores_is_not_a_dependent() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("remove-ignores-ignored-patch")?;
+        let project = project_with_a_committed_task(checkout, &working_dir, "lint")?;
+        add_and_commit(&project, "fmt")?;
+
+        let helper = working_dir.path().join("helper");
+        std::fs::create_dir_all(helper.join("src"))?;
+        write_text(&helper.join("src/lib.rs"), "")?;
+        write_text(
+            &helper.join("Cargo.toml"),
+            &format!(
+                "[package]\nname = \"helper\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+                 [patch.crates-io]\nlint = {{ path = \"{}\" }}\n\n[workspace]\n",
+                path_to_str(&project.root().join("tasks/lint"))?
+            ),
+        )?;
+        let fmt_manifest = project.root().join("tasks/fmt/Cargo.toml");
+        let helper_path = path_to_str(&helper)?.to_string();
+        manifest::edit(&fmt_manifest, |document| {
+            document["dependencies"]["helper"] =
+                toml_edit::Item::Value(toml_edit::Value::InlineTable(
+                    [
+                        ("path", toml_edit::Value::from(helper_path.as_str())),
+                        ("optional", toml_edit::Value::from(true)),
+                    ]
+                    .into_iter()
+                    .collect(),
+                ));
+            Ok(())
+        })?;
+        assert_it_builds(
+            &project,
+            "with a crate outside the workspace that patches lint",
+        )?;
+        git::commit_everything(project.root())?;
+
         assert_remove_succeeds_and_it_builds(&project, "lint")
     })
 }

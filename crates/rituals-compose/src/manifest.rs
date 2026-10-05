@@ -10,8 +10,17 @@ use toml_edit::{Array, DocumentMut, InlineTable, Item, RawString, Value};
 use crate::generated_file::TaskKey;
 use crate::rollback::Changes;
 
+mod dependency_places;
 mod entry_removal;
+mod member_globs;
+mod package_name;
+mod path_change;
+mod path_dependencies;
 mod removal;
+mod repointing;
+
+pub use dependency_places::ManifestRole;
+pub use path_change::PathChange;
 
 /// A manifest a task is about to edit.
 ///
@@ -96,12 +105,12 @@ impl Manifest {
     /// let manifest_path = directory.join("Cargo.toml");
     /// # std::fs::write(&manifest_path, "[workspace]\nmembers = [\n    \"ritual\",\n]\n")?;
     /// let mut manifest = Manifest::read(&manifest_path)?;
-    /// manifest.append_workspace_member("tasks/lint")?;
+    /// manifest.append_workspace_member(".rituals/lint")?;
     ///
     /// rollback::attempt("running `add lint` again", |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
-    /// assert!(on_disk.contains("tasks/lint"));
+    /// assert!(on_disk.contains(".rituals/lint"));
     /// # std::fs::remove_dir_all(&directory)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -165,12 +174,12 @@ impl Manifest {
     /// let mut manifest = Manifest::read(&manifest_path)?;
     ///
     /// assert!(manifest.has_workspace_members_list());
-    /// manifest.append_workspace_member("tasks/lint")?;
+    /// manifest.append_workspace_member(".rituals/lint")?;
     ///
     /// let without_members_list = directory.join("no-members.toml");
     /// # std::fs::write(&without_members_list, "[workspace]\n")?;
     /// let mut bare = Manifest::read(&without_members_list)?;
-    /// assert!(bare.append_workspace_member("tasks/lint").is_err());
+    /// assert!(bare.append_workspace_member(".rituals/lint").is_err());
     /// # std::fs::remove_dir_all(&directory)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -223,17 +232,17 @@ impl Manifest {
     /// let mut manifest = Manifest::read(&manifest_path)?;
     /// let name = TaskKey::new(Name::new("lint")?)?;
     ///
-    /// manifest.import_task(&name, "../tasks/lint")?;
+    /// manifest.import_task(&name, "../.rituals/lint")?;
     /// rollback::attempt("running `add lint` again", |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
-    /// assert!(on_disk.contains("lint = { path = \"../tasks/lint\" }"));
+    /// assert!(on_disk.contains("lint = { path = \"../.rituals/lint\" }"));
     /// assert!(on_disk.contains("\"lint\""));
     ///
     /// let bare_path = directory.join("bare.toml");
     /// # std::fs::write(&bare_path, "[package]\nname = \"demo\"\n")?;
     /// let mut bare = Manifest::read(&bare_path)?;
-    /// assert!(bare.import_task(&name, "../tasks/lint").is_err());
+    /// assert!(bare.import_task(&name, "../.rituals/lint").is_err());
     /// # std::fs::remove_dir_all(&directory)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -602,9 +611,9 @@ pub fn declares_a_workspace(path: &Path) -> bool {
 /// use rituals_compose::manifest::dependency_path;
 ///
 /// let manifest_path = Path::new("/workspace/ritual/Cargo.toml");
-/// let crate_dir = Path::new("/workspace/tasks/lint");
+/// let crate_dir = Path::new("/workspace/.rituals/lint");
 ///
-/// assert_eq!(dependency_path(manifest_path, crate_dir), "../tasks/lint");
+/// assert_eq!(dependency_path(manifest_path, crate_dir), "../.rituals/lint");
 /// ```
 ///
 /// # Panics
@@ -638,24 +647,7 @@ pub fn dependency_path(manifest_path: &Path, crate_dir: &Path) -> String {
         );
     };
 
-    let from_components: Vec<_> = manifest_directory.components().collect();
-    let to_components: Vec<_> = crate_dir.components().collect();
-
-    let shared = from_components
-        .iter()
-        .zip(to_components.iter())
-        .take_while(|(from, to)| from == to)
-        .count();
-
-    let ascents = from_components.len() - shared;
-    let mut segments: Vec<String> = std::iter::repeat_n("..".to_string(), ascents).collect();
-    segments.extend(
-        to_components[shared..]
-            .iter()
-            .map(|component| component.as_os_str().to_string_lossy().into_owned()),
-    );
-
-    segments.join("/")
+    crate::paths::relative(manifest_directory, crate_dir)
 }
 
 #[cfg(test)]

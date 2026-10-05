@@ -10,6 +10,7 @@ use std::path::Path;
 use import::Import;
 use rituals::{CommandLine, Failure, Name, Outcome, Task, clap};
 use rituals_compose::generated_file::TaskKey;
+use rituals_compose::layout::{self, TaskPlace};
 use rituals_compose::manifest::{self, Manifest};
 use rituals_compose::rust_name::other_spelling_clause;
 use rituals_compose::{metadata, top_level};
@@ -61,7 +62,7 @@ fn run(command_line: &CommandLine, arguments: &AddArguments) -> Outcome {
 /// a different question — "already a task" rather than "that slot has to be a
 /// bundle" — with the wrong remedy. Every check after these four runs against
 /// the project itself, once `cargo metadata` has been fetched, in this order:
-/// `name` is not already imported, `tasks/<name>` is not a leftover directory,
+/// `name` is not already imported, its directory under `.rituals/` is not a leftover,
 /// no workspace member is already called `name`, the project's *existing* task
 /// list resolves, the workspace manifest can take the import, then the composed
 /// CLI's manifest is read. Every refusal about `name` itself comes before the
@@ -84,8 +85,8 @@ fn prepare(command_line: &CommandLine, arguments: &AddArguments) -> Result<Impor
 
     // Runs before the leftover check below: whether `name` is already a
     // dependency or already listed is a fact about the manifest, and it is
-    // what tells `tasks/<name>` existing apart from `tasks/<name>` existing
-    // *and being a leftover* — the only state `leftover_refusal` is true in.
+    // what tells the task's directory existing apart from it existing *and
+    // being a leftover* — the only state `leftover_refusal` is true in.
     let regenerate = top_level::management_command(command_line, "regenerate");
     already_imported_refusal(
         package,
@@ -98,21 +99,16 @@ fn prepare(command_line: &CommandLine, arguments: &AddArguments) -> Result<Impor
         },
     )?;
 
-    let tasks_directory = project.workspace_root().join("tasks");
-    let task_crate_dir = tasks_directory.join(name.as_str());
-    assert!(
-        task_crate_dir.starts_with(&tasks_directory),
-        "joining a validated Name under tasks/ must stay under tasks/"
-    );
+    let place = layout::place_for(project.workspace_root(), name.as_name());
 
     let cli_manifest_path = project.manifest_path().to_path_buf();
-    let dependency_path = manifest::dependency_path(&cli_manifest_path, &task_crate_dir);
+    let dependency_path = manifest::dependency_path(&cli_manifest_path, place.directory());
 
-    if task_crate_dir.exists() {
+    if place.directory().exists() {
         return Err(leftover_refusal(
             package,
             name.as_name(),
-            &task_crate_dir,
+            &place,
             &dependency_path,
             &regenerate,
         ));
@@ -139,7 +135,7 @@ fn prepare(command_line: &CommandLine, arguments: &AddArguments) -> Result<Impor
 
     Ok(Import {
         name,
-        task_crate_dir,
+        place,
         workspace_manifest,
         cli_manifest,
         dependency_path,
@@ -197,8 +193,8 @@ struct RemedyCommands<'a> {
 
 /// Refuses when `name` is already spoken for in the composed CLI's own
 /// manifest — a dependency (whether or not it is also listed), or listed
-/// with no matching dependency. Runs before the `tasks/<name>` directory is
-/// even looked at: all three of these states are about the manifest, true
+/// with no matching dependency. Runs before the task's directory is even
+/// looked at: all three of these states are about the manifest, true
 /// or false regardless of what is on disk, and a leftover directory's own
 /// refusal ([`leftover_refusal`]) is only accurate once none of them apply.
 ///
@@ -290,25 +286,24 @@ fn ensure_workspace_can_take_the_import(workspace_manifest: &Manifest) -> Outcom
     Ok(())
 }
 
-/// The refusal for a `tasks/<name>` directory that already exists: either it
-/// holds a task crate this project does not import (a leftover from a run
-/// that did not finish), or it is an unrelated collision.
+/// The refusal for a task directory that already exists: either it holds a
+/// task crate this project does not import (a leftover from a run that did
+/// not finish), or it is an unrelated collision.
 fn leftover_refusal(
     package: &str,
     name: &Name,
-    task_crate_dir: &Path,
+    place: &TaskPlace,
     dependency_path: &str,
     regenerate: &str,
 ) -> Failure {
-    let manifest_path = task_crate_dir.join("Cargo.toml");
+    let manifest_path = place.directory().join("Cargo.toml");
+    let directory = place.from_the_root();
     if !manifest::declares_a_task_crate(&manifest_path) {
-        return Failure::new(format!(
-            "refusing to create tasks/{name}: it already exists"
-        ));
+        return Failure::new(format!("refusing to create {directory}: it already exists"));
     }
 
     Failure::new(format!(
-        "refusing to create tasks/{name}: it already exists and is a task crate `{package}` \
+        "refusing to create {directory}: it already exists and is a task crate `{package}` \
          does not import; add `{name} = {{ path = \"{dependency_path}\" }}` to `{package}`'s \
          [dependencies] and `\"{name}\"` to its [package.metadata.ritual] tasks, then run \
          `{regenerate}`"

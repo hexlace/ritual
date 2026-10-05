@@ -165,7 +165,15 @@ mod tests {
     fn default_command_line() -> CommandLine {
         CommandLine::from_dispatch(
             Identity::from_macro_expansion("demo-ritual", "ritual", "0.1.0"),
-            ["add", "regenerate", "new", "create", "import", "remove"],
+            [
+                "add",
+                "regenerate",
+                "new",
+                "create",
+                "import",
+                "remove",
+                "migrate",
+            ],
         )
     }
 

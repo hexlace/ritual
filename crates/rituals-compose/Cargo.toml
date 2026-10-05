@@ -26,5 +26,9 @@ serde_json.workspace = true
 # See the comment on this dependency in the workspace root manifest.
 toml_edit.workspace = true
 
+[features]
+# Test fixtures for crates that test against `git`, never needed at run time.
+test-util = []
+
 [lints]
 workspace = true

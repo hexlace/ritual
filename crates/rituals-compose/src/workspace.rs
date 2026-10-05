@@ -13,9 +13,10 @@
 //! `cargo locate-project`; `rituals` carries nothing about manifests or
 //! metadata by design, so this lives here rather than there.
 //!
-//! The same question answers one more: which `Cargo.lock` a `cargo
-//! metadata` run in a directory may write, so a task can record it before
-//! that run — see [`lockfile`].
+//! The same `cargo locate-project` answers two more: which directory is the
+//! root of the workspace a directory is in — see [`root`] — and which
+//! `Cargo.lock` a `cargo metadata` run there may write, so a task can record
+//! it before that run — see [`lockfile`].
 
 use std::path::{Path, PathBuf};
 
@@ -59,13 +60,73 @@ pub(crate) fn locate_project(directory: &Path, workspace: bool) -> Result<Locate
     }
 }
 
+/// The root of the workspace Cargo resolves for `directory`: the directory
+/// holding the root manifest.
+///
+/// Found with `cargo locate-project --workspace`, which resolves nothing and
+/// so writes nothing, not even a lockfile. That is why a task asks it before
+/// its first `cargo metadata`, the call that can rewrite `Cargo.lock`: it can
+/// look at the project, and record what a later call may write, without
+/// having touched it. [`lockfile`] is built on this, so there is one way to
+/// find the root.
+///
+/// The path is as Cargo reports it, which is resolved through symbolic links
+/// when the working directory is.
+///
+/// # Examples
+///
+/// ```no_run
+/// use rituals::Failure;
+/// use rituals_compose::workspace;
+///
+/// // Needs a real project on disk and runs `cargo`, so this example is
+/// // `no_run`.
+/// let directory = std::env::current_dir()
+///     .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
+/// let root = workspace::root(&directory)?;
+/// println!("the project is in {}", root.display());
+/// # Ok::<(), Failure>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns a [`Failure`] naming `cargo locate-project` when cargo could not
+/// be run, or `cargo locate-project failed: ` and cargo's own words when it
+/// found no workspace for `directory`, the same condition in which `cargo
+/// metadata` would fail.
+pub fn root(directory: &Path) -> Result<PathBuf, Failure> {
+    match locate_project(directory, true)? {
+        Located::Found(root_manifest) => directory_of(&root_manifest),
+        Located::NotFound(stderr) => Err(Failure::new(format!(
+            "cargo locate-project failed: {stderr}"
+        ))),
+    }
+}
+
+/// The directory holding the manifest `cargo locate-project` printed.
+///
+/// What cargo printed is the one input here that is not this process's own,
+/// so a path with no directory above it, which cargo does not print, is a
+/// failure that says what was printed rather than a panic.
+fn directory_of(root_manifest: &Path) -> Result<PathBuf, Failure> {
+    root_manifest
+        .parent()
+        .filter(|directory| !directory.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .ok_or_else(|| {
+            Failure::new(format!(
+                "cargo locate-project printed `{}`, which is not a file in a directory",
+                root_manifest.display()
+            ))
+        })
+}
+
 /// The `Cargo.lock` a `cargo metadata` run in `directory` may write.
 ///
 /// `cargo metadata` creates or rewrites the lockfile when it is missing or
 /// behind the manifests, and the one it writes is beside the root manifest
-/// of the workspace Cargo resolves for `directory`. Found with `cargo
-/// locate-project --workspace`, which resolves nothing and so writes
-/// nothing. A run that records this path in
+/// of the workspace Cargo resolves for `directory`: [`root`]'s directory.
+/// Found without resolving anything, so without writing anything. A run that records this path in
 /// [`Changes`](crate::rollback::Changes) before running `cargo metadata` can
 /// put the lockfile back, byte for byte or to absent, whatever directory of
 /// the workspace it ran from;
@@ -100,12 +161,7 @@ pub(crate) fn locate_project(directory: &Path, workspace: bool) -> Result<Locate
 /// be run, or with cargo's own words when it found no workspace for
 /// `directory`, the same condition in which `cargo metadata` would fail.
 pub fn lockfile(directory: &Path) -> Result<PathBuf, Failure> {
-    match locate_project(directory, true)? {
-        Located::Found(root_manifest) => Ok(root_manifest.with_file_name("Cargo.lock")),
-        Located::NotFound(stderr) => Err(Failure::new(format!(
-            "cargo locate-project failed: {stderr}"
-        ))),
-    }
+    root(directory).map(|root| root.join("Cargo.lock"))
 }
 
 /// The words one caller's refusal is built from, so
@@ -289,8 +345,8 @@ fn unresolvable_workspace_refusal(
 
 #[cfg(test)]
 mod tests {
-    use super::{Refusal, ensure_the_directory_stands_alone};
-    use crate::test_support::ScratchDir;
+    use super::{Refusal, directory_of, ensure_the_directory_stands_alone, lockfile, root};
+    use crate::test_support::{ScratchDir, TestOutcome};
 
     /// A fixed [`Refusal`] every test below shares — the wording is not
     /// under test here, only the decision tree and that all three fields
@@ -496,5 +552,125 @@ mod tests {
             assert!(message.contains(&refusal.what_to_do_instead));
         }
         Ok(())
+    }
+
+    /// A workspace at the root of a scratch directory with one member,
+    /// `member`, and the scratch directory's own path resolved through
+    /// symbolic links, the way Cargo reports the directory it finds.
+    fn a_workspace_with_a_member(
+        tag: &str,
+    ) -> Result<(ScratchDir, std::path::PathBuf), Box<dyn std::error::Error>> {
+        let scratch = ScratchDir::new(tag)?;
+        std::fs::create_dir_all(scratch.path().join("member/src"))?;
+        std::fs::write(
+            scratch.path().join("Cargo.toml"),
+            "[workspace]\nmembers = [\"member\"]\n",
+        )?;
+        std::fs::write(
+            scratch.path().join("member/Cargo.toml"),
+            "[package]\nname = \"member\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )?;
+        std::fs::write(scratch.path().join("member/src/lib.rs"), "")?;
+        let resolved = std::fs::canonicalize(scratch.path())?;
+        Ok((scratch, resolved))
+    }
+
+    /// The root is the directory of the root manifest, found from the root
+    /// itself, from a member, and from a directory deep inside one.
+    #[test]
+    fn the_root_is_the_workspaces_directory_from_wherever_it_is_asked() -> TestOutcome {
+        let (scratch, resolved) = a_workspace_with_a_member("root-from-anywhere")?;
+
+        for directory in [
+            scratch.path().to_path_buf(),
+            scratch.path().join("member"),
+            scratch.path().join("member/src"),
+        ] {
+            assert_eq!(
+                root(&directory).map_err(|failure| failure.to_string())?,
+                resolved,
+                "asked from {}",
+                directory.display()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn asking_for_the_root_writes_nothing() -> TestOutcome {
+        let (scratch, _resolved) = a_workspace_with_a_member("root-writes-nothing")?;
+
+        root(&scratch.path().join("member")).map_err(|failure| failure.to_string())?;
+
+        assert!(
+            !scratch.path().join("Cargo.lock").exists(),
+            "locating the root must not resolve anything, so it must not write a lockfile"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_directory_in_no_project_has_no_root_and_cargo_says_why() -> TestOutcome {
+        let scratch = ScratchDir::new("root-no-project")?;
+
+        let failure = root(scratch.path()).err().ok_or("expected a failure")?;
+
+        assert!(
+            failure
+                .to_string()
+                .starts_with("cargo locate-project failed: "),
+            "expected cargo's own words after the command: {failure}"
+        );
+        Ok(())
+    }
+
+    /// The lockfile `cargo metadata` would write is beside the root manifest,
+    /// whichever directory it is run from, and is found the way the root is.
+    #[test]
+    fn the_lockfile_is_beside_the_root_manifest() -> TestOutcome {
+        let (scratch, resolved) = a_workspace_with_a_member("lockfile-beside-root")?;
+
+        assert_eq!(
+            lockfile(&scratch.path().join("member/src")).map_err(|failure| failure.to_string())?,
+            resolved.join("Cargo.lock")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_directory_in_no_project_has_no_lockfile_and_cargo_says_why() -> TestOutcome {
+        let scratch = ScratchDir::new("lockfile-no-project")?;
+
+        let failure = lockfile(scratch.path()).err().ok_or("expected a failure")?;
+
+        assert_eq!(
+            Some(failure.to_string()),
+            root(scratch.path())
+                .err()
+                .map(|failure| failure.to_string()),
+            "the lockfile fails exactly as the root does"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_printed_path_with_no_directory_is_a_failure_that_names_it() {
+        for printed in ["", "/"] {
+            let failure = directory_of(std::path::Path::new(printed)).err();
+            assert_eq!(
+                failure.map(|failure| failure.to_string()),
+                Some(format!(
+                    "cargo locate-project printed `{printed}`, which is not a file in a directory"
+                ))
+            );
+        }
+    }
+
+    #[test]
+    fn the_directory_of_a_printed_manifest_is_the_one_holding_it() {
+        assert_eq!(
+            directory_of(std::path::Path::new("/work/acme/Cargo.toml")).ok(),
+            Some(std::path::PathBuf::from("/work/acme"))
+        );
     }
 }

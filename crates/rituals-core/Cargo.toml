@@ -18,6 +18,7 @@ new.workspace = true
 create.workspace = true
 import.workspace = true
 remove.workspace = true
+migrate.workspace = true
 
 [package.metadata.ritual]
 task = true

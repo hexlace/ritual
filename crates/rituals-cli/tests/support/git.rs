@@ -3,31 +3,48 @@
 //!
 //! A story that needs git as the way back — `remove` refuses to delete files
 //! git cannot give back — makes a repository of its own inside its temporary
-//! directory. Nothing here reads the developer's git configuration: no
-//! global or system file is consulted, the identity comes from the
-//! environment, and signing is off for these commits alone, so the suite
-//! neither prompts for a key nor depends on how the machine is set up.
+//! directory. Nothing here reads the developer's git configuration or
+//! ignore and attribute files: no global or system file is consulted, the
+//! identity comes from the environment, and signing is off for these commits
+//! alone, so the suite neither prompts for a key nor depends on how the
+//! machine is set up.
 
 use std::path::Path;
 use std::process::{Command, Stdio};
 
 use super::{Outcome, ResultContext, RunOutput, TestOutcome};
 
-/// Runs `git <arguments…>` in `directory` with the machine's git
-/// configuration and any inherited repository location out of the way.
-pub(crate) fn git(directory: &Path, arguments: &[&str]) -> Outcome<RunOutput> {
-    let output = Command::new("git")
-        .args([
-            "-c",
-            "commit.gpgsign=false",
-            "-c",
-            "init.defaultBranch=main",
-        ])
-        .args(arguments)
-        .current_dir(directory)
-        .stdin(Stdio::null())
+// HC-ONE-WAY: `rituals-compose`'s `test-util` feature exports the same
+// isolated git (`rituals_compose::git::fixture::isolated_git`), and this
+// suite keeps its own on purpose. These stories judge ritual's shipped binary
+// from outside, the way a person would, and they import none of ritual's
+// library crates. An instrument taken from a crate under test changes whenever
+// that crate does, so a story could pass because its own fixture moved. This
+// module is the one place in the suite that says how git is isolated.
+
+/// Points `command` away from the machine it runs on: no global or system git
+/// configuration, no global ignore or attributes file, no configuration
+/// injected through the environment, an identity from the environment, and no
+/// inherited repository location.
+///
+/// `GIT_CONFIG_GLOBAL` replaces the user's configuration files but not the
+/// global ignore and attributes files, which git finds under
+/// `$XDG_CONFIG_HOME/git`, or `$HOME/.config/git` when that is unset.
+/// Pointing `XDG_CONFIG_HOME` at `/dev/null`, which holds no `git`
+/// directory, leaves git nothing to read there and no other place to look.
+///
+/// Git also reads configuration a parent hands it in the environment.
+/// `GIT_CONFIG_COUNT` says how many `GIT_CONFIG_KEY_<n>` and
+/// `GIT_CONFIG_VALUE_<n>` pairs to read, and none are read without it, so
+/// removing it is enough for them; `GIT_CONFIG_PARAMETERS` is removed too.
+///
+/// Set on the command itself, so stories running side by side neither
+/// interfere with each other nor change the process's environment.
+pub(crate) fn isolate_from_the_machine(command: &mut Command) -> &mut Command {
+    command
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("XDG_CONFIG_HOME", "/dev/null")
         .env("GIT_AUTHOR_NAME", "Fixture")
         .env("GIT_AUTHOR_EMAIL", "fixture@example.invalid")
         .env("GIT_COMMITTER_NAME", "Fixture")
@@ -35,8 +52,29 @@ pub(crate) fn git(directory: &Path, arguments: &[&str]) -> Outcome<RunOutput> {
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
-        .output()
-        .context(&format!("spawning `git {}` failed", arguments.join(" ")))?;
+        .env_remove("GIT_CONFIG_COUNT")
+        .env_remove("GIT_CONFIG_PARAMETERS")
+}
+
+/// Runs `git <arguments…>` in `directory` with the machine's git
+/// configuration, ignore and attributes files, and any inherited repository
+/// location out of the way, and
+/// signing off for the commits a story makes alone.
+pub(crate) fn git(directory: &Path, arguments: &[&str]) -> Outcome<RunOutput> {
+    let output = isolate_from_the_machine(
+        Command::new("git")
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "init.defaultBranch=main",
+            ])
+            .args(arguments)
+            .current_dir(directory)
+            .stdin(Stdio::null()),
+    )
+    .output()
+    .context(&format!("spawning `git {}` failed", arguments.join(" ")))?;
     Ok(RunOutput {
         exit_code: output.status.code(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),

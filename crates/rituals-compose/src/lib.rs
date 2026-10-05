@@ -2,11 +2,15 @@
 //! maintained.
 //!
 //! This is what a scaffolding task links against — such as `add`, `create`,
-//! `import`, `new`, `regenerate` and `remove`, the task crates ritual's own
-//! bundle groups — for the renderers that produce a task crate's own files and
+//! `import`, `migrate`, `new`, `regenerate` and `remove`, the task crates ritual's
+//! own bundle groups — for the renderers that produce a task crate's own files and
 //! a composed command line's generated file, for the metadata and manifest
 //! operations those tasks need, for the [`cargo`] a task that runs Cargo uses
-//! and the [`shell`] that renders a command for a person to copy, and for the
+//! and the [`shell`] that renders a command for a person to copy, for the
+//! [`layout`] that says where a project keeps its own tasks, for the [`git`]
+//! checks that say whether git can give back what a task is about to delete
+//! or move, for the [`relocation`] that says where paths go when directories
+//! move, for the [`paths`] that compares and spells them, and for the
 //! [`rollback`] that puts a project back when a task's run does not finish.
 //! Nothing here runs on a composed command line's own path: assembling a
 //! command line from a project's imports and dispatching to one of them live
@@ -24,6 +28,12 @@
 //! its comments or formatting. It also reads Cargo's own configuration
 //! files, through [`cargo_config`], for the paths a build reads that no
 //! manifest names.
+//!
+//! # Feature flags
+//!
+//! - `test-util` — adds `git::fixture`, a `git` that reads nothing from the
+//!   machine it runs on and the commands that build a fixture repository, for
+//!   a crate whose tests run against `git`. Nothing needs it at run time.
 //!
 //! # Examples
 //!
@@ -49,10 +59,13 @@
 pub mod cargo;
 pub mod cargo_config;
 pub mod generated_file;
+pub mod git;
+pub mod layout;
 pub mod manifest;
 pub mod metadata;
-mod paths;
+pub mod paths;
 mod project;
+pub mod relocation;
 pub mod rollback;
 pub mod rust_name;
 pub mod sentence;

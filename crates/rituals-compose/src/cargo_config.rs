@@ -25,7 +25,7 @@
 //! // Reads the configuration files above a real directory, and in
 //! // `$CARGO_HOME`, so this example is `no_run`.
 //! let start = std::env::current_dir()?;
-//! let directory = Path::new("/w/tasks/lint");
+//! let directory = Path::new("/w/.rituals/lint");
 //! for entry in cargo_config::entries_pointing_under(&[start.as_path()], directory)? {
 //!     println!("still read: {entry}");
 //! }
@@ -71,12 +71,12 @@ const INCLUDE_EXTENSION: &str = "toml";
 ///
 /// use rituals_compose::cargo_config;
 ///
-/// // A task about to delete `tasks/lint` asks whether a build would still
+/// // A task about to delete `.rituals/lint` asks whether a build would still
 /// // read it because of a configuration file; this reads the files above a
 /// // real directory and in `$CARGO_HOME`, so it is `no_run`.
 /// let workspace_root = Path::new("/w");
-/// let entries =
-///     cargo_config::entries_pointing_under(&[workspace_root], &workspace_root.join("tasks/lint"))?;
+/// let directory = workspace_root.join(".rituals/lint");
+/// let entries = cargo_config::entries_pointing_under(&[workspace_root], &directory)?;
 /// if !entries.is_empty() {
 ///     println!("still read through {}", entries.join(", "));
 /// }

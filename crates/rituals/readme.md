@@ -96,7 +96,7 @@ cargo ritual add hello
 cargo ritual hello world
 ```
 
-`add` writes the manifest and the `task()` above into `tasks/hello`, imports
+`add` writes the manifest and the `task()` above into `.rituals/hello`, imports
 it, and regenerates the command line. To write a task crate outside any
 project, for several projects to share, run `ritual create hello` and
 [import it](https://github.com/hexlace/ritual#import-a-task-from-somewhere-else).

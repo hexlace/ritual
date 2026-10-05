@@ -37,8 +37,9 @@ its package alone, as crates.io would receive it, and the test suite runs
 on the oldest toolchain its `rust-version` declares.
 
 The tests in `crates/rituals-cli/tests/` scaffold and build real projects
-with `new`, `create` and `add`, bring tasks into them with `import`, and
-take tasks out of them with `remove`.
+with `new`, `create` and `add`, bring tasks into them with `import`, take
+tasks out of them with `remove`, and bring a 0.1 project's tasks into
+`.rituals/` with `migrate`.
 Each project builds on its own, so the suite compiles far more than the
 workspace itself, and because a scaffolded project has no lockfile, it needs
 network access or a warm Cargo registry cache.

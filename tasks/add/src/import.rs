@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 
 use rituals::{CommandLine, Failure, Name, Outcome, report};
 use rituals_compose::generated_file::TaskKey;
+use rituals_compose::layout::TaskPlace;
 use rituals_compose::manifest::Manifest;
 use rituals_compose::rollback::{self, Changes};
 use rituals_compose::source::Source;
@@ -28,7 +29,7 @@ use rituals_compose::{generated_file, task_crate, top_level};
 /// as it found it, and says so.
 pub(crate) struct Import {
     pub(crate) name: TaskKey,
-    pub(crate) task_crate_dir: PathBuf,
+    pub(crate) place: TaskPlace,
     pub(crate) workspace_manifest: Manifest,
     pub(crate) cli_manifest: Manifest,
     pub(crate) dependency_path: String,
@@ -40,7 +41,7 @@ impl Import {
     /// two files, then the two manifests. Stops at the first failure.
     ///
     /// The task crate's directory is reserved before anything is written,
-    /// and `tasks/` with it when this is the project's first task, so a
+    /// and `.rituals/` with it when this is the project's first task, so a
     /// failed run removes both. Each manifest is written through `changes`,
     /// so a failed run puts its bytes back; the undo runs in the reverse
     /// order, so the manifests are restored before the directory is
@@ -48,11 +49,11 @@ impl Import {
     /// worse state than a directory nothing points at, so if the restore is
     /// the step that fails, the directory is still there.
     fn write(&mut self, changes: &mut Changes) -> Outcome {
-        changes.reserve_directory(&self.task_crate_dir)?;
-        write_task_crate(&self.task_crate_dir, self.name.as_name())?;
+        changes.reserve_directory(self.place.directory())?;
+        write_task_crate(&self.place, self.name.as_name())?;
 
-        let member = format!("tasks/{}", self.name);
-        self.workspace_manifest.append_workspace_member(&member)?;
+        self.workspace_manifest
+            .append_workspace_member(self.place.from_the_root())?;
         self.workspace_manifest.write(changes)?;
         report(format!(
             "updated {}",
@@ -97,6 +98,7 @@ fn finish_by_regenerating(command_line: &CommandLine, import: &Import) -> Outcom
         ))
     })?;
     report(next_step(
+        &import.place,
         import.name.as_name(),
         command_line.identity().binary_name(),
     ));
@@ -106,31 +108,33 @@ fn finish_by_regenerating(command_line: &CommandLine, import: &Import) -> Outcom
 /// The line `add` ends on: the file the new task's code goes in, and what
 /// a person types to run it. A task imported from the project's own
 /// manifest is always a top-level command under its own key.
-fn next_step(name: &Name, binary_name: &str) -> String {
-    format!("next: edit tasks/{name}/src/lib.rs, then run cargo {binary_name} {name}")
+fn next_step(place: &TaskPlace, name: &Name, binary_name: &str) -> String {
+    let directory = place.from_the_root();
+    format!("next: edit {directory}/src/lib.rs, then run cargo {binary_name} {name}")
 }
 
-/// Writes `tasks/<name>/Cargo.toml` and `tasks/<name>/src/lib.rs`, and
+/// Writes the task crate's `Cargo.toml` and `src/lib.rs` into `place`, and
 /// reports both.
-fn write_task_crate(task_crate_dir: &Path, name: &Name) -> Outcome {
-    let source_directory = task_crate_dir.join("src");
+fn write_task_crate(place: &TaskPlace, name: &Name) -> Outcome {
+    let directory = place.from_the_root();
+    let source_directory = place.directory().join("src");
     std::fs::create_dir_all(&source_directory).map_err(|error| {
         Failure::new(format!("creating {} failed", source_directory.display())).caused_by(error)
     })?;
 
-    let manifest_path = task_crate_dir.join("Cargo.toml");
+    let manifest_path = place.directory().join("Cargo.toml");
     let manifest_text = task_crate::manifest(name, &Source::Inherited);
     std::fs::write(&manifest_path, manifest_text).map_err(|error| {
         Failure::new(format!("writing {} failed", manifest_path.display())).caused_by(error)
     })?;
-    report(format!("created tasks/{name}/Cargo.toml"));
+    report(format!("created {directory}/Cargo.toml"));
 
     let lib_path = source_directory.join("lib.rs");
     let lib_text = task_crate::lib(name);
     std::fs::write(&lib_path, lib_text).map_err(|error| {
         Failure::new(format!("writing {} failed", lib_path.display())).caused_by(error)
     })?;
-    report(format!("created tasks/{name}/src/lib.rs"));
+    report(format!("created {directory}/src/lib.rs"));
 
     Ok(())
 }
@@ -150,6 +154,7 @@ mod tests {
 
     use rituals::{Failure, Name, Outcome};
     use rituals_compose::generated_file::TaskKey;
+    use rituals_compose::layout;
     use rituals_compose::manifest::Manifest;
     use rituals_compose::rollback::{self, Changes};
 
@@ -159,9 +164,10 @@ mod tests {
     #[test]
     fn the_next_step_names_the_file_to_edit_and_the_command_that_runs_it() {
         let name = Name::new("hello").expect("hello is a valid name");
+        let place = layout::place_for(std::path::Path::new("/work/demo"), &name);
         assert_eq!(
-            next_step(&name, "acme"),
-            "next: edit tasks/hello/src/lib.rs, then run cargo acme hello"
+            next_step(&place, &name, "acme"),
+            "next: edit .rituals/hello/src/lib.rs, then run cargo acme hello"
         );
     }
 
@@ -221,12 +227,14 @@ mod tests {
         }
 
         fn import(&self, name: &str) -> Result<Import, Box<dyn Error>> {
+            let name = TaskKey::new(Name::new(name)?)?;
+            let place = layout::place_for(&self.workspace_root, name.as_name());
             Ok(Import {
-                name: TaskKey::new(Name::new(name)?)?,
-                task_crate_dir: self.workspace_root.join("tasks").join(name),
+                dependency_path: format!("../{}", place.from_the_root()),
+                name,
+                place,
                 workspace_manifest: Manifest::read(&self.workspace_manifest_path)?,
                 cli_manifest: Manifest::read(&self.cli_manifest_path)?,
-                dependency_path: format!("../tasks/{name}"),
                 workspace_root: self.workspace_root.clone(),
             })
         }
@@ -284,8 +292,8 @@ mod tests {
         // Simulate the workspace-manifest write failing: nothing else has
         // happened yet.
         let reported = fail_after(&mut import, |import, changes| {
-            changes.reserve_directory(&import.task_crate_dir)?;
-            super::write_task_crate(&import.task_crate_dir, import.name.as_name())
+            changes.reserve_directory(import.place.directory())?;
+            super::write_task_crate(&import.place, import.name.as_name())
         });
 
         assert!(
@@ -299,8 +307,8 @@ mod tests {
             "the tree must be exactly as it started"
         );
         assert!(
-            !project.workspace_root.join("tasks").exists(),
-            "tasks/ must be gone too"
+            !project.workspace_root.join(".rituals").exists(),
+            ".rituals/ must be gone too"
         );
         Ok(())
     }
@@ -312,11 +320,11 @@ mod tests {
 
         let mut import = project.import("lint")?;
         let reported = fail_after(&mut import, |import, changes| {
-            changes.reserve_directory(&import.task_crate_dir)?;
-            super::write_task_crate(&import.task_crate_dir, import.name.as_name())?;
+            changes.reserve_directory(import.place.directory())?;
+            super::write_task_crate(&import.place, import.name.as_name())?;
             import
                 .workspace_manifest
-                .append_workspace_member("tasks/lint")?;
+                .append_workspace_member(import.place.from_the_root())?;
             import.workspace_manifest.write(changes)
         });
 
@@ -340,11 +348,11 @@ mod tests {
 
         let mut import = project.import("lint")?;
         let reported = fail_after(&mut import, |import, changes| {
-            changes.reserve_directory(&import.task_crate_dir)?;
-            super::write_task_crate(&import.task_crate_dir, import.name.as_name())?;
+            changes.reserve_directory(import.place.directory())?;
+            super::write_task_crate(&import.place, import.name.as_name())?;
             import
                 .workspace_manifest
-                .append_workspace_member("tasks/lint")?;
+                .append_workspace_member(import.place.from_the_root())?;
             import.workspace_manifest.write(changes)?;
             import
                 .cli_manifest
@@ -366,26 +374,26 @@ mod tests {
     }
 
     #[test]
-    fn undo_leaves_tasks_directory_when_add_did_not_create_it() -> TestOutcome {
+    fn undo_leaves_the_tasks_directory_when_add_did_not_create_it() -> TestOutcome {
         let project = ScratchProject::new("undo-preexisting-tasks")?;
-        std::fs::create_dir_all(project.workspace_root.join("tasks"))?;
+        std::fs::create_dir_all(project.workspace_root.join(".rituals"))?;
         std::fs::write(
-            project.workspace_root.join("tasks/.keep"),
+            project.workspace_root.join(".rituals/.keep"),
             "a file that predates this add run\n",
         )?;
 
         let mut import = project.import("lint")?;
         let _ = fail_after(&mut import, |import, changes| {
-            changes.reserve_directory(&import.task_crate_dir)?;
-            super::write_task_crate(&import.task_crate_dir, import.name.as_name())
+            changes.reserve_directory(import.place.directory())?;
+            super::write_task_crate(&import.place, import.name.as_name())
         });
 
         assert!(
-            project.workspace_root.join("tasks/.keep").is_file(),
-            "tasks/ must survive when add did not create it"
+            project.workspace_root.join(".rituals/.keep").is_file(),
+            ".rituals/ must survive when add did not create it"
         );
         assert!(
-            !import.task_crate_dir.exists(),
+            !import.place.directory().exists(),
             "the crate directory add did create must still go"
         );
         Ok(())
@@ -416,12 +424,12 @@ mod tests {
         let mut permission_is_enforced = true;
 
         let reported = fail_after(&mut import, |import, changes| {
-            changes.reserve_directory(&import.task_crate_dir)?;
-            super::write_task_crate(&import.task_crate_dir, import.name.as_name())?;
+            changes.reserve_directory(import.place.directory())?;
+            super::write_task_crate(&import.place, import.name.as_name())?;
 
             let setup = |error| Failure::new("changing permissions failed").caused_by(error);
             std::fs::set_permissions(
-                &import.task_crate_dir,
+                import.place.directory(),
                 std::fs::Permissions::from_mode(0o555),
             )
             .map_err(setup)?;
@@ -433,12 +441,12 @@ mod tests {
             // demonstrates cannot occur for this user: restore before the
             // undo runs, so a skipped check says so rather than passing
             // silently.
-            let probe = import.task_crate_dir.join("probe");
+            let probe = import.place.directory().join("probe");
             permission_is_enforced = std::fs::File::create(&probe).is_err();
             if !permission_is_enforced {
                 let _ = std::fs::remove_file(&probe);
                 std::fs::set_permissions(
-                    &import.task_crate_dir,
+                    import.place.directory(),
                     std::fs::Permissions::from_mode(0o755),
                 )
                 .map_err(setup)?;
@@ -459,18 +467,18 @@ mod tests {
         // scratch directory this test made is still removable on drop
         // whether or not the assertions below pass.
         std::fs::set_permissions(
-            &import.task_crate_dir,
+            import.place.directory(),
             std::fs::Permissions::from_mode(0o755),
         )?;
 
         assert!(
             reported
                 .to_string()
-                .contains(&import.task_crate_dir.display().to_string()),
+                .contains(&import.place.directory().display().to_string()),
             "expected the message to name the directory that could not be removed: {reported}"
         );
         assert!(
-            import.task_crate_dir.exists(),
+            import.place.directory().exists(),
             "the directory undo could not remove must still be there"
         );
         Ok(())

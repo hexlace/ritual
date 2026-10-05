@@ -16,11 +16,13 @@
               module is private; see the note above"
 )]
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use rituals::Failure;
 
-use crate::metadata::{self, Dependency, Metadata, Package};
+use crate::metadata::manifest_walk::{manifests_at, walk_manifests};
+use crate::metadata::{Dependency, Metadata, Package};
 use crate::paths::lies_under;
 use crate::rust_name::extern_identifier;
 use crate::{project, task_list};
@@ -350,54 +352,50 @@ fn other_dependents<'a>(
 /// Every package `metadata` did not load that declares a path dependency
 /// under `directory`, by name: what [`Metadata::dependents_outside_the_graph`]
 /// answers.
+///
+/// A crate `metadata` did not load is read from its own manifest, the walk
+/// [`Metadata::manifests_cargo_reads`] makes, because Cargo refuses to describe
+/// one that lies under the workspace's root without being a member. A path
+/// dependency whose directory holds no manifest is left out: Cargo could not
+/// have described the project had it needed one.
 pub(crate) fn dependents_outside_the_graph(
     metadata: &Metadata,
     directory: &Path,
 ) -> Result<Vec<String>, Failure> {
-    let mut asked: Vec<PathBuf> = metadata
+    let asked: BTreeSet<PathBuf> = metadata
         .packages
         .iter()
         .map(|package| crate::paths::normalize(&package.manifest_path))
         .collect();
-    let mut pending: Vec<PathBuf> = Vec::new();
+    let mut starts: Vec<PathBuf> = Vec::new();
     for package in &metadata.packages {
         if !lies_under(&package.manifest_path, directory) {
-            pending.extend(unasked_path_crates(package, directory, &asked));
+            starts.extend(manifests_at(
+                package
+                    .dependencies
+                    .iter()
+                    .filter_map(|dependency| dependency.path.as_deref()),
+                Some(directory),
+            ));
         }
     }
 
     let mut dependents: Vec<String> = Vec::new();
-    while let Some(manifest_path) = pending.pop() {
-        if asked.contains(&manifest_path) {
-            continue;
+    let root_manifest = crate::paths::normalize(&metadata.workspace_root.join("Cargo.toml"));
+    walk_manifests(&root_manifest, starts, asked, Some(directory), |reached| {
+        let declares_it = reached
+            .leads_to
+            .iter()
+            .any(|path| lies_under(path, directory));
+        let declaring = reached
+            .manifest
+            .package_name()
+            .filter(|name| declares_it && !dependents.iter().any(|dependent| dependent == name));
+        if let Some(name) = declaring {
+            dependents.push(name.to_string());
         }
-        asked.push(manifest_path.clone());
-        let package = metadata::fetch_declared(&manifest_path)?;
-        let declares_it = package.dependencies.iter().any(|dependency| {
-            dependency
-                .path
-                .as_deref()
-                .is_some_and(|path| lies_under(path, directory))
-        });
-        if declares_it && !dependents.contains(&package.name) {
-            dependents.push(package.name.clone());
-        }
-        pending.extend(unasked_path_crates(&package, directory, &asked));
-    }
+    })?;
     Ok(dependents)
-}
-
-/// The manifests of `package`'s declared path dependencies that are neither
-/// under `directory` nor among `asked`, normalised.
-fn unasked_path_crates(package: &Package, directory: &Path, asked: &[PathBuf]) -> Vec<PathBuf> {
-    package
-        .dependencies
-        .iter()
-        .filter_map(|dependency| dependency.path.as_deref())
-        .filter(|path| !lies_under(path, directory))
-        .map(|path| crate::paths::normalize(&path.join("Cargo.toml")))
-        .filter(|manifest_path| !asked.contains(manifest_path))
-        .collect()
 }
 
 /// The workspace members other than `resolved`, by name, whose manifests lie
@@ -424,8 +422,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{TaskImport, read};
-    use crate::metadata::{Dependency, Metadata, parse};
-    use crate::test_support::TestOutcome;
+    use crate::metadata::{Dependency, Metadata, fetch, parse};
+    use crate::test_support::{ScratchDir, TestOutcome};
 
     const DEMO_WORKSPACE: &str = include_str!("metadata/fixtures/demo-workspace.json");
 
@@ -881,6 +879,57 @@ mod tests {
             .ok_or("an unknown package was meant to be refused")?;
 
         assert!(failure.to_string().contains("nonexistent-package"));
+        Ok(())
+    }
+
+    /// `vendor/y` is reached through `vendor/x`, which is excluded from the
+    /// workspace, and sits under the workspace's root without being a member
+    /// or excluded. Asking `cargo metadata --no-deps` about it fails with
+    /// `current package believes it's in a workspace when it's not`, so
+    /// finding what depends on `tasks/greet` has to read its manifest
+    /// instead.
+    #[test]
+    fn a_crate_reached_through_a_non_member_under_the_root_is_asked_about() -> TestOutcome {
+        let scratch = ScratchDir::new("dependents-through-a-non-member")?;
+        let root = std::fs::canonicalize(scratch.path())?;
+        let package = |name: &str, dependency: &str| {
+            format!(
+                "[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n\
+                 [dependencies]\n{dependency}\n"
+            )
+        };
+        let workspace = "[workspace]\nmembers = [\"cli\", \"tasks/greet\"]\n\
+                         exclude = [\"vendor/x\"]\nresolver = \"3\"\n";
+        let files = [
+            ("Cargo.toml", workspace.to_string()),
+            (
+                "cli/Cargo.toml",
+                package("cli", "x = { path = \"../vendor/x\", optional = true }"),
+            ),
+            ("cli/src/lib.rs", String::new()),
+            ("tasks/greet/Cargo.toml", package("greet", "")),
+            ("tasks/greet/src/lib.rs", String::new()),
+            (
+                "vendor/x/Cargo.toml",
+                package("x", "y = { path = \"../y\" }"),
+            ),
+            ("vendor/x/src/lib.rs", String::new()),
+            (
+                "vendor/y/Cargo.toml",
+                package("y", "greet = { path = \"../../tasks/greet\" }"),
+            ),
+            ("vendor/y/src/lib.rs", String::new()),
+        ];
+        for (path, contents) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().ok_or("a fixture file has a directory")?)?;
+            std::fs::write(&path, contents)?;
+        }
+        let document = fetch(&root)?;
+
+        let dependents = document.dependents_outside_the_graph(&root.join("tasks/greet"))?;
+
+        assert_eq!(dependents, ["y"]);
         Ok(())
     }
 }

@@ -11,18 +11,18 @@ mod support;
 
 use support::{Project, ResultContext, TempDir, TestOutcome, in_checkout, write_text};
 
-/// `add`, asked to scaffold a name whose `tasks/<name>` directory is already
+/// `add`, asked to scaffold a name whose `.rituals/<name>` directory is already
 /// there, refuses with a line prefixed `ritual: `.
 #[test]
 fn a_tasks_own_refusal_is_prefixed_with_the_bin_name_not_the_package_name() -> TestOutcome {
     in_checkout(|checkout| {
         let working_dir = TempDir::new("refusal-prefix-task-failure")?;
         let project = Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
-        std::fs::create_dir_all(project.root().join("tasks/already-here"))
-            .context("creating the leftover tasks/already-here failed")?;
+        std::fs::create_dir_all(project.root().join(".rituals/already-here"))
+            .context("creating the leftover .rituals/already-here failed")?;
 
         let result = project.run_cli(&["add", "already-here"])?;
-        result.expect_failure("`add already-here`, with tasks/already-here already present");
+        result.expect_failure("`add already-here`, with .rituals/already-here already present");
         assert!(
             result
                 .sole_line_prefixed_with("ritual")

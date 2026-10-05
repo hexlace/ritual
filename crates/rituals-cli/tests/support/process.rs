@@ -18,6 +18,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use super::git::isolate_from_the_machine;
 use super::{OptionContext, Outcome, ResultContext};
 
 /// The `cargo` this suite was itself run by.
@@ -180,18 +181,27 @@ pub(crate) fn cargo_with_default_locations(
 /// stderr and would answer any `stderr.contains(…)` about a name that
 /// appears in a crate name, a path, or the command line itself.
 ///
-/// Anything `binary` builds lands in `current_dir`'s own `target/`.
+/// Anything `binary` builds lands in `current_dir`'s own `target/`, and any
+/// `git` it starts reads nothing from the machine the suite runs on (see
+/// [`isolate_from_the_machine`]), so what it decides never depends on a
+/// developer's own global ignore file or attributes.
 pub(crate) fn run_binary(
     binary: &Path,
     current_dir: &Path,
     arguments: &[&str],
 ) -> Outcome<RunOutput> {
+    let mut command = isolated_binary(binary, current_dir, arguments);
+    run_to_completion(&mut command, &binary.display().to_string())
+}
+
+/// `binary` with `arguments` in `current_dir`, building into its own
+/// `target/` and with `git` isolated from the machine.
+fn isolated_binary(binary: &Path, current_dir: &Path, arguments: &[&str]) -> Command {
     let mut command = Command::new(binary);
     command.args(arguments).current_dir(current_dir);
-    run_to_completion(
-        in_own_target_dir(&mut command, &current_dir.join("target")),
-        &binary.display().to_string(),
-    )
+    in_own_target_dir(&mut command, &current_dir.join("target"));
+    isolate_from_the_machine(&mut command);
+    command
 }
 
 /// Runs the `ritual` binary this suite was built with —

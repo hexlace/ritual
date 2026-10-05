@@ -1,7 +1,7 @@
 //! `add` and `regenerate` are ordinary imported tasks, not framework
 //! built-ins. A scaffolded project imports ritual's management bundle —
 //! `rituals-core`, whose children are `add`, `regenerate`, `new`, `create`,
-//! `import` and `remove` — the way it imports any task: a Cargo dependency,
+//! `import`, `remove` and `migrate` — the way it imports any task: a Cargo dependency,
 //! sourced from the same `--path` checkout as `rituals`, plus one entry,
 //! `ritual`, in `[package.metadata.ritual] tasks`. Nothing is reserved for those tasks at
 //! the assembly step: dropping the bundle the way any import is dropped
@@ -66,6 +66,7 @@ fn assert_help_lists_the_bundles_children_in_order(project: &Project) -> TestOut
             "create",
             "import",
             "remove",
+            "migrate",
             "help"
         ],
         "stdout was:\n{}",
@@ -83,7 +84,7 @@ fn assert_a_later_task_follows_the_bundle(project: &Project) -> TestOutcome {
         .alias(&["add", "greet"])?
         .expect_success("`cargo ritual add greet`");
 
-    let task_manifest = manifest::read(&project.root().join("tasks/greet/Cargo.toml"))?;
+    let task_manifest = manifest::read(&project.root().join(".rituals/greet/Cargo.toml"))?;
     assert_eq!(
         manifest::keys_of(&task_manifest, &["dependencies"]),
         ["rituals"],
@@ -109,6 +110,7 @@ fn assert_a_later_task_follows_the_bundle(project: &Project) -> TestOutcome {
             "create",
             "import",
             "remove",
+            "migrate",
             "greet",
             "help"
         ],

@@ -50,7 +50,7 @@ impl Project<'_> {
     /// // `no_run`.
     /// let document = metadata::fetch(Path::new("."))?;
     /// let project = document.locate_project("demo-ritual")?;
-    /// let task_dir = project.workspace_root().join("tasks/lint");
+    /// let task_dir = project.workspace_root().join(".rituals/lint");
     /// println!("a new task would go in {}", task_dir.display());
     /// # Ok::<(), rituals::Failure>(())
     /// ```
@@ -167,8 +167,8 @@ impl Project<'_> {
 /// receive — `Identity::package_name()` — rather than being read directly:
 /// `cargo metadata` walks up from the current directory to find the
 /// workspace root, and this function then identifies the caller among the
-/// workspace's members by name, so `add`, `import`, `regenerate` and `remove`
-/// work from any subdirectory of a project.
+/// workspace's members by name, so `add`, `import`, `regenerate`, `remove`
+/// and `migrate` work from any subdirectory of a project.
 ///
 /// # Errors
 ///

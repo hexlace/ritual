@@ -5,27 +5,39 @@ use std::path::Path;
 use super::process::run_binary;
 use super::{
     Checkout, Outcome, Project, ResultContext, RunOutput, TempDir, TestOutcome,
-    assert_trees_identical, git, help, manifest, snapshot_tree,
+    assert_trees_identical, git, help, legacy, manifest, snapshot_tree,
 };
 
-/// A project with one task `add` scaffolded under `tasks/<task>`, committed
-/// whole to a git repository of its own.
+/// A project with one task in `tasks/<task>`, the layout ritual 0.1's `add`
+/// made, committed whole to a git repository of its own.
 ///
-/// What a person has after `cargo ritual add <task>` and a commit — the
-/// state in which `remove` is allowed to delete the task's directory.
+/// What a person has after `cargo ritual add <task>` on 0.1 and a commit —
+/// the state in which `remove` is allowed to delete the task's directory. The
+/// stories built on it are about `remove`, which finds a task's directory
+/// from its dependency's `path` and so handles any layout; they keep the
+/// layout they spell out in their paths by taking it from
+/// [`legacy`](super::legacy), not from whatever directory `add` scaffolds
+/// into today.
 pub(crate) fn project_with_a_committed_task(
     checkout: &Checkout,
     working_dir: &TempDir,
     task: &str,
 ) -> Outcome<Project> {
-    let project = project_with_an_uncommitted_task(checkout, working_dir, task)?;
-    git::init_and_commit_everything(project.root())?;
-    Ok(project)
+    legacy::committed_project_with_tasks(checkout, working_dir, &[task])
 }
 
-/// A project with one task `add` scaffolded under `tasks/<task>`, in a
-/// directory that is not a git repository.
+/// The same project, in a directory that is not a git repository.
 pub(crate) fn project_with_an_uncommitted_task(
+    checkout: &Checkout,
+    working_dir: &TempDir,
+    task: &str,
+) -> Outcome<Project> {
+    legacy::project_with_tasks(checkout, working_dir, &[task])
+}
+
+/// A project with one task `add` scaffolded under `.rituals/<task>`, as this
+/// version's `add` does, committed whole to a git repository of its own.
+pub(crate) fn project_with_a_committed_added_task(
     checkout: &Checkout,
     working_dir: &TempDir,
     task: &str,
@@ -34,6 +46,7 @@ pub(crate) fn project_with_an_uncommitted_task(
     project
         .alias(&["add", task])?
         .expect_success(&format!("`cargo ritual add {task}`"));
+    git::init_and_commit_everything(project.root())?;
     Ok(project)
 }
 

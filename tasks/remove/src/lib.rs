@@ -1,16 +1,15 @@
 //! The `remove` task: take a task out of this project, in the order that
 //! keeps it building.
 
-mod git;
 mod removal;
 #[cfg(test)]
 mod test_support;
 
 use std::path::{Path, PathBuf};
 
-use git::{Flag, Obstacle};
 use removal::{Manifests, Member, Removal};
 use rituals::{CommandLine, Failure, Outcome, Task, clap};
+use rituals_compose::git::{self, CannotGiveBack, Flag, Unanswered, Unwatched};
 use rituals_compose::metadata::{self, Metadata, TaskImport};
 use rituals_compose::sentence::join_with_and;
 use rituals_compose::{cargo_config, top_level};
@@ -233,22 +232,7 @@ fn plan_member(
         dropped_workspace_dependency,
     } = *deletion;
     let shown = shown(directory, workspace_root);
-
-    let mut dependents: Vec<String> = import
-        .other_dependents()
-        .iter()
-        .map(ToString::to_string)
-        .collect();
-    dependents.extend(document.dependents_outside_the_graph(directory)?);
-    if !dependents.is_empty() {
-        return Err(other_dependents_refusal(import.key(), &shown, &dependents));
-    }
-    if !import.members_inside().is_empty() {
-        return Err(members_inside_refusal(&shown, import.members_inside()));
-    }
-    if !is_strictly_inside(directory, workspace_root)? {
-        return Err(outside_the_workspace_refusal(&shown));
-    }
+    ensure_nothing_else_needs(import, document, directory, workspace_root, &shown)?;
 
     let workspace = manifests.workspace();
     if workspace.empties_default_members(directory) {
@@ -258,9 +242,9 @@ fn plan_member(
     if !globs.is_empty() {
         return Err(globs_refusal(&shown, &globs));
     }
-    let git_obstacle = |obstacle| {
-        git_refusal(
-            obstacle,
+    let give_back = |cannot_give_back| {
+        give_back_refusal(
+            cannot_give_back,
             import.key(),
             &shown,
             retry_command,
@@ -271,8 +255,8 @@ fn plan_member(
     // A build reads the configuration above wherever it starts: the project's
     // own command line can be run from any member's directory, and a build
     // from any directory below one holding a `.cargo` configuration reads it.
-    let configured =
-        git::directories_holding_cargo_configuration(workspace_root).map_err(git_obstacle)?;
+    let configured = git::directories_holding_cargo_configuration(workspace_root)
+        .map_err(|unanswered| give_back(unanswered.into()))?;
     let mut starts = vec![current_dir, workspace_root];
     starts.extend(document.member_directories());
     starts.extend(configured.iter().map(PathBuf::as_path));
@@ -282,13 +266,41 @@ fn plan_member(
     }
 
     let from_top_level =
-        git::ensure_git_can_give_back(directory, workspace_root).map_err(git_obstacle)?;
+        git::ensure_git_can_give_back(directory, workspace_root).map_err(give_back)?;
 
     Ok(Member {
         directory: directory.to_path_buf(),
         relative: shown,
         from_top_level,
     })
+}
+
+/// Refuses when something other than the workspace's own manifests still
+/// needs `directory`: another package that depends on it, members inside it,
+/// or the directory not being inside the workspace at all.
+fn ensure_nothing_else_needs(
+    import: &TaskImport<'_>,
+    document: &Metadata,
+    directory: &Path,
+    workspace_root: &Path,
+    shown: &str,
+) -> Result<(), Failure> {
+    let mut dependents: Vec<String> = import
+        .other_dependents()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    dependents.extend(document.dependents_outside_the_graph(directory)?);
+    if !dependents.is_empty() {
+        return Err(other_dependents_refusal(import.key(), shown, &dependents));
+    }
+    if !import.members_inside().is_empty() {
+        return Err(members_inside_refusal(shown, import.members_inside()));
+    }
+    if !is_strictly_inside(directory, workspace_root)? {
+        return Err(outside_the_workspace_refusal(shown));
+    }
+    Ok(())
 }
 
 /// Whether `directory` lies strictly inside `workspace_root` once both are
@@ -431,14 +443,64 @@ fn entries_refusal(directory: &str, entries: &[String]) -> Failure {
     ))
 }
 
-/// Each path spelled from git's top level with the `:/` pathspec magic,
-/// which git reads from there whatever directory it is run in.
-fn from_the_top_level<'a>(paths: impl IntoIterator<Item = &'a PathBuf>) -> String {
+/// Each path spelled as [`git::top_level_pathspec`] spells it, joined for a
+/// sentence.
+fn from_the_top_level<P: AsRef<Path>>(paths: impl IntoIterator<Item = P>) -> String {
     paths
         .into_iter()
-        .map(|path| format!(":/{}", path.display()))
+        .map(|path| git::top_level_pathspec(path.as_ref()))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// The refusal for a git that could not answer, which says the same whatever
+/// it was asked: `by_hand` is how a person takes the task out without it.
+fn unanswered_refusal(
+    unanswered: &Unanswered,
+    key: &str,
+    directory: &str,
+    by_hand: &str,
+) -> Failure {
+    match unanswered {
+        Unanswered::NotARepository => Failure::new(format!(
+            "refusing to remove `{key}`: this project is not a git repository, so nothing \
+             could give {directory} back once it is deleted; {by_hand}"
+        )),
+        Unanswered::GitMissing => Failure::new(format!(
+            "refusing to remove `{key}`: `git` could not be run, and remove needs it to check \
+             that {directory} can be given back; {by_hand}"
+        )),
+        Unanswered::Failed(message) => Failure::new(format!(
+            "refusing to remove `{key}`: git could not say whether {directory} can be given \
+             back: {message}"
+        )),
+    }
+}
+
+/// Each file git has been told not to look at, with its flag, spelled from
+/// git's top level and joined for a sentence.
+fn unwatched_named(files: &[Unwatched]) -> String {
+    let named: Vec<String> = files
+        .iter()
+        .map(|file| {
+            let flag = match file.flag() {
+                Flag::AssumeUnchanged => "assume-unchanged",
+                Flag::SkipWorktree => "skip-worktree",
+            };
+            format!("{} ({flag})", from_the_top_level([file.path()]))
+        })
+        .collect();
+    named.join(", ")
+}
+
+/// Each file a filter applies to, with the filter, spelled from git's top
+/// level and joined for a sentence.
+fn filtered_named(files: &[(PathBuf, String)]) -> String {
+    let named: Vec<String> = files
+        .iter()
+        .map(|(path, filter)| format!("{} (filter `{filter}`)", from_the_top_level([path])))
+        .collect();
+    named.join(", ")
 }
 
 /// The refusal for a directory git could not be asked about, or could not
@@ -446,8 +508,8 @@ fn from_the_top_level<'a>(paths: impl IntoIterator<Item = &'a PathBuf>) -> Strin
 ///
 /// `retry_command` is what a person runs again, as they would type it;
 /// `regenerate_command` is how they would type `regenerate`.
-fn git_refusal(
-    obstacle: Obstacle,
+fn give_back_refusal(
+    cannot_give_back: CannotGiveBack,
     key: &str,
     directory: &str,
     retry_command: &str,
@@ -458,16 +520,11 @@ fn git_refusal(
          `{regenerate_command}`, remove its dependency and workspace member entry, then \
          delete {directory} by hand"
     );
-    match obstacle {
-        Obstacle::NotARepository => Failure::new(format!(
-            "refusing to remove `{key}`: this project is not a git repository, so nothing \
-             could give {directory} back once it is deleted; {by_hand}"
-        )),
-        Obstacle::GitMissing => Failure::new(format!(
-            "refusing to remove `{key}`: `git` could not be run, and remove needs it to check \
-             that {directory} can be given back; {by_hand}"
-        )),
-        Obstacle::OwnRepository(repository) => {
+    match cannot_give_back {
+        CannotGiveBack::Unanswered(unanswered) => {
+            unanswered_refusal(&unanswered, key, directory, &by_hand)
+        }
+        CannotGiveBack::OwnRepository(repository) => {
             // Joining an empty path would add a trailing separator.
             let repository = if repository.as_os_str().is_empty() {
                 directory.to_string()
@@ -479,46 +536,24 @@ fn git_refusal(
                  this project's git has no record of what is in it; {by_hand}"
             ))
         }
-        Obstacle::OtherRepository(repository) => Failure::new(format!(
+        CannotGiveBack::OtherRepository(repository) => Failure::new(format!(
             "refusing to remove `{key}`: {directory} is in the git repository at {}, not this \
              project's, so this project's git has no record of it; {by_hand}",
             repository.display()
         )),
-        Obstacle::Failed(message) => Failure::new(format!(
-            "refusing to remove `{key}`: git could not say whether {directory} can be given \
-             back: {message}"
+        CannotGiveBack::Unwatched(files) => Failure::new(format!(
+            "refusing to remove `{key}`: git has been told not to look at changes to {}, so \
+             it cannot vouch for them; clear the flag with `git update-index \
+             --no-assume-unchanged` or `--no-skip-worktree`, commit what changed, then run \
+             `{retry_command}` again",
+            unwatched_named(&files)
         )),
-        Obstacle::Unwatched(files) => {
-            let named: Vec<String> = files
-                .iter()
-                .map(|file| {
-                    let flag = match file.flag {
-                        Flag::AssumeUnchanged => "assume-unchanged",
-                        Flag::SkipWorktree => "skip-worktree",
-                    };
-                    format!("{} ({flag})", from_the_top_level([&file.path]))
-                })
-                .collect();
-            Failure::new(format!(
-                "refusing to remove `{key}`: git has been told not to look at changes to {}, so \
-                 it cannot vouch for them; clear the flag with `git update-index \
-                 --no-assume-unchanged` or `--no-skip-worktree`, commit what changed, then run \
-                 `{retry_command}` again",
-                named.join(", ")
-            ))
-        }
-        Obstacle::Filtered(files) => {
-            let named: Vec<String> = files
-                .iter()
-                .map(|(path, filter)| format!("{} (filter `{filter}`)", from_the_top_level([path])))
-                .collect();
-            Failure::new(format!(
-                "refusing to remove `{key}`: git stores {} through a filter, so what it would \
-                 give back can differ from what is on disk; {by_hand}",
-                named.join(", ")
-            ))
-        }
-        Obstacle::Dirty(files) => Failure::new(format!(
+        CannotGiveBack::Filtered(files) => Failure::new(format!(
+            "refusing to remove `{key}`: git stores {} through a filter, so what it would \
+             give back can differ from what is on disk; {by_hand}",
+            filtered_named(&files)
+        )),
+        CannotGiveBack::Dirty(files) => Failure::new(format!(
             "refusing to remove `{key}`: {directory} has files git cannot give back — {}; \
              commit or delete them, then run `{retry_command}` again",
             from_the_top_level(&files)
@@ -530,12 +565,14 @@ fn git_refusal(
 mod tests {
     use std::path::PathBuf;
 
+    use rituals_compose::git::fixture::{commit_everything, git};
+    use rituals_compose::git::{self, CannotGiveBack, Unanswered};
+
     use super::{
-        Flag, Obstacle, bundle_refusal, entries_refusal, git_refusal, globs_refusal,
-        is_strictly_inside, last_default_member_refusal, members_inside_refusal, neither_refusal,
+        bundle_refusal, entries_refusal, give_back_refusal, globs_refusal, is_strictly_inside,
+        last_default_member_refusal, members_inside_refusal, neither_refusal,
         other_dependents_refusal, outside_the_workspace_refusal, pick, several_keys_refusal, shown,
     };
-    use crate::git::Unwatched;
     use crate::test_support::{ScratchDir, TestOutcome};
 
     const REMOVE: &str = "cargo ritual remove";
@@ -757,9 +794,9 @@ mod tests {
         );
     }
 
-    fn refusal(obstacle: Obstacle) -> String {
-        git_refusal(
-            obstacle,
+    fn refusal(cannot_give_back: CannotGiveBack) -> String {
+        give_back_refusal(
+            cannot_give_back,
             "greet",
             "tasks/greet",
             "cargo ritual remove greet",
@@ -777,7 +814,7 @@ mod tests {
     #[test]
     fn dirty_files_are_each_named_from_gits_top_level() {
         assert_eq!(
-            refusal(Obstacle::Dirty(vec![
+            refusal(CannotGiveBack::Dirty(vec![
                 PathBuf::from("tasks/greet/scratch-notes.txt"),
                 PathBuf::from("tasks/greet/src/lib.rs"),
             ])),
@@ -787,31 +824,51 @@ mod tests {
         );
     }
 
+    /// An `Unwatched` is only ever built from what git reports, so the
+    /// refusal this test words is for the answer `git` itself gives for a
+    /// task holding one file of each flag.
     #[test]
-    fn files_git_does_not_look_at_are_each_named_with_their_flag() {
+    fn files_git_does_not_look_at_are_each_named_with_their_flag() -> TestOutcome {
+        let scratch = ScratchDir::new("unwatched")?;
+        let root = scratch.path();
+        std::fs::create_dir_all(root.join("tasks/greet/src"))?;
+        std::fs::write(root.join("tasks/greet/local.toml"), "committed\n")?;
+        std::fs::write(root.join("tasks/greet/src/lib.rs"), "committed\n")?;
+        git(root, &["init"])?;
+        commit_everything(root)?;
+        git(
+            root,
+            &[
+                "update-index",
+                "--assume-unchanged",
+                "tasks/greet/local.toml",
+            ],
+        )?;
+        git(
+            root,
+            &["update-index", "--skip-worktree", "tasks/greet/src/lib.rs"],
+        )?;
+
+        let Err(cannot_give_back) = git::ensure_git_can_give_back(&root.join("tasks/greet"), root)
+        else {
+            return Err("git was told not to look at two files and still vouched for them".into());
+        };
+
         assert_eq!(
-            refusal(Obstacle::Unwatched(vec![
-                Unwatched {
-                    path: PathBuf::from("tasks/greet/local.toml"),
-                    flag: Flag::AssumeUnchanged,
-                },
-                Unwatched {
-                    path: PathBuf::from("tasks/greet/src/lib.rs"),
-                    flag: Flag::SkipWorktree,
-                },
-            ])),
+            refusal(cannot_give_back),
             "refusing to remove `greet`: git has been told not to look at changes to \
              :/tasks/greet/local.toml (assume-unchanged), :/tasks/greet/src/lib.rs \
              (skip-worktree), so it cannot vouch for them; clear the flag with `git \
              update-index --no-assume-unchanged` or `--no-skip-worktree`, commit what changed, \
              then run `cargo ritual remove greet` again"
         );
+        Ok(())
     }
 
     #[test]
     fn files_behind_a_filter_are_each_named_with_it() {
         assert_eq!(
-            refusal(Obstacle::Filtered(vec![(
+            refusal(CannotGiveBack::Filtered(vec![(
                 PathBuf::from("tasks/greet/local.cfg"),
                 "strip".to_string()
             )])),
@@ -826,7 +883,7 @@ mod tests {
     #[test]
     fn a_directory_in_another_repository_is_told_to_delete_by_hand() {
         assert_eq!(
-            refusal(Obstacle::OtherRepository(PathBuf::from("/elsewhere"))),
+            refusal(CannotGiveBack::OtherRepository(PathBuf::from("/elsewhere"))),
             format!(
                 "refusing to remove `greet`: tasks/greet is in the git repository at /elsewhere, \
                  not this project's, so this project's git has no record of it; {BY_HAND}"
@@ -837,7 +894,7 @@ mod tests {
     #[test]
     fn a_project_that_is_not_a_repository_is_told_to_delete_by_hand() {
         assert_eq!(
-            refusal(Obstacle::NotARepository),
+            refusal(Unanswered::NotARepository.into()),
             format!(
                 "refusing to remove `greet`: this project is not a git repository, so nothing \
                  could give tasks/greet back once it is deleted; {BY_HAND}"
@@ -848,7 +905,7 @@ mod tests {
     #[test]
     fn a_missing_git_is_refused_like_a_missing_repository() {
         assert_eq!(
-            refusal(Obstacle::GitMissing),
+            refusal(Unanswered::GitMissing.into()),
             format!(
                 "refusing to remove `greet`: `git` could not be run, and remove needs it to \
                  check that tasks/greet can be given back; {BY_HAND}"
@@ -859,7 +916,7 @@ mod tests {
     #[test]
     fn a_directory_that_is_its_own_repository_is_told_to_delete_by_hand() {
         assert_eq!(
-            refusal(Obstacle::OwnRepository(PathBuf::new())),
+            refusal(CannotGiveBack::OwnRepository(PathBuf::new())),
             format!(
                 "refusing to remove `greet`: tasks/greet is a git repository of its own, so \
                  this project's git has no record of what is in it; {BY_HAND}"
@@ -872,7 +929,9 @@ mod tests {
     #[test]
     fn a_repository_inside_the_directory_is_named_where_it_is() {
         assert_eq!(
-            refusal(Obstacle::OwnRepository(PathBuf::from("vendor/upstream"))),
+            refusal(CannotGiveBack::OwnRepository(PathBuf::from(
+                "vendor/upstream"
+            ))),
             format!(
                 "refusing to remove `greet`: tasks/greet/vendor/upstream is a git repository of \
                  its own, so this project's git has no record of what is in it; {BY_HAND}"
@@ -883,9 +942,7 @@ mod tests {
     #[test]
     fn any_other_git_failure_is_passed_through_in_gits_words() {
         assert_eq!(
-            refusal(Obstacle::Failed(
-                "fatal: detected dubious ownership".to_string()
-            )),
+            refusal(Unanswered::Failed("fatal: detected dubious ownership".to_string()).into()),
             "refusing to remove `greet`: git could not say whether tasks/greet can be given \
              back: fatal: detected dubious ownership"
         );

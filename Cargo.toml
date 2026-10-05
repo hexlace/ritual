@@ -7,6 +7,7 @@ members = [
     "tasks/add",
     "tasks/create",
     "tasks/import",
+    "tasks/migrate",
     "tasks/new",
     "tasks/regenerate",
     "tasks/remove",
@@ -26,6 +27,7 @@ ritual = { package = "rituals-core", path = "crates/rituals-core", version = "0.
 add = { package = "rituals-core-add", path = "tasks/add", version = "0.1.2" }
 create = { package = "rituals-core-create", path = "tasks/create", version = "0.1.2" }
 import = { package = "rituals-core-import", path = "tasks/import", version = "0.1.2" }
+migrate = { package = "rituals-core-migrate", path = "tasks/migrate", version = "0.1.2" }
 new = { package = "rituals-core-new", path = "tasks/new", version = "0.1.2" }
 regenerate = { package = "rituals-core-regenerate", path = "tasks/regenerate", version = "0.1.2" }
 remove = { package = "rituals-core-remove", path = "tasks/remove", version = "0.1.2" }

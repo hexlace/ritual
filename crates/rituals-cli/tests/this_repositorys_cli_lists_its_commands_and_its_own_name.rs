@@ -1,6 +1,6 @@
 //! This repository's own composed CLI — the `ritual` binary — lists exactly
-//! its commands, `add`, `regenerate`, `new`, `create`, `import` and
-//! `remove`, in that order, and reports its own bin name for `--version`,
+//! its commands, `add`, `regenerate`, `new`, `create`, `import`, `remove` and
+//! `migrate`, in that order, and reports its own bin name for `--version`,
 //! never its package name, `rituals-cli`.
 //!
 //! The commands are the children of ritual's management bundle,
@@ -28,6 +28,7 @@ fn this_repositorys_own_cli_lists_its_commands_in_order() -> TestOutcome {
             "create",
             "import",
             "remove",
+            "migrate",
             "help"
         ],
         "stdout was:\n{}",

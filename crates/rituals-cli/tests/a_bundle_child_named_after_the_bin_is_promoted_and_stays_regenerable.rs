@@ -81,7 +81,7 @@ fn assert_regenerate_accepts_the_project_unchanged(project: &Project) -> TestOut
     Ok(())
 }
 
-/// `add extra` changes exactly the new crate's directories and two files,
+/// `add extra` changes exactly `.rituals/`, the new crate's directories and two files,
 /// both manifests and the generated file — which mounts `extra` afterwards.
 fn assert_add_lands_every_part_of_a_new_task(project: &Project) -> TestOutcome {
     let before = snapshot_tree(project.root())?;
@@ -98,10 +98,11 @@ fn assert_add_lands_every_part_of_a_new_task(project: &Project) -> TestOutcome {
         PathBuf::from("Cargo.toml"),
         composed_cli.join("Cargo.toml"),
         composed_cli.join("src/main.rs"),
-        PathBuf::from("tasks/extra"),
-        PathBuf::from("tasks/extra/Cargo.toml"),
-        PathBuf::from("tasks/extra/src"),
-        PathBuf::from("tasks/extra/src/lib.rs"),
+        PathBuf::from(".rituals"),
+        PathBuf::from(".rituals/extra"),
+        PathBuf::from(".rituals/extra/Cargo.toml"),
+        PathBuf::from(".rituals/extra/src"),
+        PathBuf::from(".rituals/extra/src/lib.rs"),
     ];
     expected.sort();
     assert_eq!(changed_paths(&before, &after), expected);

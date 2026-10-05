@@ -57,12 +57,12 @@ demo/
 ├── ritual/               the CLI crate (package demo-ritual)
 │   ├── Cargo.toml        says which of its dependencies are tasks
 │   └── src/main.rs       generated from that list, never edited by hand
-└── tasks/hello/          the task add scaffolded
+└── .rituals/hello/       the task add scaffolded
     ├── Cargo.toml
     └── src/lib.rs
 ```
 
-Now give `hello` something to do. Replace `tasks/hello/src/lib.rs` with:
+Now give `hello` something to do. Replace `.rituals/hello/src/lib.rs` with:
 
 ```rust
 use rituals::{Outcome, Task, clap, report};
@@ -132,7 +132,7 @@ The CLI crate says which of its dependencies are tasks, by dependency key:
 
 ```toml
 [dependencies]
-lint = { path = "../tasks/lint" }
+lint = { path = "../.rituals/lint" }
 
 [package.metadata.ritual]
 tasks = ["lint"]
@@ -167,8 +167,8 @@ task, and bundles nest.
 
 ### Ritual's own commands are a bundle too
 
-`add`, `regenerate`, `new`, `create`, `import` and `remove` come from the
-bundle `rituals-core`, imported under the key `ritual`. A new project's
+`add`, `regenerate`, `new`, `create`, `import`, `remove` and `migrate` come
+from the bundle `rituals-core`, imported under the key `ritual`. A new project's
 command line is also called `ritual`, so those commands appear directly:
 `cargo ritual add`, not `cargo ritual ritual add`. If you name your command line something else,
 with `ritual new demo --cli acme`, they stay grouped: your tasks run as
@@ -187,9 +187,15 @@ Run this anywhere inside the project:
 cargo ritual add lint
 ```
 
-It scaffolds `tasks/lint`, adds it to the workspace and to the CLI crate's
-manifest, and regenerates. Edit `tasks/lint/src/lib.rs`, then run
+It scaffolds `.rituals/lint`, adds it to the workspace and to the CLI crate's
+manifest, and regenerates. Edit `.rituals/lint/src/lib.rs`, then run
 `cargo ritual lint`.
+
+A project's own tasks are tooling, not the project, so they live in
+`.rituals/`, next to `.github/`, rather than among the project's real
+directories. A project made by ritual 0.1 keeps its tasks in `tasks/`, and
+they keep working there. [`cargo ritual migrate`](#move-a-01-project-into-rituals)
+moves them.
 
 ### Import a task from somewhere else
 
@@ -299,11 +305,117 @@ that, and is not undone; git gives back anything it deleted, and if the
 deletion fails partway the message says how, in a command that works from
 anywhere in the project.
 
+### Move a 0.1 project into `.rituals/`
+
+Ritual 0.1 put a project's tasks in `tasks/`. From 0.2 they go in `.rituals/`,
+and `cargo ritual migrate` moves a project that has them in `tasks/`. A project
+with its tasks in `tasks/` keeps building and running on 0.2 until you do, so
+there is no hurry.
+
+To upgrade:
+
+1. Set `rituals` under `[workspace.dependencies]` in the workspace's
+   `Cargo.toml`, and `rituals-core` in the CLI crate's `Cargo.toml`
+   (`ritual/Cargo.toml`, where it is written `ritual = { package =
+   "rituals-core", ... }`), to the new release. Both: tasks built on `rituals`
+   0.1 do not fit a bundle built on 0.2, and the command line will not compile
+   until both match.
+2. Run `cargo build`, so `Cargo.lock` follows, and commit everything.
+3. Run `cargo ritual migrate`.
+4. Review the changes with `git status` and `git diff`, and commit them.
+
+`migrate` is for any release's change to the layout. It runs every migration
+that applies, oldest first, and stores nothing, so there is no version to keep
+in step and a project that needs nothing is told `nothing to migrate`. It runs
+from the new version, which is why the bump comes first. This release has one
+migration, from `tasks/` to `.rituals/`.
+
+For each task under `tasks/` that the CLI crate's `[package.metadata.ritual]
+tasks` list imports, it:
+
+- moves the directory to the same place under `.rituals/`, ignored files
+  included, once git would see every file there as it does now (see below);
+- changes the workspace's `members`, `default-members` and `exclude`, keeping a
+  glob a glob (`tasks/*` becomes `.rituals/*`) and keeping an explicit list
+  explicit, each entry changed where it stands;
+- changes the `path` of every dependency on a moved task in every manifest
+  Cargo reads, crates outside the workspace included, not only the CLI crate's,
+  since tasks can depend on each other and a crate Cargo reaches through an
+  optional dependency can depend on a task: `[dependencies]` and the other
+  dependency tables, `[workspace.dependencies]`, `[patch]`, `[replace]`, and
+  the other places Cargo reads a path. A path that still leads where it led,
+  such as a task's `../greet` to a task that moved beside it, is left as you
+  wrote it;
+- leaves `tasks/` in place when something that is not one of those tasks is
+  still in it, and says what is left.
+
+A task in `tasks/` that only another task depends on stays where it is, and the
+paths that reach it are repointed. The children of a bundle stay too, when your
+command line imports the bundle and not them.
+
+It edits manifests in place, so your comments and formatting stay. It then
+checks that Cargo still reads the project, and prints what it did, then every
+other file in the repository that still mentions `tasks/`, such as a CI
+workflow or a script, which it does not edit:
+
+```text
+moved tasks/greet to .rituals/greet
+moved tasks/shout to .rituals/shout
+updated Cargo.toml ([workspace] members `tasks/greet` is now `.rituals/greet`)
+updated Cargo.toml ([workspace] members `tasks/shout` is now `.rituals/shout`)
+updated ritual/Cargo.toml ([dependencies] greet path `../tasks/greet` is now `../.rituals/greet`)
+updated ritual/Cargo.toml ([dependencies] shout path `../tasks/shout` is now `../.rituals/shout`)
+deleted tasks/ (empty once its tasks moved out)
+.github/workflows/ci.yml still mentions tasks/
+next: review the changes with git status and git diff, then commit them
+```
+
+Nothing is committed for you.
+
+It only runs where git can give everything back, and refuses before it writes
+anything when:
+
+- the project is not in a git repository, or the work tree has changes that
+  are not committed or files that are not tracked (files git ignores do not
+  count here, and move with their task). A project with nothing to migrate is
+  told so whatever its work tree holds;
+- git would see a file under a task differently at its new place. Git decides
+  by path whether to ignore a file, which attributes to give it and whether
+  the sparse checkout includes it, so a commit after the move could leave out
+  a file that is committed now (a rule such as `.*` ignores `.rituals/`),
+  add a file that is ignored now (a rule that names `tasks/greet/.env`), or
+  store a file through another filter (a `.gitattributes` rule for Git LFS
+  that names `tasks/`). The same goes for a file that would be outside a
+  sparse checkout, and for a tracked file git has been told not to look at
+  (`assume-unchanged` or `skip-worktree`), whose edits a commit would carry
+  without `git status` showing them. The check is for the rules your project
+  carries, its `.gitignore` and `.gitattributes` files; configuration outside
+  the repository is yours to keep in step. An ignore file inside a task moves
+  with it and counts at its new place. The refusal names the file and the
+  rule, and what to change;
+- a task's directory holds other workspace members, or a git submodule, or
+  its destination in `.rituals/` is taken, or `.rituals` is a file;
+- a path in a manifest reaches a task through a symbolic link or another
+  spelling of its directory, so there is no telling how to repoint it;
+- a manifest that needs one of those edits is one git does not track, such as
+  a crate outside the workspace in a directory git ignores, since git could not
+  give its old text back. Commit it, or take the path out of it.
+
+If anything fails while it is moving and editing, the project is put back as
+it was, ignored files included, and the failure says so. If a move cannot be
+undone, the message names the directory and, when it is safe, the `mv` command
+that puts it back, which works from anywhere. It offers none when something
+else now stands where the directory belongs, because `mv` would put one inside
+the other. The run's last steps come after that, and cannot
+undo it: deleting the empty directories and searching for files that mention
+`tasks/`. If one of them fails, `migrate` says what failed and that every task
+has already moved and Cargo reads the project as it should.
+
 ### Inside a project, use `cargo ritual`
 
 `cargo ritual` works from any directory inside the project. The global
-`ritual` carries `add`, `regenerate`, `import` and `remove` too, but they
-refuse in your project: use `cargo ritual add`.
+`ritual` carries `add`, `regenerate`, `import`, `remove` and `migrate` too, but
+they refuse in your project: use `cargo ritual add`.
 
 ## Where next
 

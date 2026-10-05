@@ -26,8 +26,9 @@ use serde::Deserialize;
 /// what it prints. Its fields are not public: a caller asks it questions
 /// through its methods — [`Metadata::locate_project`],
 /// [`Metadata::resolve_task_list`], [`Metadata::task_imports`],
-/// [`Metadata::dependents_outside_the_graph`] and
-/// [`Metadata::has_workspace_member`] — so the subset of Cargo's schema it
+/// [`Metadata::dependents_outside_the_graph`],
+/// [`Metadata::has_workspace_member`], [`Metadata::workspace_members`] and
+/// [`Metadata::manifests_cargo_reads`] — so the subset of Cargo's schema it
 /// reads can change without breaking anyone.
 ///
 /// # Examples
@@ -58,15 +59,6 @@ pub struct Metadata {
     pub(crate) workspace_members: Vec<String>,
     pub(crate) packages: Vec<Package>,
     pub(crate) resolve: Resolve,
-}
-
-/// What `cargo metadata --no-deps` prints: every package of a workspace as
-/// its manifest declares it, with nothing resolved.
-#[derive(Debug, Deserialize)]
-pub(crate) struct Declared {
-    /// The schema version, checked to be `1` like [`Metadata`]'s.
-    pub(crate) version: u64,
-    pub(crate) packages: Vec<Package>,
 }
 
 /// One package in the resolved graph — a workspace member or a dependency,

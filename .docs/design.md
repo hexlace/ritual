@@ -171,10 +171,10 @@ could have. Nothing is special-cased for the global one.
 ## Management tasks are a bundle
 
 Every command line carries ritual's own management tasks, `add`,
-`regenerate`, `new`, `create`, `import` and `remove`, as one bundle: the
-crate `rituals-core`, imported under the key `ritual` with an ordinary
-dependency line and an ordinary `tasks` entry. Inside a project there is
-therefore no globally installed tool to keep in sync with the project.
+`regenerate`, `new`, `create`, `import`, `remove` and `migrate`, as one
+bundle: the crate `rituals-core`, imported under the key `ritual` with an
+ordinary dependency line and an ordinary `tasks` entry. Inside a project there
+is therefore no globally installed tool to keep in sync with the project.
 
 They are an ordinary imported bundle rather than names built into the
 dispatcher. Built-in names would be reserved in every command line, which
@@ -307,15 +307,17 @@ then handed a `CommandLine` at invocation, carrying the identity and the
 commands the top level got from a flattened bundle. The change is two edits:
 the constructor's name, and one prepended parameter.
 
-`add`, `import`, `regenerate` and `remove` use exactly this. They need it
-to find their own project among the workspace's members, and `add`,
+`add`, `import`, `regenerate`, `remove` and `migrate` use exactly this. They
+need it to find their own project among the workspace's members, and `add`,
 `import` and `regenerate` also need it to check a name against the running
-top level before writing.
+top level before writing; `remove` and `migrate` need it to spell the command
+a refusal tells a person to run again.
 
 ## Each task owns its precondition
 
 The whole bundle mounts everywhere. A project's command line carries `new`,
-and the global binary carries `add`, `import`, `regenerate` and `remove`.
+and the global binary carries `add`, `import`, `regenerate`, `remove` and
+`migrate`.
 The alternative was a conditional import, where a task is present or absent
 depending on where the command line stands. That would be the first exception
 to the tree being the same shape everywhere. So each task guards itself
@@ -333,11 +335,11 @@ instead:
   `Cargo.toml`, and a walk gets that case wrong. An excluded directory with
   no manifest of its own is still inside the workspace to Cargo, so `create`
   and `new` refuse there.
-- **`add`, `import`, `regenerate` and `remove` refuse outside their own
+- **`add`, `import`, `regenerate`, `remove` and `migrate` refuse outside their own
   project.** They look for the package their own command line was built from,
   by name. In any other workspace they refuse and name the command to run in
   the person's own project. So the global binary's `add`, `import`,
-  `regenerate` and `remove` work only inside the ritual repository, and a
+  `regenerate`, `remove` and `migrate` work only inside the ritual repository, and a
   project uses its own `cargo ritual add`.
   Identity by package name is all this checks. A project's built binary run
   by hand inside a different project whose CLI crate has the same package
@@ -380,13 +382,33 @@ an unreleased revision. Naming both is an argument error.
 
 ## What `add` writes
 
-`add <name>` scaffolds a task crate in `tasks/<name>`, appends it to the
+`add <name>` scaffolds a task crate in `.rituals/<name>`, appends it to the
 workspace's `members`, adds a path dependency and a `tasks` entry to the
 CLI crate's manifest, and then runs the same path `regenerate` runs. `add`
 keeps no task list of its own, so the two cannot drift apart. The new crate
 inherits `rituals.workspace = true`, so its dependency on `rituals` does not
 change when the crate moves. `add` therefore needs `rituals` in the
 workspace's `[workspace.dependencies]`, and refuses without it.
+
+**Why `.rituals/`.** A project's own tasks are tooling, not the project, so
+they sit with `.docs/` and `.github/` rather than among the project's real
+directories, where `tasks/` would sort into the middle of them. Where a task
+goes is decided in one place, `rituals_compose::layout`, which a scaffolder
+asks and does not answer for itself, so the member entry, the dependency path
+and the report all agree.
+
+**Why the member is explicit.** The entry written is `".rituals/<name>"`, one
+per task, and `new` writes no `.rituals/*` glob. Cargo reads a glob that
+matches nothing as a literal path and stops loading the workspace, so a glob
+written before the first task exists would break every new project, and
+`remove` would then refuse to take a project's last task out from under it.
+An explicit entry leaves `remove` nothing to special-case. A person's own
+glob is still theirs, and `remove` still refuses to delete it.
+
+A project laid out by 0.1, its tasks in `tasks/`, keeps working. A task is a
+workspace member and a path dependency, so nothing but `add` ever needed it
+to be in a particular directory: a task in `tasks/` builds, runs,
+regenerates and is removed exactly as one in `.rituals/` is.
 
 A scaffolded crate's manifest carries no `[lints]` table. An unknown
 project's lint table could fail a freshly scaffolded handler before its
@@ -476,7 +498,7 @@ and removes the `[workspace.dependencies]` entry the dependency inherited
 when no other package uses it. For a crate that is a member
 of the workspace it also removes the `members` entry, and the same directory
 from `default-members`. An entry names the directory when Cargo would read
-it as that directory, so `tasks/./lint` and the absolute path are taken out
+it as that directory, so `.rituals/./lint` and the absolute path are taken out
 too. A glob in `members` is left alone, because deleting the directory is
 enough, unless it would match nothing once the directory goes, which
 refuses. Which crate is a workspace member comes from `cargo metadata`, and
@@ -491,7 +513,7 @@ brings the lock up to date. The directory is deleted after that, outside the
 rollback and as the last step, because git is the way back for a deletion,
 not a rename aside. A deletion that fails partway says that the manifests are
 already updated and that git can give back what was deleted, with a `git
-checkout` that names the directory from git's top level (`:/tasks/lint`), so
+checkout` that names the directory from git's top level (`:/.rituals/lint`), so
 it works from any directory of the project.
 
 **Why it refuses first.** Before anything is written `remove` refuses:
@@ -521,9 +543,12 @@ metadata` runs before the deletion and cannot see what the deletion
 breaks. Dependents come from what each package declares, not from the
 resolved graph, which holds only the edges the active features reach; and
 a path crate `cargo metadata` did not load at all, such as one behind an
-optional dependency nothing turns on, is asked about with `cargo metadata
---no-deps`, because Cargo still reads its manifest when it resolves the
-lockfile.
+optional dependency nothing turns on, is asked about by reading its manifest,
+because Cargo still reads it when it resolves the lockfile, and a `[patch]`
+or `[replace]` in such a crate, which Cargo ignores, does not make it a
+dependent. That is the walk `migrate` makes to find every manifest to
+repoint, not `cargo metadata --no-deps`, which refuses a crate that sits
+under the workspace's root without being a member.
 
 Cargo's configuration is read the way Cargo reads it: the `.cargo/config`
 file, or `.cargo/config.toml` when there is none, in every directory a
@@ -538,10 +563,10 @@ configuration files a build could still read are outside it, and are listed
 under what `remove` cannot see.
 
 A path points into the directory when the filesystem says it does, not when
-its text matches. Cargo opens paths through the filesystem, so `Tasks/Lint`
-on a file system that folds case, `alias/lint` when `alias` links to `tasks`,
-and an absolute path through a link above the project all name `tasks/lint`
-to it. So each path is followed a component at a time, through symbolic
+its text matches. Cargo opens paths through the filesystem, so `.Rituals/Lint`
+on a file system that folds case, `alias/lint` when `alias` links to
+`.rituals`, and an absolute path through a link above the project all name
+`.rituals/lint` to it. So each path is followed a component at a time, through symbolic
 links, and compared with the directory by file identity. When the directory
 is itself a link, a path through the link points into it and a path to its
 target does not, because deleting the link leaves the target. Cargo removes
@@ -598,6 +623,211 @@ compiles: put the dependency back, drop the entry, regenerate, then remove
 the dependency. `remove` cannot run there, because it runs as that command
 line, so the header stays as it is.
 
+## What `migrate` does
+
+Some releases change what a project should look like, and the change is
+mechanical, so a person should not carry it out by hand from release notes.
+`migrate` brings a project up to the layout of the ritual it runs.
+
+**A step knows whether it applies.** A migration is a step: a value that looks
+at the project and says whether it is already as the step would leave it.
+`migrate` asks every step in release order and runs each one that applies, each
+reading the project the step before it left. It stores nothing between runs.
+There is no recorded "migrated to" version to go stale or be edited out of
+step with the project, and a second run finds every step already satisfied and
+says `nothing to migrate`. The steps are a closed set that lives in one crate,
+so they are an enum matched on, not a trait. A later release's change to the
+layout is a new step that goes last. A step owns both ends of its move as
+literals: the first moves `tasks/` to `.rituals/` for good, and does not read
+the destination from `layout`, which says where scaffolding puts a task today.
+
+**The first step: `tasks/` to `.rituals/`.** It applies when a workspace member
+under `tasks/` declares itself a task, by the one rule the task list is
+resolved with, and the project's own command line imports it, in its
+`[package.metadata.ritual] tasks` list. "Member" is what `cargo metadata` says,
+since Cargo's membership is glob expansion, `exclude` and path dependencies
+that become members on their own, and a second reading of that could only
+disagree with Cargo. A project with no member under `tasks/` that declares
+itself a task has nothing to migrate, and its list is not read. When there is
+one, the list is read, and a list that cannot be read is a failure, not
+`nothing to migrate`; a list that imports none of them is nothing to migrate.
+Each task the command line imports moves to
+the same place under `.rituals/`, so `tasks/greet` becomes `.rituals/greet`.
+Anything else in `tasks/` stays where it is, with the directory that holds it:
+a crate that is not a task, a task that only another task depends on, and the
+children of a bundle the command line imports whole. The path from a task that
+moved to one that stayed is repointed.
+
+**It only runs where git can give everything back.** A work tree with changes
+that are not committed, files that are untracked, or no repository at all is
+refused, before anything is written. Ignored files do not count against the
+clean tree, because a rename carries them with their directory; whether git
+would still ignore them once they have moved is a separate question, below.
+The question is asked before the first `cargo metadata`, which can rewrite
+`Cargo.lock` and would make a clean tree dirty, and acted on only once a step
+applies. A project with nothing to migrate is therefore told so whatever git
+says, including right after a migration that has not been committed yet. The
+check reuses `remove`'s code, in `rituals_compose::git`, and asks only the
+question `migrate` needs: unlike `remove`, it deletes nothing, so what it must
+have is that git sees the files the same way after the rename, not that git
+can give back every byte, and `remove`'s checks for filters and for ignored
+files do not apply.
+
+**It refuses a move that changes what git sees.** Git decides some things by a
+file's path alone, and a rename changes the path: whether it is ignored, which
+attributes it has, and whether the sparse checkout includes it. A rule keyed on
+`tasks/` stops applying after the move and one that matches under `.rituals/`
+starts. The tree is clean now, and the commit after the move would then leave
+out a file that is committed (a `.*` rule ignores the new directory, and a
+tracked file whose new path is ignored is deleted and not added, whatever rule
+matched the old path), add a file that is ignored now (a secret named in a rule
+for the old place), or store a file through another filter (a `.gitattributes`
+rule for Git LFS keyed on `tasks/`), and `git status` shows each as an
+ordinary change. So, while planning and before any write, `migrate` lists
+every file under every task, tracked, untracked and ignored, and compares
+what git says at the old path with what it would say at the new one:
+
+1. Ignore status, by `git check-ignore -v -n --no-index`, which reports the
+   rule that decided. A tracked file counts as seen at its old path whatever
+   the rules say, because tracking is not undone by a rule; an untracked file
+   is seen when no rule ignores it.
+2. Attributes, by `git check-attr -a`, compared as whole sets so that a
+   filter, an end-of-line setting and a macro such as `binary` are all
+   covered. Only a file git sees at both places is compared; one it ignores
+   is not stored, so its attributes decide nothing.
+3. The sparse checkout, by `git sparse-checkout check-rules`, asked only when
+   `core.sparseCheckout` is on, since otherwise it fails or prints nothing.
+4. The index flags assume-unchanged and skip-worktree, which are not decided
+   by path: a commit after the move can carry an edit `git status` never
+   showed. A skip-worktree file that is not on disk is not moved by a rename,
+   so it is left out.
+
+The new places do not exist yet, and the files that decide them move too: a
+`.gitignore` or `.gitattributes` inside a task goes with it, so asked in the
+real tree before the move, git cannot see it at the new place and the check
+would refuse a move that is safe. So the new places are asked about in a work
+tree of copies in the system's temporary directory, named for the process and
+removed when the check returns, that holds the project's ignore and attribute
+files where they will be: every one in the directories above each new place,
+and every one under a task at its new place. Git is given the repository's own
+git directory beside it, so the repository's configuration and the index are
+read exactly as for the real tree. Only regular files are copied, because git
+does not follow a link for these files. Nothing is written to the project or
+the repository. The check is for the rules the project carries. Configuration
+outside the repository, such as a global excludes file or `.git/info/exclude`,
+is the person's own and out of scope, because a project has to work from a
+fresh clone: git still reads it when asked, and the check neither sets it aside
+nor promises anything about it. The alternatives were asking the real tree
+before the move, which gets that wrong, and reproducing git's precedence by
+hand, which is a second reading of git's rules that could only disagree with
+the first.
+
+The check is only worth trusting if the copies answer as the real tree will, so
+a test asks for it: over every repository the unit tests judge, it takes the
+prediction, really renames the directory, asks git itself about the new paths,
+and requires the two to agree, including which files a `git add --all` after
+the rename stages.
+
+The first kind found is reported, with every file it holds for, since each kind
+has its own remedy. The refusal opens `refusing to migrate` rather than naming
+a task, because one rule can catch every task, names the first ten files and
+counts the rest, and names the rule and the file it is in, at the line, so the
+person can open it. A rule that sits in a file that moves with a task is named
+where the file is now.
+
+**The order of writes, and the failure story.** `migrate` makes the promise
+`remove` makes: it leaves a project Cargo reads as it should in the new layout,
+or leaves it as it found it, or says exactly how to put it back.
+
+1. Refusals first, from reading only: a task directory that holds other
+   workspace members, a destination that is taken (`.rituals` being a file
+   counts), a git submodule at or inside a task directory, a file that git
+   would see differently at its new place, and a manifest that reaches a task
+   in a way that cannot be repointed, or that needs an edit while git does not
+   track it.
+2. Every manifest with edits is written in place.
+3. Each task directory is renamed.
+4. `cargo metadata` runs again, and the project must still resolve its task
+   list and read the same workspace members, each where it now is.
+
+All of it is one rollback. The renames are recorded in it and undone by
+renaming back, directories first and then each manifest's bytes at its
+original path, so a task's own manifest, edited where it stood and then
+carried by its rename, comes back right. A move is recorded rather than
+recovered through git because the final check can only run after the moves,
+so with git as the way back every failure after a move would need a recovery
+command, and git cannot give back the ignored files a directory holds, such
+as a stray `target/`. A rename carries them both ways, so they end up where
+they started on every path. If a rename cannot be undone, the message names
+both paths and the `mv` that puts the directory back, with absolute paths so
+it works from any directory. It names no command when both places hold
+something again, because that `mv` would move one inside the other.
+
+**What is repointed.** A task can depend on another, and any member can depend
+on a task, so the command line crate's manifest is not the only one that names
+a moved directory, and a member's is not the last: a crate outside the
+workspace can too. Every manifest Cargo reads, the
+workspace's own, every package at a path on disk and every crate those reach
+through a path dependency of any kind, however far and wherever it sits, has
+every place Cargo reads a path repointed. Cargo reads more than `cargo
+metadata` lists: a crate excluded from the workspace and reached only through
+an optional dependency no feature turns on is read when it resolves the
+lockfile, and so is a crate that crate reaches. `cargo metadata --no-deps`
+cannot be asked about every one of them, since it refuses a crate that sits
+under the workspace's root without being a member, so the walk reads the
+TOML itself, following each manifest's path dependencies with a set of the
+manifests already read, which bounds it to the files on disk. It follows
+`[workspace.dependencies]`, `[patch]` and `[replace]` from the workspace's
+root manifest alone, because Cargo ignores them in any other, so a crate
+only a member's `[patch]` reaches is not read, repointed or refused. A path
+dependency whose directory has no `Cargo.toml` is skipped, because Cargo did
+not need it to read the project, and a manifest that exists but does not parse
+is refused, naming it. A manifest that needs an edit and is not tracked by git
+is refused, because git could not give it back. The places repointed are:
+dependency paths in every table and target, `[workspace.dependencies]`,
+`[patch]` and `[replace]`, a package's `build`,
+`readme`, `license-file` and `workspace`, every target's `path`, and the lists
+in `[workspace]`. Moving `tasks/` to `.rituals/` keeps every depth, so only a
+path that crosses into or out of a moved directory changes. One that still
+leads where it led is kept as the person wrote it, which is why `shout`'s
+`path = "../greet"` is not touched when both move together. A path that reaches
+a moved directory through a symbolic link or another spelling of it is refused
+before anything is written, because writing it differently would be a guess.
+
+**Members.** An explicit `members` entry that names a moved task is rewritten
+in place, in canonical form, so `tasks/./x` becomes `.rituals/x`. A glob over
+`tasks/` stays a glob: `tasks/*` becomes `.rituals/*` when nothing else it
+matches stays, and when a crate that is not a task does, the glob is kept and
+the new one is added beside it. Only directories count, because Cargo skips a
+matched file. A glob that does not lead with `tasks/` is the person's own and
+is left alone, and the final check judges it. Cargo's member globs match the
+hidden directory like any other, so a glob stays a glob and nothing is listed
+explicitly. `default-members` follows the same rules. An `exclude` entry at or
+under a moved directory follows it, and an `exclude` glob is left as it is,
+because Cargo reads `exclude` as paths.
+
+**What it says.** Every move and every changed value, then what was cleaned up
+and what is left, then every other file in the repository that mentions
+`tasks/`, and last a `next:` line. Files are listed, never edited, whether or
+not `migrate` edited them, because whether a path in a workflow means the task
+directory is for the person to judge. The files git ignores are left out, and
+the files it does not track yet are in, since a commit would carry them.
+
+After the changes are kept, outside the rollback, `migrate` deletes the
+directories the moves emptied, `tasks/` included once nothing else is in it,
+and lists the files that mention `tasks/`. An empty directory is cosmetic and
+harmless if left, and a search that fails is only information, so neither
+undoes a migration that worked. A failure in either is a line that leads with
+what failed, and the run still succeeds.
+
+**What it does not reach.** Cargo's own configuration files are not edited. A
+`paths` override in `.cargo/config.toml` that points into a moved directory
+makes the final `cargo metadata` fail, so the run is rolled back with Cargo's
+words. The final check starts from the workspace root, so configuration that
+only a build started from a member's own directory reads is not seen by it, and
+such a project would still resolve from the root and then fail when built from
+that directory.
+
 ## Refusals
 
 Every task checks what it can before it writes anything. A refusal names what
@@ -605,8 +835,9 @@ it found and what to do instead. A run that fails partway through writing
 puts back what it wrote, and says whether it managed to.
 
 What ritual prints is the documentation people read most, so a next step or
-a remedy is written as a command a person can copy. `new`, `add`, `create`
-and `import` each end with a `next:` line. A remedy that names one of
+a remedy is written as a command a person can copy. `new`, `add`, `create`,
+`import` and `migrate` each end with a `next:` line (`migrate` only when it
+changed something). A remedy that names one of
 ritual's own commands spells it for the running command line: `cargo ritual
 regenerate` in a default project, `cargo acme ritual regenerate` under
 `--cli acme`. The running binary cannot see which key a project mounted

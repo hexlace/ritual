@@ -5,12 +5,17 @@
 //! about a project in one call: where the workspace is, which package is
 //! its composed CLI, what that package's dependencies resolve to, what each
 //! of those declares about itself, and what extern-crate name rustc gives
-//! each one. Ritual never reads a dependency's manifest itself: a manifest
-//! the graph did not load, such as a path crate behind an optional
-//! dependency no feature turns on, is read by `cargo metadata --no-deps`
-//! too.
+//! each one. A manifest the graph did not load, such as a path crate behind
+//! an optional dependency no feature turns on, is read by `cargo metadata
+//! --no-deps` too, except where every crate Cargo reads is wanted and not
+//! only the ones it lists: [`Metadata::manifests_cargo_reads`] follows path
+//! dependencies through the TOML itself, since `--no-deps` refuses a crate
+//! that sits under the workspace's root without being a member.
 
+pub(crate) mod manifest_walk;
+mod manifests_cargo_reads;
 mod schema;
+mod workspace_member;
 
 use std::path::Path;
 
@@ -22,7 +27,8 @@ use crate::rollback::Changes;
 use crate::workspace::{self, Located, locate_project};
 
 pub use schema::Metadata;
-pub(crate) use schema::{Declared, DepKind, Dependency, Node, NodeDependency, Package};
+pub(crate) use schema::{DepKind, Dependency, Node, NodeDependency, Package};
+pub use workspace_member::WorkspaceMember;
 
 /// A composed CLI crate, found among a workspace's members. Declared in the
 /// private `crate::project` module and re-exported here, at the path a
@@ -231,64 +237,6 @@ pub fn fetch_in_its_own_project(
     let document = fetch_recording(changes, current_dir)?;
     document.ensure_runs_in_its_own_project(package_name, command, arguments)?;
     Ok(document)
-}
-
-/// Asks Cargo what the package whose manifest is `manifest_path` declares,
-/// without resolving anything, as `cargo metadata --no-deps` reports it.
-///
-/// For a package the resolved graph did not load: one reached only through
-/// an optional dependency no feature turns on is still read by Cargo when
-/// it resolves the lockfile, but is not in [`Metadata`]'s packages.
-/// `--no-deps` writes no lockfile.
-///
-/// # Errors
-///
-/// Returns a [`Failure`] with `cargo metadata`'s own stderr when it could
-/// not be run or failed, one naming a parse or version problem, and one
-/// naming `manifest_path` when Cargo reported no package with that manifest.
-pub(crate) fn fetch_declared(manifest_path: &Path) -> Result<Package, Failure> {
-    let output = cargo::command()
-        .args([
-            "metadata",
-            "--format-version",
-            "1",
-            "--no-deps",
-            "--manifest-path",
-        ])
-        .arg(manifest_path)
-        .output()
-        .map_err(|error| Failure::new("running `cargo metadata` failed").caused_by(error))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Failure::new(format!(
-            "cargo metadata failed for {}: {}",
-            manifest_path.display(),
-            stderr.trim_end()
-        )));
-    }
-
-    let declared: Declared = serde_json::from_slice(&output.stdout)
-        .map_err(|error| Failure::new("parsing cargo metadata output failed").caused_by(error))?;
-    if declared.version != SUPPORTED_FORMAT_VERSION {
-        return Err(Failure::new(format!(
-            "cargo metadata returned format version {}, but this framework understands only \
-             version {SUPPORTED_FORMAT_VERSION}",
-            declared.version
-        )));
-    }
-
-    let wanted = crate::paths::normalize(manifest_path);
-    declared
-        .packages
-        .into_iter()
-        .find(|package| crate::paths::normalize(&package.manifest_path) == wanted)
-        .ok_or_else(|| {
-            Failure::new(format!(
-                "cargo metadata reported no package for {}",
-                manifest_path.display()
-            ))
-        })
 }
 
 /// Parses `cargo metadata --format-version 1`'s JSON output.
@@ -510,7 +458,9 @@ impl Metadata {
     }
 
     /// Names every package this document did not load that declares a path
-    /// dependency under `directory`, of any kind, target or optional status.
+    /// dependency under `directory` that Cargo reads, of any kind, target or
+    /// optional status. A `[patch]` or `[replace]` in a manifest other than
+    /// the workspace's root is not one: Cargo ignores it.
     ///
     /// Completes [`TaskImport::other_dependents`], which reads only the
     /// packages this document holds. Cargo reads the manifest of every
@@ -518,16 +468,18 @@ impl Metadata {
     /// features, but `cargo metadata` lists only the packages the active
     /// features reach: a crate outside the workspace behind an optional
     /// dependency no feature turns on is read, and is not here. So each such
-    /// crate is asked about with `cargo metadata --no-deps`, and so are the
-    /// path crates it declares in turn, until there are none left that
-    /// nothing has asked about. Packages under `directory` are not asked
-    /// about: they go with it.
+    /// crate's own manifest is read, and so are those of the path crates it
+    /// declares in turn, the walk [`Metadata::manifests_cargo_reads`] makes,
+    /// until there are none left that nothing has asked about. A path crate
+    /// whose directory holds no manifest is left out. Packages under
+    /// `directory` are not asked about: they go with it.
     ///
     /// # Errors
     ///
-    /// Returns a [`Failure`] when `cargo metadata` cannot say what one of
-    /// those crates declares, so a caller deleting `directory` cannot tell
-    /// whether something would still read it.
+    /// Returns a [`Failure`] naming the manifest when one of those crates'
+    /// manifests exists but cannot be read or does not parse as TOML, so a caller
+    /// deleting `directory` cannot tell whether something would still read
+    /// it.
     ///
     /// # Examples
     ///
@@ -539,7 +491,7 @@ impl Metadata {
     /// // Runs `cargo metadata` against a workspace on disk, so this example
     /// // is `no_run`.
     /// let document = metadata::fetch(Path::new("."))?;
-    /// let dependents = document.dependents_outside_the_graph(Path::new("tasks/lint"))?;
+    /// let dependents = document.dependents_outside_the_graph(Path::new(".rituals/lint"))?;
     /// if !dependents.is_empty() {
     ///     println!("still read by {}", dependents.join(", "));
     /// }
@@ -577,6 +529,38 @@ impl Metadata {
             .iter()
             .filter(|package| self.workspace_members.contains(&package.id))
             .filter_map(|package| package.manifest_path.parent())
+            .collect()
+    }
+
+    /// Returns every member of this workspace, each as a package a task can
+    /// ask about, in the order the document lists its packages.
+    ///
+    /// A dependency pulled in from outside the workspace is not a member,
+    /// however it is reached.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    ///
+    /// use rituals_compose::metadata;
+    ///
+    /// // Reads a document `fetch` already produced from a real
+    /// // `cargo metadata` call, so this example stays `no_run`.
+    /// let document = metadata::fetch(Path::new("."))?;
+    /// for member in document.workspace_members() {
+    ///     if member.declares_a_task_crate() {
+    ///         println!("{} is a task", member.package_name());
+    ///     }
+    /// }
+    /// # Ok::<(), rituals::Failure>(())
+    /// ```
+    #[must_use]
+    pub fn workspace_members(&self) -> Vec<WorkspaceMember<'_>> {
+        self.packages
+            .iter()
+            .filter(|package| self.workspace_members.contains(&package.id))
+            .map(|package| WorkspaceMember { package })
             .collect()
     }
 
@@ -707,8 +691,8 @@ mod tests {
     use rituals::{Failure, Name};
 
     use super::{
-        Metadata, ensure_inside_a_project, fetch_in_its_own_project, outside_its_project_refusal,
-        parse,
+        Metadata, WorkspaceMember, ensure_inside_a_project, fetch_in_its_own_project,
+        outside_its_project_refusal, parse,
     };
     use crate::rollback::attempt;
     use crate::test_support::{ScratchDir, TestOutcome};
@@ -1205,5 +1189,145 @@ mod tests {
             assert!(metadata.has_workspace_member(&valid_name("task-true")));
             assert!(!metadata.has_workspace_member(&valid_name("no-such-package")));
         }
+    }
+
+    /// Every package in the fixture is a member, in the order the document
+    /// lists the packages; one taken out of `workspace_members` stands for a
+    /// dependency outside the workspace.
+    #[test]
+    fn workspace_members_are_the_member_packages_and_no_other() -> TestOutcome {
+        let metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+
+        let members: Vec<(&str, String, String)> = metadata
+            .workspace_members()
+            .iter()
+            .map(|member| {
+                (
+                    member.package_name(),
+                    member.manifest_path().display().to_string(),
+                    member.directory().display().to_string(),
+                )
+            })
+            .collect();
+
+        assert_eq!(
+            members,
+            [
+                "demo-ritual:cli",
+                "task-dev-only:task-dev-only",
+                "task-keyword:task-keyword",
+                "task-malformed:task-malformed",
+                "task-null:task-null",
+                "task-renamed-source:task-renamed-source",
+                "task-true:task-true",
+            ]
+            .map(|pair| {
+                let (name, directory) = pair.split_once(':').unwrap_or((pair, pair));
+                (
+                    name,
+                    format!("/scrubbed/checkout/{directory}/Cargo.toml"),
+                    format!("/scrubbed/checkout/{directory}"),
+                )
+            })
+        );
+
+        let task_true_outside = DEMO_WORKSPACE.replacen(
+            "task-null#0.1.0\",\n    \"path+file:///scrubbed/checkout/task-true#0.1.0\",",
+            "task-null#0.1.0\",",
+            1,
+        );
+        assert_ne!(task_true_outside, DEMO_WORKSPACE);
+        let without = parse(task_true_outside.as_bytes())?;
+        assert!(
+            without
+                .workspace_members()
+                .iter()
+                .all(|member| member.package_name() != "task-true"),
+            "a package outside the workspace is not one of its members"
+        );
+        Ok(())
+    }
+
+    /// Only `task = true` makes a crate a task: a missing table, a missing
+    /// key and a key that is not a boolean all say no, by the one rule the
+    /// task list is resolved with.
+    #[test]
+    fn a_member_declares_a_task_crate_only_with_task_true() -> TestOutcome {
+        let metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+
+        let tasks: Vec<&str> = metadata
+            .workspace_members()
+            .iter()
+            .filter(|member| member.declares_a_task_crate())
+            .map(WorkspaceMember::package_name)
+            .collect();
+
+        // `demo-ritual` declares `tasks`, not `task`; `task-malformed` has
+        // `task = "true"`, a string; `task-null` has no metadata at all.
+        assert_eq!(tasks, ["task-keyword", "task-renamed-source", "task-true"]);
+        Ok(())
+    }
+
+    /// Path packages, whether or not members: `rituals` is in the fixture's
+    /// graph but not one of its members.
+    #[test]
+    fn path_package_manifests_include_members_and_path_crates_that_are_not() -> TestOutcome {
+        let metadata = parse(DEMO_WORKSPACE.as_bytes())?;
+        let displayed = |manifests: Vec<&Path>| -> Vec<String> {
+            manifests
+                .iter()
+                .map(|manifest| manifest.display().to_string())
+                .collect()
+        };
+
+        assert_eq!(
+            displayed(metadata.path_package_manifests()),
+            [
+                "cli",
+                "rituals",
+                "task-dev-only",
+                "task-keyword",
+                "task-malformed",
+                "task-null",
+                "task-renamed-source",
+                "task-true",
+            ]
+            .map(|directory| format!("/scrubbed/checkout/{directory}/Cargo.toml"))
+        );
+        Ok(())
+    }
+
+    /// A package from a registry or a git source is not the project's own,
+    /// whatever directory its sources were unpacked into.
+    #[test]
+    fn a_package_with_a_source_is_not_a_path_package() -> TestOutcome {
+        let from_a_registry = DEMO_WORKSPACE.replacen(
+            concat!(
+                "\"id\": \"path+file:///scrubbed/checkout/rituals#0.1.2\",\n",
+                "      \"license\": null,\n",
+                "      \"license_file\": null,\n",
+                "      \"description\": null,\n",
+                "      \"source\": null,",
+            ),
+            concat!(
+                "\"id\": \"path+file:///scrubbed/checkout/rituals#0.1.2\",\n",
+                "      \"license\": null,\n",
+                "      \"license_file\": null,\n",
+                "      \"description\": null,\n",
+                "      \"source\": \"registry+https://github.com/rust-lang/crates.io-index\",",
+            ),
+            1,
+        );
+        assert_ne!(from_a_registry, DEMO_WORKSPACE);
+        let metadata = parse(from_a_registry.as_bytes())?;
+
+        let manifests = metadata.path_package_manifests();
+
+        assert!(
+            !manifests.contains(&Path::new("/scrubbed/checkout/rituals/Cargo.toml")),
+            "a package with a source is not a path package: {manifests:?}"
+        );
+        assert_eq!(manifests.len(), 7);
+        Ok(())
     }
 }
