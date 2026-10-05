@@ -196,8 +196,24 @@ impl Relocation {
         &self.from_directory
     }
 
-    /// The directory every moved directory moves into.
-    pub(crate) fn moved_into(&self) -> &Path {
+    /// The directory every moved directory moves into, normalised.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rituals_compose::relocation::Relocation;
+    ///
+    /// let root = std::env::temp_dir().join("workspace");
+    /// let relocation = Relocation::new(
+    ///     &root.join("tasks"),
+    ///     &root.join("./.rituals"),
+    ///     [root.join("tasks/lint")],
+    /// );
+    ///
+    /// assert_eq!(relocation.moved_into(), root.join(".rituals"));
+    /// ```
+    #[must_use]
+    pub fn moved_into(&self) -> &Path {
         &self.to_directory
     }
 

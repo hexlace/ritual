@@ -129,27 +129,8 @@ pub(super) fn plan(
         directories,
     } = candidates;
     let relocation = Relocation::new(from_directory, to_directory, directories.iter().cloned());
-    let moves: Vec<(PathBuf, PathBuf)> = directories
-        .iter()
-        .map(|directory| {
-            let Some(destination) = relocation.destination(directory) else {
-                unreachable!(
-                    "{} was given to the relocation as a directory that moves",
-                    directory.display()
-                )
-            };
-            (directory.clone(), destination)
-        })
-        .collect();
-
-    let members: Vec<Member> = before
-        .workspace_members()
-        .iter()
-        .map(|member| Member {
-            directory: member.directory().to_path_buf(),
-            package: member.package_name().to_string(),
-        })
-        .collect();
+    let moves = moves_of(&relocation, directories);
+    let members = members_of(before);
     refusals::ensure_none_holds_other_members(
         directories,
         &members,
@@ -171,7 +152,6 @@ pub(super) fn plan(
 
     refusals::ensure_the_moves_keep_what_git_sees(
         &relocation,
-        to_directory,
         migrating.repository,
         migrating.root,
         migrating.migrate_command,
@@ -188,6 +168,34 @@ pub(super) fn plan(
         relocation,
         moves,
     })
+}
+
+/// Each of `directories` with the place `relocation` moves it to.
+fn moves_of(relocation: &Relocation, directories: &[PathBuf]) -> Vec<(PathBuf, PathBuf)> {
+    directories
+        .iter()
+        .map(|directory| {
+            let Some(destination) = relocation.destination(directory) else {
+                unreachable!(
+                    "{} was given to the relocation as a directory that moves",
+                    directory.display()
+                )
+            };
+            (directory.clone(), destination)
+        })
+        .collect()
+}
+
+/// The workspace members, each by its directory and package name.
+fn members_of(before: &Metadata) -> Vec<Member> {
+    before
+        .workspace_members()
+        .iter()
+        .map(|member| Member {
+            directory: member.directory().to_path_buf(),
+            package: member.package_name().to_string(),
+        })
+        .collect()
 }
 
 /// Every manifest Cargo reads, each read once and repointed in memory: the

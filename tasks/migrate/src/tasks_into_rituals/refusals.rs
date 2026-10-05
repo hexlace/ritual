@@ -133,10 +133,10 @@ pub(super) fn ensure_none_holds_a_submodule(
 /// change. The refusal opens `refusing to migrate` rather than naming a
 /// directory, because one rule can catch every task.
 ///
-/// `to_directory` is the directory the tasks move into.
+/// The refusal names the directory the tasks move into, which the relocation
+/// holds.
 pub(super) fn ensure_the_moves_keep_what_git_sees(
     relocation: &Relocation,
-    to_directory: &Path,
     repository: &Repository,
     root: &Path,
     migrate_command: &str,
@@ -144,7 +144,7 @@ pub(super) fn ensure_the_moves_keep_what_git_sees(
     git::ensure_a_move_keeps_what_git_sees(relocation, root).map_err(|seen_differently| {
         seen_differently_refusal(
             &seen_differently,
-            &from_the_root(to_directory, root),
+            &from_the_root(relocation.moved_into(), root),
             repository,
             migrate_command,
         )
@@ -967,15 +967,9 @@ mod tests {
             [root.join("tasks/greet")],
         );
         let check = || {
-            ensure_the_moves_keep_what_git_sees(
-                &relocation,
-                &root.join(".rituals"),
-                repository,
-                root,
-                MIGRATE,
-            )
-            .err()
-            .map(|failure| failure.to_string())
+            ensure_the_moves_keep_what_git_sees(&relocation, repository, root, MIGRATE)
+                .err()
+                .map(|failure| failure.to_string())
         };
 
         assert_eq!(
