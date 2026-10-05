@@ -150,7 +150,7 @@ fn new_with_a_path_takes_both_crates_from_that_checkout() -> TestOutcome {
         let dependencies = new_project(&["--path", checkout.path_argument()?])?;
 
         let rituals = checkout.root().join("crates").join("rituals");
-        let core = checkout.root().join("crates").join("rituals-core");
+        let core = checkout.root().join(".rituals").join("ritual");
         assert_eq!(
             dependencies.workspace_rituals,
             fields(&[("path", path_to_str(&rituals)?)])

@@ -3,7 +3,7 @@ members = [
     "crates/rituals-cli",
     "crates/rituals",
     "crates/rituals-compose",
-    "crates/rituals-core",
+    ".rituals/ritual",
     ".rituals/add",
     ".rituals/create",
     ".rituals/import",
@@ -23,7 +23,7 @@ resolver = "3"
 # version.
 rituals = { path = "crates/rituals", version = "0.1.2" }
 rituals-compose = { path = "crates/rituals-compose", version = "0.1.2" }
-ritual = { package = "rituals-core", path = "crates/rituals-core", version = "0.1.2" }
+ritual = { package = "rituals-core", path = ".rituals/ritual", version = "0.1.2" }
 add = { package = "rituals-core-add", path = ".rituals/add", version = "0.1.2" }
 create = { package = "rituals-core-create", path = ".rituals/create", version = "0.1.2" }
 import = { package = "rituals-core-import", path = ".rituals/import", version = "0.1.2" }

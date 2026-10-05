@@ -234,7 +234,7 @@ mod tests {
     fn an_internal_dependency_without_a_version_is_refused_and_nothing_changes() {
         let text = "[workspace.package]\nversion = \"0.1.0\"\n\n[workspace.dependencies]\n\
                     rituals = { path = \"crates/rituals\", version = \"0.1.0\" }\n\
-                    ritual = { path = \"crates/rituals-core\" }\n";
+                    ritual = { path = \".rituals/ritual\" }\n";
         let mut document = parse(text);
         assert_eq!(
             set_release_version(&mut document, release("0.1.1")),

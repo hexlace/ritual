@@ -42,7 +42,7 @@ fn assert_declares_itself_a_task(
 fn the_management_bundle_and_its_tasks_declare_themselves_tasks() -> TestOutcome {
     in_checkout(|checkout| {
         for (directory, package_name) in [
-            ("crates/rituals-core", "rituals-core"),
+            (".rituals/ritual", "rituals-core"),
             (".rituals/add", "rituals-core-add"),
             (".rituals/regenerate", "rituals-core-regenerate"),
             (".rituals/new", "rituals-core-new"),

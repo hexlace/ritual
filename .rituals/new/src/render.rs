@@ -57,7 +57,7 @@ const FRAMEWORK: ImportedCrate = ImportedCrate {
 pub(crate) const MANAGEMENT_BUNDLE: ImportedCrate = ImportedCrate {
     key: MANAGEMENT_BUNDLE_KEY,
     package: Some("rituals-core"),
-    directory: "crates/rituals-core",
+    directory: ".rituals/ritual",
 };
 
 /// Renders `<name>/Cargo.toml` — the project's workspace manifest, with an
@@ -370,7 +370,7 @@ mod tests {
              \n\
              [dependencies]\n\
              rituals.workspace = true\n\
-             ritual = { package = \"rituals-core\", path = \"/checkout/crates/rituals-core\" }\n\
+             ritual = { package = \"rituals-core\", path = \"/checkout/.rituals/ritual\" }\n\
              \n\
              [package.metadata.ritual]\n\
              tasks = [\"ritual\"]\n"
@@ -427,7 +427,7 @@ mod tests {
                         table.get("package").and_then(toml_edit::Value::as_str),
                         Some("rituals-core")
                     );
-                    let expected = checkout_root.join("crates/rituals-core");
+                    let expected = checkout_root.join(".rituals/ritual");
                     assert_eq!(
                         table.get("path").and_then(toml_edit::Value::as_str),
                         Some(expected.display().to_string().as_str())
