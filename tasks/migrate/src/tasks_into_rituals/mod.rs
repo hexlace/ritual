@@ -6,7 +6,7 @@ mod refusals;
 use std::path::{Path, PathBuf};
 
 use rituals::Failure;
-use rituals_compose::metadata::{self, Metadata};
+use rituals_compose::metadata::{self, Metadata, TaskImport, WorkspaceMember};
 use rituals_compose::rollback::Changes;
 
 use crate::step::{Applied, Migrating};
@@ -34,29 +34,62 @@ pub(crate) struct Candidates {
     directories: Vec<PathBuf>,
 }
 
-/// The task members under `tasks/`, when there are any.
+/// The tasks under `tasks/` that `package`'s command line imports, when there
+/// are any.
 ///
 /// A task is a workspace member that declares itself one, by the one rule the
-/// task list is resolved with. Cargo reports each member's directory
-/// absolute and without `.` or `..`, as it does the root, so they are
-/// compared as the text they are.
-pub(crate) fn find(document: &Metadata, root: &Path) -> Option<Candidates> {
+/// task list is resolved with, and the command line imports it when its
+/// `[package.metadata.ritual] tasks` list names it. A task under `tasks/`
+/// that only another task depends on is neither moved nor listed: it stays
+/// where it is, and what reaches it is repointed. A project with no task
+/// under `tasks/` has nothing to migrate whatever its list holds, so the list
+/// is read only once there is one.
+///
+/// Cargo reports each member's directory absolute and without `.` or `..`, as
+/// it does the root and the directory an import's `path` points at once
+/// `task_imports` has checked it against the package, so they are compared as
+/// the text they are.
+///
+/// # Errors
+///
+/// Returns a [`Failure`] when `package` cannot be located or its list cannot
+/// be read, which only matters once a task under `tasks/` exists.
+pub(crate) fn find(
+    document: &Metadata,
+    root: &Path,
+    package: &str,
+) -> Result<Option<Candidates>, Failure> {
     let from_directory = root.join(FROM);
-    let mut directories: Vec<PathBuf> = document
+    let under_tasks: Vec<&Path> = document
         .workspace_members()
         .iter()
         .filter(|member| member.declares_a_task_crate())
-        .map(|member| member.directory().to_path_buf())
+        .map(WorkspaceMember::directory)
         .filter(|directory| *directory != from_directory && directory.starts_with(&from_directory))
+        .collect();
+    if under_tasks.is_empty() {
+        return Ok(None);
+    }
+
+    let imported: Vec<&Path> = document
+        .task_imports(package)?
+        .iter()
+        .filter(|import| import.is_workspace_member())
+        .filter_map(TaskImport::directory)
+        .collect();
+    let mut directories: Vec<PathBuf> = under_tasks
+        .into_iter()
+        .filter(|directory| imported.contains(directory))
+        .map(Path::to_path_buf)
         .collect();
     directories.sort_unstable();
     directories.dedup();
 
-    (!directories.is_empty()).then(|| Candidates {
+    Ok((!directories.is_empty()).then(|| Candidates {
         from_directory,
         to_directory: root.join(TO),
         directories,
-    })
+    }))
 }
 
 /// Moves every candidate and repoints everything that reached it, inside
@@ -153,7 +186,7 @@ mod tests {
 
     fn found(root: &Path) -> Result<Option<Vec<PathBuf>>, Box<dyn std::error::Error>> {
         let document = metadata::fetch(root)?;
-        Ok(find(&document, root).map(|candidates| candidates.directories))
+        Ok(find(&document, root, "ritual")?.map(|candidates| candidates.directories))
     }
 
     #[test]
@@ -168,6 +201,47 @@ mod tests {
             directories,
             Some(vec![root.join("tasks/greet"), root.join("tasks/shout")])
         );
+        Ok(())
+    }
+
+    /// `helper` is a task that only `greet` depends on: the command line does
+    /// not list it, so it is not one of the project's own tasks to move. It
+    /// stays in `tasks/`, and the path `greet` reaches it by follows `greet`.
+    #[test]
+    fn a_task_only_another_task_depends_on_is_not_a_candidate() -> TestOutcome {
+        let scratch = ScratchDir::new("step1-dependency-only")?;
+        let root = scratch.path();
+        legacy_project(root)?;
+        write_files(
+            root,
+            &[
+                ("tasks/helper/Cargo.toml", &package("helper", true)),
+                ("tasks/helper/src/lib.rs", "//! A fixture.\n"),
+                (
+                    "tasks/greet/Cargo.toml",
+                    "[package]\nname = \"greet\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n\
+                     [dependencies]\nrituals.workspace = true\n\
+                     helper = { path = \"../helper\" }\n\n\
+                     [package.metadata.ritual]\ntask = true\n",
+                ),
+            ],
+        )?;
+
+        assert_eq!(
+            found(root)?,
+            Some(vec![root.join("tasks/greet"), root.join("tasks/shout")])
+        );
+        let lines = applied(root)??;
+        assert!(
+            lines.contains(
+                &"updated .rituals/greet/Cargo.toml ([dependencies] helper path `../helper` is \
+                  now `../../tasks/helper`)"
+                    .to_string()
+            ),
+            "{lines:?}"
+        );
+        assert!(root.join("tasks/helper/Cargo.toml").is_file());
+        assert!(!root.join(".rituals/helper").exists());
         Ok(())
     }
 
@@ -220,7 +294,7 @@ mod tests {
             .map_err(|failure| failure.to_string())?;
         let migrating = migrating(root, repository);
         let before = metadata::fetch(root)?;
-        let Some(candidates) = find(&before, root) else {
+        let Some(candidates) = find(&before, root, "ritual")? else {
             return Err("fixture precondition: the project must have tasks to move".into());
         };
         let outcome = rollback::attempt("running `migrate` again", |changes| {
@@ -347,9 +421,10 @@ mod tests {
 
     /// A glob that does not lead with `tasks/` is the person's own and is left
     /// alone, so it may stop matching a task once the task has moved. Another
-    /// crate still matches the glob, so Cargo loads the workspace, and nothing
-    /// depends on `orphan`, so it is no longer a member: the check after the
-    /// move names it and the move is undone.
+    /// crate still matches the glob, so Cargo loads the workspace, and the
+    /// workspace excludes the place `orphan` moves to, so the command line's
+    /// dependency on it no longer makes it a member: the check after the move
+    /// names it and the move is undone.
     #[test]
     fn a_member_the_move_leaves_unreachable_is_named_and_the_project_put_back() -> TestOutcome {
         let scratch = ScratchDir::new("step1-lost-member")?;
@@ -361,13 +436,25 @@ mod tests {
                 (
                     "Cargo.toml",
                     "[workspace]\nmembers = [\"ritual\", \"tasks/greet\", \"tasks/shout\", \
-                     \"t*/orphan\"]\nresolver = \"3\"\n\n[workspace.dependencies]\n\
-                     rituals = { path = \"vendor/rituals\" }\n",
+                     \"t*/orphan\"]\nexclude = [\".rituals/orphan\"]\nresolver = \"3\"\n\n\
+                     [workspace.dependencies]\nrituals = { path = \"vendor/rituals\" }\n",
+                ),
+                (
+                    "ritual/Cargo.toml",
+                    "[package]\nname = \"ritual\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n\
+                     [[bin]]\nname = \"ritual\"\npath = \"src/main.rs\"\n\n\
+                     [dependencies]\nrituals.workspace = true\n\
+                     greet = { path = \"../tasks/greet\" }\n\
+                     shout = { path = \"../tasks/shout\" }\n\
+                     orphan = { path = \"../tasks/orphan\" }\n\n\
+                     [package.metadata.ritual]\ntasks = [\"greet\", \"shout\", \"orphan\"]\n",
                 ),
                 (
                     "tasks/orphan/Cargo.toml",
+                    // Not inheriting from the workspace: once excluded, it has no
+                    // workspace root to inherit from.
                     "[package]\nname = \"orphan\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n\
-                     [dependencies]\nrituals.workspace = true\n\n\
+                     [dependencies]\nrituals = { path = \"../../vendor/rituals\" }\n\n\
                      [package.metadata.ritual]\ntask = true\n",
                 ),
                 ("tasks/orphan/src/lib.rs", "//! A fixture.\n"),

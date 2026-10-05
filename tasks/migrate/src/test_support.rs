@@ -15,6 +15,7 @@
 )]
 
 use std::error::Error;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -97,6 +98,10 @@ pub(crate) fn package(name: &str, is_task: bool) -> String {
 /// each a library crate named for its last component, and a task unless it
 /// is in `plain`. `members` entries may be globs: the directories they
 /// match are the ones in `directories`.
+///
+/// The workspace also holds the command line crate `ritual` at `cli/`, which
+/// depends on every directory that is a task and lists each in its `tasks`,
+/// as the command line of a project that imported them does.
 pub(crate) fn workspace(
     root: &Path,
     members: &[&str],
@@ -105,6 +110,7 @@ pub(crate) fn workspace(
 ) -> TestOutcome {
     let listed: Vec<String> = members
         .iter()
+        .chain(&["cli"])
         .map(|member| format!("\"{member}\""))
         .collect();
     write_files(
@@ -117,9 +123,14 @@ pub(crate) fn workspace(
             ),
         )],
     )?;
+    let mut imports = Vec::new();
     for directory in directories {
         let name = directory.rsplit('/').next().unwrap_or(directory);
-        let manifest = package(name, !plain.contains(directory));
+        let is_task = !plain.contains(directory);
+        if is_task {
+            imports.push((name, *directory));
+        }
+        let manifest = package(name, is_task);
         write_files(
             root,
             &[
@@ -128,5 +139,34 @@ pub(crate) fn workspace(
             ],
         )?;
     }
-    Ok(())
+    command_line(root, &imports)
+}
+
+/// Writes the command line crate `ritual` at `cli/`, depending on and
+/// listing each `(name, directory)` in `imports`.
+fn command_line(root: &Path, imports: &[(&str, &str)]) -> TestOutcome {
+    let mut dependencies = String::new();
+    for (name, directory) in imports {
+        let _ = writeln!(dependencies, "{name} = {{ path = \"../{directory}\" }}");
+    }
+    let names: Vec<String> = imports
+        .iter()
+        .map(|(name, _directory)| format!("\"{name}\""))
+        .collect();
+    write_files(
+        root,
+        &[
+            (
+                "cli/Cargo.toml",
+                &format!(
+                    "[package]\nname = \"ritual\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n\
+                     [[bin]]\nname = \"ritual\"\npath = \"src/main.rs\"\n\n\
+                     [dependencies]\n{dependencies}\n\
+                     [package.metadata.ritual]\ntasks = [{}]\n",
+                    names.join(", ")
+                ),
+            ),
+            ("cli/src/main.rs", "fn main() {}\n"),
+        ],
+    )
 }

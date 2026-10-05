@@ -29,11 +29,23 @@ impl Step {
     pub(crate) const IN_RELEASE_ORDER: [Self; 1] = [Self::TasksIntoRituals];
 
     /// What this step would do to the project `document` describes, or
-    /// `None` when the project is already as the step leaves it.
-    pub(crate) fn applies(self, document: &Metadata, root: &Path) -> Option<Migration> {
+    /// `None` when the project is already as the step leaves it. `package` is
+    /// the one whose command line is running `migrate`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`Failure`] when the step has to read what the command line
+    /// imports and cannot.
+    pub(crate) fn applies(
+        self,
+        document: &Metadata,
+        root: &Path,
+        package: &str,
+    ) -> Result<Option<Migration>, Failure> {
         match self {
             Self::TasksIntoRituals => {
-                tasks_into_rituals::find(document, root).map(Migration::TasksIntoRituals)
+                Ok(tasks_into_rituals::find(document, root, package)?
+                    .map(Migration::TasksIntoRituals))
             }
         }
     }
@@ -94,7 +106,9 @@ mod tests {
 
     fn applies(root: &std::path::Path) -> Result<bool, Box<dyn std::error::Error>> {
         let document = metadata::fetch(root)?;
-        Ok(Step::TasksIntoRituals.applies(&document, root).is_some())
+        Ok(Step::TasksIntoRituals
+            .applies(&document, root, "ritual")?
+            .is_some())
     }
 
     #[test]
@@ -162,7 +176,23 @@ mod tests {
     #[test]
     fn a_project_with_no_members_but_its_own_package_does_not() -> TestOutcome {
         let scratch = ScratchDir::new("step-no-tasks")?;
-        workspace(scratch.path(), &["ritual"], &["ritual"], &["ritual"])?;
+        workspace(scratch.path(), &[], &[], &[])?;
+        assert!(!applies(scratch.path())?);
+        Ok(())
+    }
+
+    /// A task in `tasks/` that no command line imports is another task's
+    /// dependency, left where it is.
+    #[test]
+    fn a_task_in_tasks_the_command_line_does_not_import_does_not_apply() -> TestOutcome {
+        let scratch = ScratchDir::new("step-not-imported")?;
+        workspace(scratch.path(), &["tasks/helper"], &["tasks/helper"], &[])?;
+        let manifest = scratch.path().join("cli/Cargo.toml");
+        let without_import = std::fs::read_to_string(&manifest)?
+            .replace("helper = { path = \"../tasks/helper\" }\n", "")
+            .replace("tasks = [\"helper\"]", "tasks = []");
+        std::fs::write(&manifest, without_import)?;
+
         assert!(!applies(scratch.path())?);
         Ok(())
     }

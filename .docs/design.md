@@ -640,12 +640,17 @@ the destination from `layout`, which says where scaffolding puts a task today.
 
 **The first step: `tasks/` to `.rituals/`.** It applies when a workspace member
 under `tasks/` declares itself a task, by the one rule the task list is
-resolved with. "Member" is what `cargo metadata` says, since Cargo's
-membership is glob expansion, `exclude` and path dependencies that become
-members on their own, and a second reading of that could only disagree with
-Cargo. Each such task moves to the same place under `.rituals/`, so
-`tasks/greet` becomes `.rituals/greet`. A crate in `tasks/` that is not a task
-stays where it is, with the directory that holds it.
+resolved with, and the project's own command line imports it, in its
+`[package.metadata.ritual] tasks` list. "Member" is what `cargo metadata` says,
+since Cargo's membership is glob expansion, `exclude` and path dependencies
+that become members on their own, and a second reading of that could only
+disagree with Cargo. A project with no such task under `tasks/` has nothing to
+migrate, whatever its list holds. Each task the command line imports moves to
+the same place under `.rituals/`, so `tasks/greet` becomes `.rituals/greet`.
+Anything else in `tasks/` stays where it is, with the directory that holds it:
+a crate that is not a task, a task that only another task depends on, and the
+children of a bundle the command line imports whole. The path from a task that
+moved to one that stayed is repointed.
 
 **It only runs where git can give everything back.** A work tree with changes
 that are not committed, files that are untracked, or no repository at all is
