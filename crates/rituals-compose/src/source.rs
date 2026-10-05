@@ -125,8 +125,10 @@ pub const RITUALS_MANIFEST_IN_CHECKOUT: &str = "crates/rituals/Cargo.toml";
 /// as its `ritual` dependency.
 pub const MANAGEMENT_BUNDLE_IN_CHECKOUT: &str = ".rituals/ritual";
 
-/// Checks that `checkout_root` is a real ritual checkout, with both
-/// directories a project made from it names: it contains
+/// Checks that `checkout_root` is a ritual checkout a project can be made
+/// from.
+///
+/// It has to hold both directories such a project names: it contains
 /// [`RITUALS_MANIFEST_IN_CHECKOUT`], and a `Cargo.toml` in
 /// [`MANAGEMENT_BUNDLE_IN_CHECKOUT`].
 ///
