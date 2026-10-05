@@ -272,8 +272,8 @@ fn committed(root: &Path, files: &[(&str, &str)]) -> TestOutcome {
     Ok(())
 }
 
-/// The reviewer's rule: every dot directory is ignored, but for the ones a
-/// project needs tracked. `.rituals` is a dot directory.
+/// A rule that ignores every dot directory, but for the ones a project needs
+/// tracked. `.rituals` is a dot directory.
 fn dot_directories_with_negations(root: &Path) -> Built {
     committed(
         root,

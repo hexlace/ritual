@@ -163,8 +163,9 @@ mod tests {
         )
     }
 
-    /// The reviewer's shape: the crate is not in `cargo metadata`'s packages,
-    /// and Cargo still reads it, so it is listed.
+    /// An excluded crate reached only through an optional dependency is not
+    /// in `cargo metadata`'s packages, and Cargo still reads it, so it is
+    /// listed.
     #[test]
     fn a_crate_outside_the_workspace_reached_by_an_optional_dependency_is_read() -> TestOutcome {
         let scratch = ScratchDir::new("reads-excluded-optional")?;

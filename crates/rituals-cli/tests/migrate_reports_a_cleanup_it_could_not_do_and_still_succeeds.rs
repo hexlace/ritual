@@ -1,7 +1,7 @@
 //! What `migrate` does after its changes are kept cannot undo them: when
 //! deleting the directory the moves emptied fails, the run says what failed
-//! and still succeeds, because every task has already moved and the project
-//! builds.
+//! and still succeeds, because every task has already moved and Cargo reads
+//! the project as it should.
 //!
 //! The failure is made from outside the process, with a project root that
 //! cannot be written to: the tasks move into a `.rituals/` that was already
