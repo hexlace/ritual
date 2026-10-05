@@ -16,11 +16,12 @@
               module is private; see the note above"
 )]
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use rituals::Failure;
 
-use crate::manifest::Manifest;
+use crate::metadata::manifest_walk::{manifests_at, walk_manifests};
 use crate::metadata::{Dependency, Metadata, Package};
 use crate::paths::lies_under;
 use crate::rust_name::extern_identifier;
@@ -361,63 +362,38 @@ pub(crate) fn dependents_outside_the_graph(
     metadata: &Metadata,
     directory: &Path,
 ) -> Result<Vec<String>, Failure> {
-    let mut asked: Vec<PathBuf> = metadata
+    let asked: BTreeSet<PathBuf> = metadata
         .packages
         .iter()
         .map(|package| crate::paths::normalize(&package.manifest_path))
         .collect();
-    let mut pending: Vec<PathBuf> = Vec::new();
+    let mut starts: Vec<PathBuf> = Vec::new();
     for package in &metadata.packages {
         if !lies_under(&package.manifest_path, directory) {
-            pending.extend(unasked_manifests(
+            starts.extend(manifests_at(
                 package
                     .dependencies
                     .iter()
                     .filter_map(|dependency| dependency.path.as_deref()),
-                directory,
-                &asked,
+                Some(directory),
             ));
         }
     }
 
     let mut dependents: Vec<String> = Vec::new();
-    // Each manifest is read once, so the walk is bounded by the manifests on
-    // disk, however the path dependencies loop.
-    while let Some(manifest_path) = pending.pop() {
-        if asked.contains(&manifest_path) {
-            continue;
-        }
-        asked.push(manifest_path.clone());
-        let manifest = Manifest::read(&manifest_path)?;
-        let leads_to = manifest.path_dependency_directories();
-        let declares_it = leads_to.iter().any(|path| lies_under(path, directory));
-        let declaring = manifest.package_name().filter(|_| declares_it);
+    walk_manifests(starts, asked, Some(directory), |reached| {
+        let declares_it = reached
+            .leads_to
+            .iter()
+            .any(|path| lies_under(path, directory));
+        let declaring = reached.manifest.package_name().filter(|_| declares_it);
         if let Some(name) = declaring
             && !dependents.iter().any(|dependent| dependent == name)
         {
             dependents.push(name.to_string());
         }
-        pending.extend(unasked_manifests(
-            leads_to.iter().map(PathBuf::as_path),
-            directory,
-            &asked,
-        ));
-    }
+    })?;
     Ok(dependents)
-}
-
-/// The manifests of the crates at `paths` that exist, that are neither under
-/// `directory` nor among `asked`, normalised.
-fn unasked_manifests<'a>(
-    paths: impl Iterator<Item = &'a Path>,
-    directory: &Path,
-    asked: &[PathBuf],
-) -> Vec<PathBuf> {
-    paths
-        .filter(|path| !lies_under(path, directory))
-        .map(|path| crate::paths::normalize(&path.join("Cargo.toml")))
-        .filter(|manifest_path| !asked.contains(manifest_path) && manifest_path.is_file())
-        .collect()
 }
 
 /// The workspace members other than `resolved`, by name, whose manifests lie

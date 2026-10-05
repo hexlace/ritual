@@ -6,8 +6,7 @@ use std::path::{Path, PathBuf};
 use rituals::Failure;
 
 use super::Metadata;
-use crate::manifest::Manifest;
-use crate::paths::normalize;
+use super::manifest_walk::walk_manifests;
 
 impl Metadata {
     /// Lists the manifest of every crate Cargo reads to understand this
@@ -50,31 +49,17 @@ impl Metadata {
     /// # Ok::<(), rituals::Failure>(())
     /// ```
     pub fn manifests_cargo_reads(&self) -> Result<Vec<PathBuf>, Failure> {
-        let mut pending: Vec<PathBuf> = vec![self.workspace_root.join("Cargo.toml")];
-        pending.extend(
+        let mut starts: Vec<PathBuf> = vec![self.workspace_root.join("Cargo.toml")];
+        starts.extend(
             self.path_package_manifests()
                 .into_iter()
                 .map(Path::to_path_buf),
         );
 
         let mut read: BTreeSet<PathBuf> = BTreeSet::new();
-        // Each manifest is read once, so the walk is bounded by the manifests
-        // on disk, however the path dependencies loop.
-        while let Some(path) = pending.pop() {
-            let path = normalize(&path);
-            if read.contains(&path) {
-                continue;
-            }
-            let manifest = Manifest::read(&path)?;
-            read.insert(path);
-            pending.extend(
-                manifest
-                    .path_dependency_directories()
-                    .into_iter()
-                    .map(|directory| directory.join("Cargo.toml"))
-                    .filter(|candidate| candidate.is_file()),
-            );
-        }
+        walk_manifests(starts, BTreeSet::new(), None, |reached| {
+            read.insert(reached.path.to_path_buf());
+        })?;
         Ok(read.into_iter().collect())
     }
 

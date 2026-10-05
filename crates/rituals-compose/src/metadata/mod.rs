@@ -12,6 +12,7 @@
 //! dependencies through the TOML itself, since `--no-deps` refuses a crate
 //! that sits under the workspace's root without being a member.
 
+pub(crate) mod manifest_walk;
 mod manifests_cargo_reads;
 mod schema;
 mod workspace_member;
