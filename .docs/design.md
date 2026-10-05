@@ -378,7 +378,11 @@ mount in the generated file, so the three cannot drift apart.
 at the version the running `ritual` was built as. What they write then
 matches the tool that made it. `--path <checkout>` or `--git <url>` takes the
 crates from a ritual checkout or a git repository instead, for work against
-an unreleased revision. Naming both is an argument error.
+an unreleased revision. Naming both is an argument error. A `--path` checkout
+is checked before anything is written: it has to hold every directory the
+project will name, `crates/rituals` and ritual's own tasks in
+`.rituals/ritual`, so a checkout whose tasks are elsewhere is refused by `new`
+rather than by the project's first build.
 
 ## What `add` writes
 

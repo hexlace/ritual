@@ -20,7 +20,7 @@
 use std::fmt::Write as _;
 
 use rituals::Name;
-use rituals_compose::source::{Source, escape_toml_string};
+use rituals_compose::source::{MANAGEMENT_BUNDLE_IN_CHECKOUT, Source, escape_toml_string};
 use rituals_compose::top_level::MANAGEMENT_BUNDLE_KEY;
 
 /// One of ritual's own crates a scaffolded project imports: the dependency
@@ -57,7 +57,7 @@ const FRAMEWORK: ImportedCrate = ImportedCrate {
 pub(crate) const MANAGEMENT_BUNDLE: ImportedCrate = ImportedCrate {
     key: MANAGEMENT_BUNDLE_KEY,
     package: Some("rituals-core"),
-    directory: ".rituals/ritual",
+    directory: MANAGEMENT_BUNDLE_IN_CHECKOUT,
 };
 
 /// Renders `<name>/Cargo.toml` — the project's workspace manifest, with an
