@@ -58,8 +58,9 @@ pub(crate) fn isolate_from_the_machine(command: &mut Command) -> &mut Command {
 
 /// Runs `git <arguments…>` in `directory` with the machine's git
 /// configuration, ignore and attributes files, and any inherited repository
-/// location out of the way, and
-/// signing off for the commits a story makes alone.
+/// location out of the way, signing off for the commits a story makes alone,
+/// and automatic maintenance off, so a commit leaves no detached
+/// `git maintenance` behind it writing into `.git` while the story reads it.
 pub(crate) fn git(directory: &Path, arguments: &[&str]) -> Outcome<RunOutput> {
     let output = isolate_from_the_machine(
         Command::new("git")
@@ -68,6 +69,8 @@ pub(crate) fn git(directory: &Path, arguments: &[&str]) -> Outcome<RunOutput> {
                 "commit.gpgsign=false",
                 "-c",
                 "init.defaultBranch=main",
+                "-c",
+                "maintenance.auto=false",
             ])
             .args(arguments)
             .current_dir(directory)

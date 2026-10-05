@@ -21,6 +21,12 @@ use std::process::Command;
 /// attributes file, an identity comes from the environment, signing is off
 /// for the commits a test makes alone, and `main` is the default branch.
 ///
+/// Automatic maintenance is off too. A commit otherwise starts
+/// `git maintenance run --auto --detach`, which can still be taking
+/// `.git/objects/maintenance.lock` after the commit has returned, so a test
+/// that snapshots `.git` once its repository is built would see a file the
+/// code under test never wrote.
+///
 /// `GIT_CONFIG_GLOBAL` replaces the user's configuration files but not the
 /// global ignore and attributes files, which git finds under
 /// `$XDG_CONFIG_HOME/git`, or `$HOME/.config/git` when that is unset.
@@ -57,6 +63,8 @@ pub fn isolated_git() -> Command {
             "commit.gpgsign=false",
             "-c",
             "init.defaultBranch=main",
+            "-c",
+            "maintenance.auto=false",
         ])
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -205,5 +213,33 @@ mod tests {
                 "an isolated git must not inherit {injected}"
             );
         }
+    }
+
+    /// A commit's automatic maintenance runs detached, so it can still be
+    /// writing `.git/objects/maintenance.lock` after the commit returns, and
+    /// a test that snapshots `.git` straight after building its repository
+    /// would see the lock come and go. A fixture's commit starts no command
+    /// of its own: git traces every command it starts, and there are none.
+    #[test]
+    fn a_fixture_commit_leaves_nothing_running_behind_it() -> TestOutcome {
+        let repository = ScratchDir::new("fixture-no-maintenance")?;
+        git(repository.path(), &["init", "--quiet"])?;
+        std::fs::write(repository.path().join("file.txt"), "x\n")?;
+        git(repository.path(), &["add", "--all"])?;
+
+        let output = isolated_git()
+            .env("GIT_TRACE", "1")
+            .arg("-C")
+            .arg(repository.path())
+            .args(["commit", "--quiet", "--message", "fixture"])
+            .output()?;
+
+        assert!(output.status.success(), "the fixture commit failed");
+        let trace = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !trace.contains("run_command:"),
+            "a fixture commit must start no other command; git traced:\n{trace}"
+        );
+        Ok(())
     }
 }
