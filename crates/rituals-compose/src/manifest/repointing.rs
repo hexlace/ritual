@@ -369,8 +369,34 @@ fn tables_of(item: &mut Item) -> Vec<&mut dyn TableLike> {
 /// around it as they were.
 fn replace_string(value: &mut Value, new: &str) {
     let decor = value.decor().clone();
-    *value = Value::from(new);
+    *value = respelled(value, new);
     *value.decor_mut() = decor;
+}
+
+/// The string `new`, quoted the way `old` is: a literal string, written with
+/// single quotes or three of them, stays a literal string, and a basic one
+/// stays basic.
+///
+/// A literal string has no escapes, so one cannot hold a path that contains
+/// its own closing quote, or a newline in a single-line one. Such a path is
+/// written as a basic string, which can hold anything.
+fn respelled(old: &Value, new: &str) -> Value {
+    let Value::String(formatted) = old else {
+        return Value::from(new);
+    };
+    let Some(raw) = formatted.as_repr().and_then(|repr| repr.as_raw().as_str()) else {
+        return Value::from(new);
+    };
+    let literal = if raw.starts_with("'''") {
+        format!("'''{new}'''")
+    } else if raw.starts_with('\'') {
+        format!("'{new}'")
+    } else {
+        return Value::from(new);
+    };
+    literal
+        .parse::<Value>()
+        .unwrap_or_else(|_| Value::from(new))
 }
 
 #[cfg(test)]
@@ -803,5 +829,63 @@ mod tests {
             document: DocumentMut::new(),
         };
         let _ = manifest.repoint(&relocation(Path::new("/w")));
+    }
+
+    /// A path written as a literal string is respelled as one, comment and
+    /// spacing included, rather than turned into a basic string.
+    #[test]
+    fn a_literal_string_path_stays_literal_with_its_comment() -> TestOutcome {
+        let (scratch, mut manifest) = project_with_manifest(
+            "repoint-literal",
+            "ritual/Cargo.toml",
+            "[dependencies]\n\
+             greet = { path = '../tasks/greet' } # the greeting\n\
+             shout = { path =   '../tasks/shout'   }\n",
+        )?;
+
+        reported(&mut manifest, &relocation(scratch.path()))?;
+
+        assert_eq!(
+            manifest.document.to_string(),
+            "[dependencies]\n\
+             greet = { path = '../.rituals/greet' } # the greeting\n\
+             shout = { path =   '../.rituals/shout'   }\n"
+        );
+        Ok(())
+    }
+
+    /// A multi-line literal string is a literal string too: the path keeps
+    /// the three quotes it was written with.
+    #[test]
+    fn a_multi_line_literal_path_stays_multi_line_literal() -> TestOutcome {
+        let (scratch, mut manifest) = project_with_manifest(
+            "repoint-multi-line-literal",
+            "ritual/Cargo.toml",
+            "[dependencies]\n\
+             greet = { path = '''../tasks/greet''' }\n",
+        )?;
+
+        reported(&mut manifest, &relocation(scratch.path()))?;
+
+        assert_eq!(
+            manifest.document.to_string(),
+            "[dependencies]\n\
+             greet = { path = '''../.rituals/greet''' }\n"
+        );
+        Ok(())
+    }
+
+    /// A literal string cannot hold its own closing quote, so a new path with
+    /// one is written as a basic string, which can; a basic string stays
+    /// basic whatever it holds.
+    #[test]
+    fn a_new_path_a_literal_cannot_hold_is_written_basic() -> TestOutcome {
+        let literal = "'old'".parse::<toml_edit::Value>()?;
+        let basic = "\"old\"".parse::<toml_edit::Value>()?;
+
+        assert_eq!(super::respelled(&literal, "it's").to_string(), "\"it's\"");
+        assert_eq!(super::respelled(&literal, "plain").to_string(), "'plain'");
+        assert_eq!(super::respelled(&basic, "plain").to_string(), "\"plain\"");
+        Ok(())
     }
 }
