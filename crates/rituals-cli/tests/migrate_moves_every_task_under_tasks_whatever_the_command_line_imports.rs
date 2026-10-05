@@ -1,21 +1,19 @@
-//! `migrate` moves the tasks this project's own command line imports, the
-//! ones its `[package.metadata.ritual] tasks` list names, and nothing else
-//! that happens to live in `tasks/`.
+//! `migrate` moves every task in `tasks/`, whether or not the project's own
+//! command line imports it: a workspace member under `tasks/` that declares
+//! itself a task is in the 0.1 layout, and the 0.2 layout has no `tasks/`.
 //!
 //! A bundle crate that a command line imports whole has its children in
-//! `tasks/` without the project having imported them, so they are not the
-//! project's own tasks to move. A task that only another task depends on is
-//! in the same position: it stays, and the path to it follows whichever
-//! task reached it.
+//! `tasks/` without the project having imported them; they move with the
+//! rest, and the bundle's paths to them follow. A task that only another
+//! task uses moves too, with the dependent's path repointed. Nothing is
+//! left behind, so no `kept tasks/` line is written and `tasks/` is gone.
 
 mod support;
 
+use support::Project;
 use support::crates::{Child, bundle_lib, bundle_manifest, leaf_lib, leaf_manifest, write_crate};
-use support::migration::{
-    assert_dependency_leads_to, assert_names, assert_nothing_to_migrate, exists,
-};
-use support::{Project, assert_trees_identical};
-use support::{TempDir, TestOutcome, git, in_checkout, manifest, snapshot_tree};
+use support::migration::{assert_dependency_leads_to, assert_names, everything_written, exists};
+use support::{TempDir, TestOutcome, git, in_checkout, manifest};
 
 /// A project whose command line imports one bundle that lives outside
 /// `tasks/`, while the bundle's children, `hello` and `wave`, are in
@@ -57,26 +55,50 @@ fn project_importing_a_bundle(
 }
 
 #[test]
-fn a_bundle_repository_whose_children_live_in_tasks_has_nothing_to_migrate() -> TestOutcome {
+fn a_bundle_repositorys_children_move_from_tasks_and_the_bundle_follows() -> TestOutcome {
     in_checkout(|checkout| {
         let working_dir = TempDir::new("migrate-bundle-children")?;
         let project = project_importing_a_bundle(checkout, &working_dir)?;
-        let before = snapshot_tree(project.root())?;
 
         let migrated = project.run_cli(&["migrate"])?;
 
-        assert_nothing_to_migrate(&migrated, "`migrate` on a project importing only a bundle");
-        assert_trees_identical(
-            "a project whose command line imports none of the tasks in tasks/ must be left alone",
-            &before,
-            &snapshot_tree(project.root())?,
+        migrated.expect_success("`migrate` on a project importing only a bundle");
+        for child in ["hello", "wave"] {
+            assert!(
+                exists(&project.root().join(format!(".rituals/{child}/Cargo.toml"))),
+                "expected the bundle's child `{child}` to move to .rituals/{child}"
+            );
+            assert_dependency_leads_to(
+                &project.root().join("bundle/Cargo.toml"),
+                &["dependencies"],
+                child,
+                &project.root().join(format!(".rituals/{child}")),
+            )?;
+        }
+        assert!(
+            !exists(&project.root().join("tasks")),
+            "expected no tasks/ to be left once every task in it has moved"
+        );
+        assert_names(&migrated, "`migrate`", &["hello", "wave"]);
+        let written = everything_written(&migrated);
+        assert!(
+            !written.contains("kept tasks/"),
+            "nothing is left in tasks/, so nothing is kept; it wrote:\n{written}"
+        );
+
+        let ran = project.run_cli(&["bundle", "hello"])?;
+        ran.expect_success("the bundle's child, after the move");
+        assert!(
+            ran.stdout.contains("hello ran"),
+            "expected the moved child to answer; stdout was:\n{}",
+            ran.stdout
         );
         Ok(())
     })
 }
 
 #[test]
-fn a_task_only_another_task_uses_stays_in_tasks_and_the_path_to_it_follows() -> TestOutcome {
+fn a_task_only_another_task_uses_moves_too_and_the_path_to_it_follows() -> TestOutcome {
     in_checkout(|checkout| {
         let working_dir = TempDir::new("migrate-dependency-only")?;
         let project = support::legacy::project_with_tasks(checkout, &working_dir, &["greet"])?;
@@ -102,20 +124,24 @@ fn a_task_only_another_task_uses_stays_in_tasks_and_the_path_to_it_follows() -> 
             "expected the imported task to move to .rituals/greet"
         );
         assert!(
-            exists(&project.root().join("tasks/helper/Cargo.toml")),
-            "expected the task nothing imports to stay in tasks/helper"
+            exists(&project.root().join(".rituals/helper/Cargo.toml")),
+            "expected the task only another task uses to move to .rituals/helper"
         );
         assert!(
-            !exists(&project.root().join(".rituals/helper")),
-            "expected the task nothing imports not to be moved"
+            !exists(&project.root().join("tasks")),
+            "expected no tasks/ to be left once every task in it has moved"
         );
         assert_dependency_leads_to(
             &project.root().join(".rituals/greet/Cargo.toml"),
             &["dependencies"],
             "helper",
-            &project.root().join("tasks/helper"),
+            &project.root().join(".rituals/helper"),
         )?;
-        assert_names(&migrated, "`migrate`", &["kept tasks/"]);
+        let written = everything_written(&migrated);
+        assert!(
+            !written.contains("kept tasks/"),
+            "nothing is left in tasks/, so nothing is kept; it wrote:\n{written}"
+        );
         project.build()?;
         Ok(())
     })
