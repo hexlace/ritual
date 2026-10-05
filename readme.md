@@ -200,10 +200,11 @@ crate ships: `publish = false` keeps it private to the project, and leaving it
 out shares it. `add` writes none, since it cannot know who a ritual is for.
 
 One Cargo rule to know when you group rituals. A `.rituals/*` glob in
-`[workspace] members` (which is what `migrate` turns `tasks/*` into) also
-matches a grouping directory that has no manifest of its own, and Cargo then
-refuses to load the workspace. List that directory under `exclude`, or list
-the members explicitly, as `add` writes them.
+`[workspace] members` also matches a grouping directory that has no manifest
+of its own, and Cargo then refuses to load the workspace. List that directory
+under `exclude`, or list the members explicitly, as `add` writes them. A 0.1
+project that already did this in `tasks/` needs nothing more: `migrate` moves
+the `exclude` entry with the group, so `tasks/group` becomes `.rituals/group`.
 
 A project made by ritual 0.1 keeps its tasks in `tasks/`, and they keep
 working there. [`cargo ritual migrate`](#move-a-01-project-into-rituals)
@@ -348,7 +349,10 @@ For each workspace member under `tasks/` that is a task, it:
   included, once git would see every file there as it does now (see below);
 - changes the workspace's `members`, `default-members` and `exclude`, keeping a
   glob a glob (`tasks/*` becomes `.rituals/*`) and keeping an explicit list
-  explicit, each entry changed where it stands;
+  explicit, each entry changed where it stands. An `exclude` entry for a
+  directory that groups tasks moves with them, so `tasks/group` becomes
+  `.rituals/group`, and stays in `tasks/` as well only while something else is
+  left in the group;
 - changes the `path` of every dependency on a moved task in every manifest
   Cargo reads, crates outside the workspace included, not only the CLI crate's,
   since tasks can depend on each other and a crate Cargo reaches through an

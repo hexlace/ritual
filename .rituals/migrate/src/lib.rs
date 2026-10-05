@@ -28,7 +28,6 @@ use rituals_compose::metadata;
 use rituals_compose::rollback::{self, Changes};
 use rituals_compose::{top_level, workspace};
 use step::{Migrating, Step};
-use tidy::Vacated;
 
 /// `migrate` takes no arguments: the layout a project is brought up to is the
 /// one of the ritual running it.
@@ -41,7 +40,6 @@ struct Done<'a> {
     /// The repository the project is in, which was clean.
     repository: &'a Repository,
     lines: Vec<String>,
-    vacated: Vec<Vacated>,
 }
 
 /// What this invocation of `migrate` was started with, which every step of it
@@ -102,12 +100,9 @@ fn run(command_line: &CommandLine) -> Outcome {
             for line in done.lines {
                 report(line);
             }
-            // After the changes are kept, outside the rollback: what these
-            // two do or fail to do is no reason to undo a migration that
+            // After the changes are kept, outside the rollback: what this
+            // does or fails to do is no reason to undo a migration that
             // worked.
-            for line in tidy::tidy(&root, &done.vacated) {
-                report(line);
-            }
             for line in mentions::lines(&root, done.repository) {
                 report(line);
             }
@@ -154,10 +149,8 @@ fn run_every_step_that_applies<'a>(
         let so_far = done.get_or_insert_with(|| Done {
             repository,
             lines: Vec::new(),
-            vacated: Vec::new(),
         });
         so_far.lines.extend(applied.lines);
-        so_far.vacated.extend(applied.vacated);
         document = applied.after;
     }
     Ok(done)

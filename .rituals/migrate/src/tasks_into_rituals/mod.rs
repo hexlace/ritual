@@ -10,7 +10,7 @@ use rituals_compose::metadata::{self, Metadata};
 use rituals_compose::rollback::Changes;
 
 use crate::step::{Applied, Migrating};
-use crate::tidy::Vacated;
+use crate::tidy::{self, Vacated};
 
 // This step owns both ends literally, and so will every step after it:
 // `tasks/` is where 0.1 put a project's tasks and `.rituals/` is where 0.2
@@ -64,10 +64,12 @@ pub(crate) fn find(document: &Metadata, root: &Path) -> Option<Candidates> {
 /// Moves every candidate and repoints everything that reached it, inside
 /// `changes` so a failure at any point is put back.
 ///
-/// Plans first, which refuses before anything is written; writes; then asks
-/// Cargo to read the project again and checks it reads what it should. The
-/// check is the last thing in the run, so a result that no longer resolves
-/// is a failure the rollback undoes.
+/// Plans first, which refuses before anything is written; writes; removes
+/// the directories the moves emptied; then asks Cargo to read the project
+/// again and checks it reads what it should. The check is the last thing in
+/// the run and sees the tree the run leaves, so a glob that matched only a
+/// directory the moves emptied cannot pass it, and a result that no longer
+/// resolves is a failure the rollback undoes.
 pub(crate) fn apply(
     candidates: &Candidates,
     migrating: &Migrating<'_>,
@@ -76,16 +78,19 @@ pub(crate) fn apply(
 ) -> Result<Applied, Failure> {
     let planned = plan::plan(candidates, migrating, before)?;
     planned.write(changes)?;
-    let after = metadata::fetch_recording(changes, migrating.root)?;
-    planned.verify(before, &after, migrating.package)?;
-    Ok(Applied {
-        lines: planned.lines(),
-        vacated: vec![Vacated {
+    let tidied = tidy::tidy(
+        migrating.root,
+        &Vacated {
             boundary: candidates.from_directory.clone(),
             sources: candidates.directories.clone(),
-        }],
-        after,
-    })
+        },
+        changes,
+    );
+    let after = metadata::fetch_recording(changes, migrating.root)?;
+    planned.verify(before, &after, migrating.package)?;
+    let mut lines = planned.lines();
+    lines.extend(tidied);
+    Ok(Applied { lines, after })
 }
 
 #[cfg(test)]
@@ -281,7 +286,8 @@ mod tests {
     }
 
     #[test]
-    fn the_step_moves_each_task_and_says_what_it_edited_in_the_order_it_wrote() -> TestOutcome {
+    fn the_step_moves_each_task_and_says_what_it_edited_and_deleted_in_the_order_it_did_it()
+    -> TestOutcome {
         let scratch = ScratchDir::new("step1-apply")?;
         let root = scratch.path();
         legacy_project(root)?;
@@ -298,6 +304,7 @@ mod tests {
                  `../.rituals/greet`)",
                 "updated ritual/Cargo.toml ([dependencies] shout path `../tasks/shout` is now \
                  `../.rituals/shout`)",
+                "deleted tasks/ (empty once its tasks moved out)",
             ]
         );
         assert!(root.join(".rituals/greet/Cargo.toml").is_file());

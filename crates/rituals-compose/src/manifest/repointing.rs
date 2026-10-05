@@ -381,6 +381,12 @@ mod tests {
         for directory in ["tasks/greet", "tasks/shout", "tasks/helper", "ritual"] {
             std::fs::create_dir_all(scratch.path().join(directory))?;
         }
+        // The crate that stays, which keeps `tasks/` holding something once
+        // the tasks have moved: a directory with nothing left in it does not.
+        std::fs::write(
+            scratch.path().join("tasks/helper/Cargo.toml"),
+            "[package]\n",
+        )?;
         let path = scratch.path().join(at);
         std::fs::create_dir_all(path.parent().ok_or("a manifest has a directory")?)?;
         std::fs::write(&path, content)?;

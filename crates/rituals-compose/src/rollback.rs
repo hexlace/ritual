@@ -13,7 +13,9 @@
 //! Each way of recording takes its snapshot before the change it makes:
 //! [`Changes::write`] writes the file itself, [`Changes::run_changing`] runs
 //! the change it guards, [`Changes::reserve_directory`] creates the directory
-//! itself, and [`Changes::rename`] moves the path itself. A change made around
+//! itself, [`Changes::rename`] moves the path itself, and
+//! [`Changes::remove_empty_directory`] removes the directory itself. A change
+//! made around
 //! [`Changes`], such as a direct `std::fs` write or a command not run through
 //! [`Changes::run_changing`], is not recorded at all.
 //!
@@ -196,6 +198,12 @@ enum Step {
     /// `to` holds it and `from` is empty: a `from` that exists again would
     /// take it in as a child.
     Rename { from: PathBuf, to: PathBuf },
+    /// An empty directory the run removed, with the permissions it had.
+    /// Undoing it creates it again, empty, with those permissions.
+    Removed {
+        path: PathBuf,
+        permissions: std::fs::Permissions,
+    },
 }
 
 impl Changes {
@@ -478,6 +486,67 @@ impl Changes {
         Ok(())
     }
 
+    /// Removes the directory at `path` if it is empty, and records it so a
+    /// failed run creates it again, empty, with the permissions it had.
+    ///
+    /// For a run whose result depends on a directory being gone, such as one
+    /// that empties a directory by moving everything out of it and then asks
+    /// Cargo whether a glob still matches it: removing the directory inside
+    /// the run lets that question be asked of the project the run leaves.
+    ///
+    /// Undone in the reverse of the order it was recorded in, like every
+    /// change, so a directory removed after a [`Changes::rename`] emptied it
+    /// exists again before the undo moves anything back into it.
+    ///
+    /// The error is the file system's own, so a caller can tell a directory
+    /// that is not empty, or no longer there, from one that could not be
+    /// removed: only a removal that happened is recorded.
+    ///
+    /// # Examples
+    ///
+    /// A task's directory moves out of `tasks/`, `tasks/` is removed because
+    /// nothing is left in it, a later step fails, and both are back:
+    ///
+    /// ```
+    /// use rituals::Failure;
+    /// use rituals_compose::rollback;
+    ///
+    /// # let directory = std::env::temp_dir()
+    /// #     .join(format!("rituals-compose-doctest-rollback-remove-{}", std::process::id()));
+    /// let from = directory.join("tasks/lint");
+    /// let to = directory.join(".rituals/lint");
+    /// # std::fs::create_dir_all(&from)?;
+    /// std::fs::write(from.join("Cargo.toml"), "[package]\n")?;
+    ///
+    /// let outcome = rollback::attempt("running `migrate` again", |changes| {
+    ///     changes.rename(&from, &to)?;
+    ///     changes
+    ///         .remove_empty_directory(&directory.join("tasks"))
+    ///         .map_err(|error| Failure::new("removing tasks/ failed").caused_by(error))?;
+    ///     Err::<(), _>(Failure::new("the project no longer loads"))
+    /// });
+    ///
+    /// assert!(outcome.is_err());
+    /// assert!(from.join("Cargo.toml").is_file());
+    /// # std::fs::remove_dir_all(&directory)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns the file system's error if `path` cannot be read, is not
+    /// empty, or cannot be removed; nothing is recorded and nothing is
+    /// removed.
+    pub fn remove_empty_directory(&mut self, path: &Path) -> std::io::Result<()> {
+        let permissions = std::fs::metadata(path)?.permissions();
+        std::fs::remove_dir(path)?;
+        self.steps.push(Step::Removed {
+            path: path.to_path_buf(),
+            permissions,
+        });
+        Ok(())
+    }
+
     /// Creates every directory above `path` that does not exist yet,
     /// outermost first, and records each one it created as a parent, so the
     /// undo removes them, innermost first, once they are empty. One that
@@ -616,9 +685,10 @@ impl Step {
     /// puts it there.
     fn describe(&self) -> String {
         match self {
-            Self::File { path, .. } | Self::Directory { path } | Self::Parent { path } => {
-                path.display().to_string()
-            }
+            Self::File { path, .. }
+            | Self::Directory { path }
+            | Self::Parent { path }
+            | Self::Removed { path, .. } => path.display().to_string(),
             Self::Rename { from, to } => describe_a_move_not_undone(from, to),
         }
     }
@@ -656,8 +726,23 @@ impl Step {
                 })
             }
             Self::Rename { from, to } => move_back(from, to),
+            Self::Removed { path, permissions } => create_again(path, permissions),
         }
     }
+}
+
+/// Creates the directory a run removed, empty, with the permissions it had,
+/// doing nothing when it is there again: one that exists already is either
+/// the run's own, never removed, or something the undo must not replace.
+fn create_again(path: &Path, permissions: &std::fs::Permissions) -> Result<(), Failure> {
+    if is_present(path)? {
+        return Ok(());
+    }
+    std::fs::create_dir(path)
+        .and_then(|()| std::fs::set_permissions(path, permissions.clone()))
+        .map_err(|error| {
+            Failure::new(format!("creating {} again failed", path.display())).caused_by(error)
+        })
 }
 
 /// Moves `to` back to `from`, doing nothing when the move was never made.
@@ -1836,5 +1921,101 @@ mod tests {
                 Path::new("/project/tasks/lint"),
             )
         });
+    }
+
+    /// A run that empties directories by moving out of them and removes
+    /// them, deepest first, then fails, has every one back, with the
+    /// permissions it had, and the moved directory back inside them.
+    #[test]
+    fn directories_a_run_emptied_and_removed_are_back_before_the_move_is_undone() -> TestOutcome {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = ScratchDir::new("rollback-remove-empty")?;
+        let tasks = scratch.path().join("tasks");
+        let group = tasks.join("group");
+        let from = group.join("lint");
+        let to = scratch.path().join(".rituals/group/lint");
+        std::fs::create_dir_all(&from)?;
+        std::fs::write(from.join("Cargo.toml"), "[package]\n")?;
+        std::fs::set_permissions(&group, std::fs::Permissions::from_mode(0o750))?;
+
+        let reported = fail_after(|changes| {
+            changes.rename(&from, &to)?;
+            for emptied in [&group, &tasks] {
+                changes.remove_empty_directory(emptied).map_err(|error| {
+                    Failure::new("removing an emptied directory failed").caused_by(error)
+                })?;
+            }
+            assert!(!tasks.exists(), "the run removed tasks/ before failing");
+            Ok(())
+        });
+
+        assert_eq!(
+            reported.to_string(),
+            "simulated failure; ritual put the project back as it found it"
+        );
+        assert_eq!(
+            std::fs::read_to_string(from.join("Cargo.toml"))?,
+            "[package]\n"
+        );
+        assert_eq!(
+            std::fs::metadata(&group)?.permissions().mode() & 0o777,
+            0o750
+        );
+        assert!(!scratch.path().join(".rituals").exists());
+        Ok(())
+    }
+
+    /// A directory that still holds something is not removed, and nothing
+    /// is recorded for it, so the file system's own answer reaches the
+    /// caller and the undo has nothing to create.
+    #[test]
+    fn a_directory_that_is_not_empty_is_left_and_nothing_is_recorded() -> TestOutcome {
+        let scratch = ScratchDir::new("rollback-remove-not-empty")?;
+        let tasks = scratch.path().join("tasks");
+        std::fs::create_dir_all(&tasks)?;
+        std::fs::write(tasks.join("notes.md"), "kept\n")?;
+
+        let kind = attempt(RETRY, |changes| {
+            let kind = changes
+                .remove_empty_directory(&tasks)
+                .err()
+                .map(|error| error.kind());
+            assert!(changes.steps.is_empty(), "nothing was removed to record");
+            Ok(kind)
+        })?;
+
+        assert_eq!(kind, Some(std::io::ErrorKind::DirectoryNotEmpty));
+        assert_eq!(std::fs::read_to_string(tasks.join("notes.md"))?, "kept\n");
+        Ok(())
+    }
+
+    /// A directory that is there again when the undo reaches it is left as
+    /// it is: the undo creates only what is missing.
+    #[test]
+    fn a_removed_directory_that_is_back_already_is_left_alone() -> TestOutcome {
+        let scratch = ScratchDir::new("rollback-remove-back-already")?;
+        let tasks = scratch.path().join("tasks");
+        std::fs::create_dir_all(&tasks)?;
+
+        let reported = fail_after(|changes| {
+            changes
+                .remove_empty_directory(&tasks)
+                .map_err(|error| Failure::new("removing tasks/ failed").caused_by(error))?;
+            std::fs::create_dir(&tasks)
+                .map_err(|error| Failure::new("creating tasks/ failed").caused_by(error))?;
+            std::fs::write(tasks.join("new.md"), "written after\n")
+                .map_err(|error| Failure::new("writing failed").caused_by(error))
+        });
+
+        assert_eq!(
+            reported.to_string(),
+            "simulated failure; ritual put the project back as it found it"
+        );
+        assert_eq!(
+            std::fs::read_to_string(tasks.join("new.md"))?,
+            "written after\n"
+        );
+        Ok(())
     }
 }

@@ -14,7 +14,6 @@ use rituals_compose::rollback::Changes;
 
 use crate::precondition::Repository;
 use crate::tasks_into_rituals::{self, Candidates};
-use crate::tidy::Vacated;
 
 /// A change a ritual release made to what a project should look like.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,8 +60,6 @@ pub(crate) struct Migrating<'a> {
 pub(crate) struct Applied {
     /// What to report, in the order to report it.
     pub(crate) lines: Vec<String>,
-    /// What the step moved things out of, to be tidied once the run is kept.
-    pub(crate) vacated: Vec<Vacated>,
     /// The project as it is now, for the next step to read.
     pub(crate) after: Metadata,
 }

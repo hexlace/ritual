@@ -60,6 +60,22 @@ enum Change {
         still_matching: Vec<String>,
         gained: String,
     },
+    /// An `exclude` entry for a directory that holds moved ones and still
+    /// holds something else, so it stays and the same directory under the
+    /// new place is added beside it.
+    ExcludeKept {
+        place: String,
+        old: String,
+        still_holding: Vec<String>,
+        gained: String,
+    },
+    /// An entry whose directory is gone once the moves are done, removed
+    /// because the list already names where its contents went.
+    Dropped {
+        place: String,
+        old: String,
+        already_listed: String,
+    },
 }
 
 impl PathChange {
@@ -93,6 +109,39 @@ impl PathChange {
     }
 }
 
+impl PathChange {
+    /// The `exclude` list at `place` keeps `old`, which still holds
+    /// `still_holding`, and gains `gained`, where what moved out of it went.
+    pub(super) fn exclude_kept(
+        place: &str,
+        old: &str,
+        still_holding: Vec<String>,
+        gained: &str,
+    ) -> Self {
+        assert!(
+            !still_holding.is_empty(),
+            "an exclude entry is kept only because something it holds stays"
+        );
+        Self(Change::ExcludeKept {
+            place: place.to_string(),
+            old: old.to_string(),
+            still_holding,
+            gained: gained.to_string(),
+        })
+    }
+
+    /// The list at `place` no longer holds `old`, whose directory is gone,
+    /// because it already holds `already_listed`, where that directory's
+    /// contents went.
+    pub(super) fn dropped(place: &str, old: &str, already_listed: &str) -> Self {
+        Self(Change::Dropped {
+            place: place.to_string(),
+            old: old.to_string(),
+            already_listed: already_listed.to_string(),
+        })
+    }
+}
+
 impl fmt::Display for PathChange {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
@@ -115,6 +164,31 @@ impl fmt::Display for PathChange {
                     join_with_and(&still_matching)
                 )
             }
+            Change::ExcludeKept {
+                place,
+                old,
+                still_holding,
+                gained,
+            } => {
+                let still_holding: Vec<String> = still_holding
+                    .iter()
+                    .map(|path| format!("`{path}`"))
+                    .collect();
+                write!(
+                    formatter,
+                    "{place} keeps `{old}`, which still holds {}, and gains `{gained}`",
+                    join_with_and(&still_holding)
+                )
+            }
+            Change::Dropped {
+                place,
+                old,
+                already_listed,
+            } => write!(
+                formatter,
+                "{place} drops `{old}`, which is gone once its contents move, since it already \
+                 lists `{already_listed}`"
+            ),
         }
     }
 }
@@ -161,5 +235,40 @@ mod tests {
     #[should_panic(expected = "a glob is kept only because something it matches stays")]
     fn a_kept_glob_with_nothing_left_to_match_is_a_bug() {
         let _ = PathChange::glob_kept("[workspace] members", "tasks/*", Vec::new(), ".rituals/*");
+    }
+
+    #[test]
+    fn a_kept_exclude_names_what_it_still_holds_and_what_it_gains() {
+        assert_eq!(
+            PathChange::exclude_kept(
+                "[workspace] exclude",
+                "tasks/group",
+                vec!["tasks/group/readme.md".to_string()],
+                ".rituals/group"
+            )
+            .to_string(),
+            "[workspace] exclude keeps `tasks/group`, which still holds `tasks/group/readme.md`, \
+             and gains `.rituals/group`"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "an exclude entry is kept only because something it holds stays")]
+    fn a_kept_exclude_with_nothing_left_in_it_is_a_bug() {
+        let _ = PathChange::exclude_kept(
+            "[workspace] exclude",
+            "tasks/group",
+            Vec::new(),
+            ".rituals/group",
+        );
+    }
+
+    #[test]
+    fn a_dropped_entry_names_the_entry_that_already_stands_for_it() {
+        assert_eq!(
+            PathChange::dropped("[workspace] exclude", "tasks/group", ".rituals/group").to_string(),
+            "[workspace] exclude drops `tasks/group`, which is gone once its contents move, \
+             since it already lists `.rituals/group`"
+        );
     }
 }

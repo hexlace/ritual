@@ -1,11 +1,18 @@
 //! Removing the directories a migration's moves emptied.
 //!
-//! This runs after the project's changes are kept, outside the rollback: an
-//! empty directory is cosmetic and harmless if left, so nothing it does or
-//! fails to do is a reason to undo a migration that worked.
+//! This runs inside the rollback, after the moves and before Cargo is asked
+//! to read the project again: whether a directory is still there decides
+//! what a glob in `[workspace] members` matches, so the check that the
+//! project still loads has to see the tree the run leaves, and a run that
+//! fails afterwards has to put the directories back before it moves anything
+//! back into them. A directory that could not be removed is still only a
+//! line in the report: if leaving it there breaks nothing, the migration
+//! worked, and if it does, that check says so.
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+
+use rituals_compose::rollback::Changes;
 
 use crate::places::from_the_root;
 use crate::report;
@@ -19,35 +26,41 @@ pub(crate) struct Vacated {
 }
 
 /// Removes every directory the moves emptied, from each source's parent up
-/// to and including the boundary, and reports each as it goes, deepest first.
+/// to and including the boundary, recording each in `changes` so a failed
+/// run creates it again, and reports each as it goes, deepest first.
 ///
 /// A directory that still holds something stops the walk upward and is
 /// reported as kept, with what is in it. A directory that could not be
-/// removed or listed is reported as a line too: the migration worked, and
-/// what failed here is cosmetic.
-pub(crate) fn tidy(root: &Path, vacated: &[Vacated]) -> Vec<String> {
+/// removed or listed is reported as a line too, not a failure: whether
+/// leaving it matters is for the check that follows to say.
+pub(crate) fn tidy(root: &Path, vacated: &Vacated, changes: &mut Changes) -> Vec<String> {
     let mut lines = Vec::new();
-    for directories in vacated {
-        for source in &directories.sources {
-            remove_empty_ancestors(root, &directories.boundary, source, &mut lines);
-        }
-        lines.extend(kept(root, &directories.boundary));
+    for source in &vacated.sources {
+        remove_empty_ancestors(root, &vacated.boundary, source, changes, &mut lines);
     }
+    lines.extend(kept(root, &vacated.boundary));
     lines
 }
 
 /// Removes each directory above `source`, nearest first, that is empty, up to
 /// and including `boundary`, and stops at the first that is not.
 ///
-/// `remove_dir` removes a directory only if it is empty, which is the check
-/// that nothing else was in it, made by the one call that deletes it.
-fn remove_empty_ancestors(root: &Path, boundary: &Path, source: &Path, lines: &mut Vec<String>) {
+/// [`Changes::remove_empty_directory`] removes a directory only if it is
+/// empty, which is the check that nothing else was in it, made by the one
+/// call that deletes it.
+fn remove_empty_ancestors(
+    root: &Path,
+    boundary: &Path,
+    source: &Path,
+    changes: &mut Changes,
+    lines: &mut Vec<String>,
+) {
     for directory in source
         .ancestors()
         .skip(1)
         .take_while(|directory| directory.starts_with(boundary))
     {
-        match std::fs::remove_dir(directory) {
+        match changes.remove_empty_directory(directory) {
             Ok(()) => lines.push(report::deleted(&from_the_root(directory, root))),
             // Either an earlier source's walk already removed it and
             // everything above it that could go, or something else is in it.
@@ -104,6 +117,9 @@ fn entries_of(directory: &Path) -> std::io::Result<Vec<String>> {
 mod tests {
     use std::path::Path;
 
+    use rituals::Failure;
+    use rituals_compose::rollback;
+
     use super::{Vacated, tidy};
     use crate::test_support::{ScratchDir, TestOutcome};
 
@@ -114,6 +130,33 @@ mod tests {
         }
     }
 
+    /// The lines [`tidy`] reports for `sources` under `tasks/`, from a run
+    /// that keeps what it removed.
+    fn tidied(root: &Path, sources: &[&str]) -> Result<Vec<String>, Failure> {
+        rollback::attempt("tidying again", |changes| {
+            Ok(tidy(root, &vacated(root, sources), changes))
+        })
+    }
+
+    /// A run that tidies and then fails has every directory it removed back,
+    /// so the moves can be undone into them.
+    #[test]
+    fn a_run_that_fails_after_tidying_has_the_directories_back() -> TestOutcome {
+        let scratch = ScratchDir::new("tidy-undone")?;
+        let root = scratch.path();
+        std::fs::create_dir_all(root.join("tasks/group"))?;
+
+        let outcome = rollback::attempt("tidying again", |changes| {
+            let lines = tidy(root, &vacated(root, &["tasks/group/deep"]), changes);
+            assert_eq!(lines.len(), 2, "{lines:?}");
+            Err::<(), _>(Failure::new("the project no longer loads"))
+        });
+
+        assert!(outcome.is_err());
+        assert!(root.join("tasks/group").is_dir());
+        Ok(())
+    }
+
     /// The tasks moved out and nothing else was in `tasks/`: it goes, and one
     /// line says so.
     #[test]
@@ -122,7 +165,7 @@ mod tests {
         let root = scratch.path();
         std::fs::create_dir_all(root.join("tasks"))?;
 
-        let lines = tidy(root, &[vacated(root, &["tasks/greet", "tasks/shout"])]);
+        let lines = tidied(root, &["tasks/greet", "tasks/shout"])?;
 
         assert_eq!(lines, ["deleted tasks/ (empty once its tasks moved out)"]);
         assert!(!root.join("tasks").exists());
@@ -136,7 +179,7 @@ mod tests {
         std::fs::create_dir_all(root.join("tasks/helper"))?;
         std::fs::write(root.join("tasks/notes.md"), "keep\n")?;
 
-        let lines = tidy(root, &[vacated(root, &["tasks/greet"])]);
+        let lines = tidied(root, &["tasks/greet"])?;
 
         assert_eq!(
             lines,
@@ -154,7 +197,7 @@ mod tests {
         let root = scratch.path();
         std::fs::create_dir_all(root.join("tasks/group"))?;
 
-        let lines = tidy(root, &[vacated(root, &["tasks/group/deep"])]);
+        let lines = tidied(root, &["tasks/group/deep"])?;
 
         assert_eq!(
             lines,
@@ -173,7 +216,7 @@ mod tests {
         let root = scratch.path();
         std::fs::create_dir_all(root.join("tasks/group/other"))?;
 
-        let lines = tidy(root, &[vacated(root, &["tasks/group/deep"])]);
+        let lines = tidied(root, &["tasks/group/deep"])?;
 
         assert_eq!(lines, ["kept tasks/, which still holds group/"]);
         assert!(root.join("tasks/group/other").is_dir());
@@ -188,7 +231,7 @@ mod tests {
         let root = scratch.path();
         std::fs::create_dir_all(root.join("tasks/group"))?;
 
-        let lines = tidy(root, &[vacated(root, &["tasks/group/a", "tasks/group/b"])]);
+        let lines = tidied(root, &["tasks/group/a", "tasks/group/b"])?;
 
         assert_eq!(
             lines
@@ -207,7 +250,7 @@ mod tests {
         let scratch = ScratchDir::new("tidy-gone")?;
         let root = scratch.path();
 
-        let lines = tidy(root, &[vacated(root, &["tasks/greet"])]);
+        let lines = tidied(root, &["tasks/greet"])?;
 
         assert!(lines.is_empty(), "{lines:?}");
         Ok(())
@@ -228,7 +271,7 @@ mod tests {
         std::fs::set_permissions(root.join("tasks"), std::fs::Permissions::from_mode(0o555))?;
         let enforced = std::fs::File::create(root.join("tasks/.probe")).is_err();
 
-        let lines = tidy(root, &[vacated(root, &["tasks/group/deep"])]);
+        let lines = tidied(root, &["tasks/group/deep"])?;
 
         std::fs::set_permissions(root.join("tasks"), std::fs::Permissions::from_mode(0o755))?;
         if !enforced {
@@ -259,7 +302,7 @@ mod tests {
         std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o555))?;
         let enforced = std::fs::File::create(root.join(".probe")).is_err();
 
-        let lines = tidy(root, &[vacated(root, &["tasks/greet"])]);
+        let lines = tidied(root, &["tasks/greet"])?;
 
         std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o755))?;
         if !enforced {
