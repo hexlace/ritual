@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use toml_edit::DocumentMut;
 
 use super::crates::{self, Child};
-use super::process::{built_binary_path, cargo, run_binary, run_ritual};
+use super::process::{
+    built_binary_path, cargo, run_binary, run_binary_with_global_git_configuration, run_ritual,
+};
 use super::{Checkout, Outcome, RunOutput, TestOutcome, failure, manifest, path_to_str, read_text};
 
 /// A project `ritual new` scaffolded inside a story's own temporary
@@ -134,6 +136,22 @@ impl Project {
     pub(crate) fn run_cli(&self, arguments: &[&str]) -> Outcome<RunOutput> {
         let binary = self.build()?;
         run_binary(&binary, &self.root, arguments)
+    }
+
+    /// Builds the composed CLI, then runs the built binary as
+    /// [`Self::run_cli`] does, except that the `git` it starts reads
+    /// `configuration` as its global configuration, and nothing else from
+    /// the machine.
+    ///
+    /// `configuration` is a file the story wrote itself, for a story about
+    /// what ritual does when a developer's own configuration says something.
+    pub(crate) fn run_cli_with_global_git_configuration(
+        &self,
+        arguments: &[&str],
+        configuration: &Path,
+    ) -> Outcome<RunOutput> {
+        let binary = self.build()?;
+        run_binary_with_global_git_configuration(&binary, &self.root, arguments, configuration)
     }
 
     /// Writes a hand-written leaf crate under `tasks/<crate_name>` and adds

@@ -3,11 +3,15 @@
 
 mod support;
 
+use std::path::Path;
+
 use support::generated::mounted_entries;
 use support::help::{command_names, lists_command};
 use support::manifest;
 use support::tree::{Entry, changed_paths};
-use support::{TempDir, TestOutcome, snapshot_tree};
+use support::{
+    ResultContext, TempDir, TestOutcome, process, run_binary, snapshot_tree, write_text,
+};
 
 /// `ritual --help`, captured from this repository's own `ritual` binary:
 /// a `Usage:` line naming the bin, a `Commands:` block, and an `Options:`
@@ -373,4 +377,176 @@ fn the_0_1_layout_fixture_reproduces_what_0_1s_add_wrote() -> TestOutcome {
         );
         Ok(())
     })
+}
+
+/// The rule a stand-in for the developer's own global ignore file holds, and
+/// the file it matches. Nothing in a fixture project is named like this, so a
+/// match can only have come from the machine.
+const MACHINE_ONLY_RULE: &str = "**/machine-only.txt\n";
+const MACHINE_ONLY_PATH: &str = "notes/machine-only.txt";
+
+/// A repository holding `MACHINE_ONLY_PATH`, and a stand-in for a developer's
+/// home holding `.config/git/ignore` with `MACHINE_ONLY_RULE`.
+struct MachineWithAGlobalIgnore {
+    repository: TempDir,
+    home: TempDir,
+}
+
+impl MachineWithAGlobalIgnore {
+    fn new(prefix: &str) -> support::Outcome<Self> {
+        let repository = TempDir::new(&format!("{prefix}-repository"))?;
+        let home = TempDir::new(&format!("{prefix}-home"))?;
+        support::git::git(repository.path(), &["init"])?.expect_success("`git init`");
+        std::fs::create_dir_all(repository.path().join("notes"))
+            .context("creating notes/ failed")?;
+        write_text(&repository.path().join(MACHINE_ONLY_PATH), "x\n")?;
+        std::fs::create_dir_all(home.path().join(".config/git"))
+            .context("creating the stand-in .config/git failed")?;
+        write_text(&home.path().join(".config/git/ignore"), MACHINE_ONLY_RULE)?;
+        Ok(Self { repository, home })
+    }
+
+    /// The `.config` directory git reads `git/ignore` from when
+    /// `XDG_CONFIG_HOME` is set to it.
+    fn config_home(&self) -> std::path::PathBuf {
+        self.home.path().join(".config")
+    }
+
+    /// `git check-ignore -v --no-index` on the file only the machine ignores.
+    fn check_ignore(&self) -> std::process::Command {
+        let mut command = std::process::Command::new("git");
+        command
+            .args(["check-ignore", "-v", "--no-index", MACHINE_ONLY_PATH])
+            .current_dir(self.repository.path())
+            .stdin(std::process::Stdio::null());
+        command
+    }
+}
+
+fn ignored_by_the_machine(output: &std::process::Output) -> bool {
+    String::from_utf8_lossy(&output.stdout).contains(MACHINE_ONLY_PATH)
+}
+
+/// A developer's global ignore file at `$XDG_CONFIG_HOME/git/ignore` is read
+/// by git even when `GIT_CONFIG_GLOBAL` is `/dev/null`, so the first half of
+/// this story is the positive control: git with only that variable set
+/// *does* match. The second half sets the same environment on a command and
+/// then isolates it, and git no longer does.
+#[test]
+fn isolating_git_stops_a_global_ignore_file_in_the_xdg_config_directory() -> TestOutcome {
+    let machine = MachineWithAGlobalIgnore::new("isolation-xdg")?;
+
+    let mut unisolated = machine.check_ignore();
+    unisolated
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("XDG_CONFIG_HOME", machine.config_home());
+    let control = unisolated.output().context("spawning git failed")?;
+    assert!(
+        ignored_by_the_machine(&control),
+        "expected git to read the stand-in global ignore file when only \
+         GIT_CONFIG_GLOBAL is set; stdout was:\n{}",
+        String::from_utf8_lossy(&control.stdout)
+    );
+
+    let mut isolated = machine.check_ignore();
+    isolated.env("XDG_CONFIG_HOME", machine.config_home());
+    support::git::isolate_from_the_machine(&mut isolated);
+    let output = isolated.output().context("spawning git failed")?;
+    assert!(
+        !ignored_by_the_machine(&output),
+        "an isolated git must not read a global ignore file; stdout was:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "isolating git must not make it warn; stderr was:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+/// With `XDG_CONFIG_HOME` unset git reads `$HOME/.config/git/ignore`, which is
+/// where a developer's file is on a machine that never set the variable.
+/// Isolating must stop that fallback too.
+#[test]
+fn isolating_git_stops_a_global_ignore_file_under_the_home_directory() -> TestOutcome {
+    let machine = MachineWithAGlobalIgnore::new("isolation-home")?;
+
+    let mut isolated = machine.check_ignore();
+    isolated.env("HOME", machine.home.path());
+    support::git::isolate_from_the_machine(&mut isolated);
+    let output = isolated.output().context("spawning git failed")?;
+
+    assert!(
+        !ignored_by_the_machine(&output),
+        "an isolated git must not read $HOME/.config/git/ignore; stdout was:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    Ok(())
+}
+
+/// The shell script a story's binary runs: `git check-ignore` on the
+/// machine-only file, with `HOME` standing in for a developer's home.
+///
+/// A story's binary is started by [`run_binary`] and nothing else, so the
+/// script, not the parent environment, carries the developer's home in.
+fn check_ignore_script(machine: &MachineWithAGlobalIgnore) -> String {
+    format!(
+        "HOME={} exec git check-ignore -v --no-index {MACHINE_ONLY_PATH}",
+        machine.home.path().display()
+    )
+}
+
+#[test]
+fn a_binary_started_by_a_story_does_not_read_the_machines_global_ignore_file() -> TestOutcome {
+    let machine = MachineWithAGlobalIgnore::new("isolation-run-binary")?;
+
+    let output = run_binary(
+        Path::new("sh"),
+        machine.repository.path(),
+        &["-c", &check_ignore_script(&machine)],
+    )?;
+
+    assert!(
+        !output.stdout.contains(MACHINE_ONLY_PATH),
+        "a binary run by a story must not see the machine's global ignore file; stdout was:\n{}",
+        output.stdout
+    );
+    Ok(())
+}
+
+/// The one global configuration a story chooses for itself is read, and is
+/// the only one: its `core.excludesFile` ignores the file, and the machine's
+/// own ignore file, which would name the same path, is not what answered.
+#[test]
+fn a_story_can_give_its_binary_one_global_git_configuration_of_its_own() -> TestOutcome {
+    let machine = MachineWithAGlobalIgnore::new("isolation-chosen-configuration")?;
+    let chosen = TempDir::new("isolation-chosen-ignore")?;
+    let chosen_ignore = chosen.path().join("chosen-ignore");
+    write_text(&chosen_ignore, "**/machine-only.txt\n")?;
+    let configuration = chosen.path().join("gitconfig");
+    write_text(
+        &configuration,
+        &format!("[core]\n\texcludesFile = {}\n", chosen_ignore.display()),
+    )?;
+
+    let output = process::run_binary_with_global_git_configuration(
+        Path::new("sh"),
+        machine.repository.path(),
+        &["-c", &check_ignore_script(&machine)],
+        &configuration,
+    )?;
+
+    assert!(
+        output.stdout.contains(&chosen_ignore.display().to_string()),
+        "expected the story's own excludesFile to answer; stdout was:\n{}",
+        output.stdout
+    );
+    assert!(
+        !output.stdout.contains(".config/git/ignore"),
+        "the machine's own ignore file must not answer; stdout was:\n{}",
+        output.stdout
+    );
+    Ok(())
 }

@@ -155,6 +155,35 @@ pub(crate) fn printed_recovery_commands(message: &str) -> Vec<String> {
         .collect()
 }
 
+/// Runs `migrate` on `project`, asserts ritual refused it naming each of
+/// `expected` (compared without regard to case) and left the whole tree
+/// byte-identical.
+#[track_caller]
+pub(crate) fn assert_migrate_is_refused_and_writes_nothing(
+    project: &Project,
+    expected: &[&str],
+) -> TestOutcome {
+    let before = snapshot_tree(project.root())?;
+    let bin_name = project.bin_name()?;
+
+    let refused = project.run_cli(&["migrate"])?;
+
+    let message = assert_a_refusal(&refused, &bin_name, "`migrate`").to_lowercase();
+    for name in expected {
+        assert!(
+            message.contains(&name.to_lowercase()),
+            "expected the refusal of `migrate` to name `{name}`; stderr was:\n{}",
+            refused.stderr
+        );
+    }
+    assert_trees_identical(
+        "a refused `migrate` must write nothing",
+        &before,
+        &snapshot_tree(project.root())?,
+    );
+    Ok(())
+}
+
 /// Runs `command` with `sh -c` from `directory`, as a person pastes it into
 /// a shell standing in the project's root, with git reading nothing from the
 /// machine it runs on.
