@@ -543,9 +543,11 @@ metadata` runs before the deletion and cannot see what the deletion
 breaks. Dependents come from what each package declares, not from the
 resolved graph, which holds only the edges the active features reach; and
 a path crate `cargo metadata` did not load at all, such as one behind an
-optional dependency nothing turns on, is asked about with `cargo metadata
---no-deps`, because Cargo still reads its manifest when it resolves the
-lockfile.
+optional dependency nothing turns on, is asked about by reading its manifest,
+because Cargo still reads it when it resolves the lockfile. That is the walk
+`migrate` makes to find every manifest to repoint, not `cargo metadata
+--no-deps`, which refuses a crate that sits under the workspace's root
+without being a member.
 
 Cargo's configuration is read the way Cargo reads it: the `.cargo/config`
 file, or `.cargo/config.toml` when there is none, in every directory a

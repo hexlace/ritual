@@ -26,7 +26,7 @@ use crate::rollback::Changes;
 use crate::workspace::{self, Located, locate_project};
 
 pub use schema::Metadata;
-pub(crate) use schema::{Declared, DepKind, Dependency, Node, NodeDependency, Package};
+pub(crate) use schema::{DepKind, Dependency, Node, NodeDependency, Package};
 pub use workspace_member::WorkspaceMember;
 
 /// A composed CLI crate, found among a workspace's members. Declared in the
@@ -236,64 +236,6 @@ pub fn fetch_in_its_own_project(
     let document = fetch_recording(changes, current_dir)?;
     document.ensure_runs_in_its_own_project(package_name, command, arguments)?;
     Ok(document)
-}
-
-/// Asks Cargo what the package whose manifest is `manifest_path` declares,
-/// without resolving anything, as `cargo metadata --no-deps` reports it.
-///
-/// For a package the resolved graph did not load: one reached only through
-/// an optional dependency no feature turns on is still read by Cargo when
-/// it resolves the lockfile, but is not in [`Metadata`]'s packages.
-/// `--no-deps` writes no lockfile.
-///
-/// # Errors
-///
-/// Returns a [`Failure`] with `cargo metadata`'s own stderr when it could
-/// not be run or failed, one naming a parse or version problem, and one
-/// naming `manifest_path` when Cargo reported no package with that manifest.
-pub(crate) fn fetch_declared(manifest_path: &Path) -> Result<Package, Failure> {
-    let output = cargo::command()
-        .args([
-            "metadata",
-            "--format-version",
-            "1",
-            "--no-deps",
-            "--manifest-path",
-        ])
-        .arg(manifest_path)
-        .output()
-        .map_err(|error| Failure::new("running `cargo metadata` failed").caused_by(error))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Failure::new(format!(
-            "cargo metadata failed for {}: {}",
-            manifest_path.display(),
-            stderr.trim_end()
-        )));
-    }
-
-    let declared: Declared = serde_json::from_slice(&output.stdout)
-        .map_err(|error| Failure::new("parsing cargo metadata output failed").caused_by(error))?;
-    if declared.version != SUPPORTED_FORMAT_VERSION {
-        return Err(Failure::new(format!(
-            "cargo metadata returned format version {}, but this framework understands only \
-             version {SUPPORTED_FORMAT_VERSION}",
-            declared.version
-        )));
-    }
-
-    let wanted = crate::paths::normalize(manifest_path);
-    declared
-        .packages
-        .into_iter()
-        .find(|package| crate::paths::normalize(&package.manifest_path) == wanted)
-        .ok_or_else(|| {
-            Failure::new(format!(
-                "cargo metadata reported no package for {}",
-                manifest_path.display()
-            ))
-        })
 }
 
 /// Parses `cargo metadata --format-version 1`'s JSON output.
@@ -523,16 +465,18 @@ impl Metadata {
     /// features, but `cargo metadata` lists only the packages the active
     /// features reach: a crate outside the workspace behind an optional
     /// dependency no feature turns on is read, and is not here. So each such
-    /// crate is asked about with `cargo metadata --no-deps`, and so are the
-    /// path crates it declares in turn, until there are none left that
-    /// nothing has asked about. Packages under `directory` are not asked
-    /// about: they go with it.
+    /// crate's own manifest is read, and so are those of the path crates it
+    /// declares in turn, the walk [`Metadata::manifests_cargo_reads`] makes,
+    /// until there are none left that nothing has asked about. A path crate
+    /// whose directory holds no manifest is left out. Packages under
+    /// `directory` are not asked about: they go with it.
     ///
     /// # Errors
     ///
-    /// Returns a [`Failure`] when `cargo metadata` cannot say what one of
-    /// those crates declares, so a caller deleting `directory` cannot tell
-    /// whether something would still read it.
+    /// Returns a [`Failure`] naming the manifest when one of those crates'
+    /// manifests exists but cannot be read or does not parse as TOML, so a caller
+    /// deleting `directory` cannot tell whether something would still read
+    /// it.
     ///
     /// # Examples
     ///

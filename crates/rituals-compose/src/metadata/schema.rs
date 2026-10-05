@@ -61,15 +61,6 @@ pub struct Metadata {
     pub(crate) resolve: Resolve,
 }
 
-/// What `cargo metadata --no-deps` prints: every package of a workspace as
-/// its manifest declares it, with nothing resolved.
-#[derive(Debug, Deserialize)]
-pub(crate) struct Declared {
-    /// The schema version, checked to be `1` like [`Metadata`]'s.
-    pub(crate) version: u64,
-    pub(crate) packages: Vec<Package>,
-}
-
 /// One package in the resolved graph — a workspace member or a dependency,
 /// at any depth.
 #[derive(Debug, Deserialize)]
