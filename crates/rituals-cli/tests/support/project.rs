@@ -136,8 +136,9 @@ impl Project {
         run_binary(&binary, &self.root, arguments)
     }
 
-    /// Writes a hand-written leaf crate under `tasks/<crate_name>` and adds
-    /// it to the workspace's members. Returns the crate's directory.
+    /// Writes a hand-written leaf crate under `.rituals/<crate_name>`, where
+    /// this version's `add` puts a ritual, and adds it to the workspace's
+    /// members. Returns the crate's directory.
     pub(crate) fn write_leaf(&self, crate_name: &str) -> Outcome<PathBuf> {
         self.write_member(
             crate_name,
@@ -146,7 +147,7 @@ impl Project {
         )
     }
 
-    /// Writes a hand-written bundle crate under `tasks/<crate_name>`,
+    /// Writes a hand-written bundle crate under `.rituals/<crate_name>`,
     /// described by `about` and grouping `children`, and adds it to the
     /// workspace's members. Any [`Child::Crate`] must already be a member.
     /// Returns the crate's directory.
@@ -164,7 +165,7 @@ impl Project {
     }
 
     fn write_member(&self, crate_name: &str, manifest: &str, lib: &str) -> Outcome<PathBuf> {
-        let member = format!("tasks/{crate_name}");
+        let member = format!(".rituals/{crate_name}");
         let crate_dir = self.root.join(&member);
         crates::write_crate(&crate_dir, manifest, lib)?;
         manifest::edit(&self.workspace_manifest_path(), |document| {

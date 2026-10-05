@@ -56,6 +56,21 @@ pub(crate) fn add_task(project: &Project, name: &str) -> TestOutcome {
     Ok(())
 }
 
+/// Writes the hand-written leaf crate `name` in `tasks/<name>` and lists it
+/// among the workspace's members, as 0.1 left a task the command line does
+/// not import: nothing mounts it.
+pub(crate) fn write_unmounted_task(project: &Project, name: &str) -> TestOutcome {
+    let member = format!("tasks/{name}");
+    crates::write_crate(
+        &project.root().join(&member),
+        &crates::leaf_manifest(name),
+        &crates::leaf_lib(name),
+    )?;
+    manifest::edit(&project.workspace_manifest_path(), |document| {
+        manifest::push_member(document, &member)
+    })
+}
+
 /// A project `new` scaffolded and 0.1's `add` gave each of `tasks`, in the
 /// order given. Not under version control.
 pub(crate) fn project_with_tasks(

@@ -24,8 +24,8 @@ fn project_importing_a_bundle(
     working_dir: &TempDir,
 ) -> support::Outcome<Project> {
     let project = Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
-    project.write_leaf("hello")?;
-    project.write_leaf("wave")?;
+    support::legacy::write_unmounted_task(&project, "hello")?;
+    support::legacy::write_unmounted_task(&project, "wave")?;
     let children = [
         Child::Crate {
             key: "hello",
