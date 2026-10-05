@@ -115,8 +115,9 @@ impl Planned {
 /// that would be unsafe. Everything here only reads.
 ///
 /// The refusals come in the order of how much each one rules out: a task
-/// that holds other members, a destination that is taken, a submodule, and
-/// last a manifest that reaches a task in a way that cannot be repointed.
+/// that holds other members, a destination that is taken, a submodule, files
+/// git would see differently at their new place, and last a manifest that
+/// reaches a task in a way that cannot be repointed.
 pub(super) fn plan(
     candidates: &Candidates,
     migrating: &Migrating<'_>,
@@ -163,6 +164,14 @@ pub(super) fn plan(
     )?;
     refusals::ensure_none_holds_a_submodule(
         directories,
+        migrating.repository,
+        migrating.root,
+        migrating.migrate_command,
+    )?;
+
+    refusals::ensure_the_moves_keep_what_git_sees(
+        &relocation,
+        to_directory,
         migrating.repository,
         migrating.root,
         migrating.migrate_command,

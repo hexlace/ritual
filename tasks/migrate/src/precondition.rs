@@ -5,11 +5,7 @@ use std::path::{Path, PathBuf};
 use rituals::Failure;
 use rituals_compose::git::{self, NotClean, Unanswered};
 
-use crate::places::from_the_root_in;
-
-/// How many uncommitted paths a refusal names before it counts the rest, so
-/// a project that was never committed does not print a screenful.
-const DIRTY_PATHS_NAMED: usize = 10;
+use crate::places::{self, from_the_root_in};
 
 /// Where the project's root is in the repository its clean work tree is in:
 /// the repository's top level and the project's root, both resolved through
@@ -114,18 +110,14 @@ pub(crate) fn unanswered_refusal(
 }
 
 /// The first few of `files`, each spelled as [`git::top_level_pathspec`]
-/// spells it, and a count of the rest.
+/// spells it, and a count of the rest, so a project that was never committed
+/// does not print a screenful.
 fn dirty_paths(files: &[PathBuf]) -> String {
-    let named: Vec<String> = files
+    let spelled: Vec<String> = files
         .iter()
-        .take(DIRTY_PATHS_NAMED)
         .map(|file| git::top_level_pathspec(file))
         .collect();
-    let named = named.join(", ");
-    match files.len().checked_sub(DIRTY_PATHS_NAMED) {
-        Some(rest) if rest > 0 => format!("{named} and {rest} more"),
-        Some(_) | None => named,
-    }
+    places::listed(&spelled)
 }
 
 #[cfg(test)]

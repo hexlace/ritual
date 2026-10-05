@@ -9,10 +9,14 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use rituals::{Failure, Outcome};
-use rituals_compose::git::{self, Unanswered};
+use rituals_compose::git::{
+    self, AttributeChange, Flag, IgnoreRule, IgnoredFile, MovedFile, SeenDifferently, Unanswered,
+    Unwatched,
+};
+use rituals_compose::relocation::Relocation;
 use rituals_compose::sentence::join_with_and;
 
-use crate::places::from_the_root;
+use crate::places::{from_the_root, listed};
 use crate::precondition::{self, Repository};
 
 /// A workspace member, as far as the checks here read one.
@@ -118,6 +122,35 @@ pub(super) fn ensure_none_holds_a_submodule(
     Ok(())
 }
 
+/// Refuses when moving the directories would change what git sees of the
+/// files in them: a rule that ignores a file at its new place and not now, or
+/// the reverse, other attributes there, a place outside the sparse checkout,
+/// or a tracked file git has been told not to look at.
+///
+/// Git decides these by path, so a commit after the move would leave out a
+/// file that is committed now, add one that is ignored now, or store one
+/// through another filter, and `git status` would show each as an ordinary
+/// change. The refusal opens `refusing to migrate` rather than naming a
+/// directory, because one rule can catch every task.
+///
+/// `to_directory` is the directory the tasks move into.
+pub(super) fn ensure_the_moves_keep_what_git_sees(
+    relocation: &Relocation,
+    to_directory: &Path,
+    repository: &Repository,
+    root: &Path,
+    migrate_command: &str,
+) -> Outcome {
+    git::ensure_a_move_keeps_what_git_sees(relocation, root).map_err(|seen_differently| {
+        seen_differently_refusal(
+            &seen_differently,
+            &from_the_root(to_directory, root),
+            repository,
+            migrate_command,
+        )
+    })
+}
+
 /// Refuses when git does not track a manifest that needs an edit, because
 /// once migrate has edited it git could not give its old bytes back.
 ///
@@ -211,6 +244,196 @@ fn manifest_is_not_tracked(manifest: &str, change: &str, migrate_command: &str) 
     ))
 }
 
+/// The refusal for what git would see differently, with every path spelled
+/// from the project's root.
+fn seen_differently_refusal(
+    seen_differently: &SeenDifferently,
+    to_directory: &str,
+    repository: &Repository,
+    migrate_command: &str,
+) -> Failure {
+    match seen_differently {
+        SeenDifferently::Unanswered(unanswered) => {
+            precondition::unanswered_refusal(unanswered, migrate_command, |message| {
+                sight_unknown(message)
+            })
+        }
+        SeenDifferently::WouldBeIgnored(files) => would_be_ignored(
+            &files
+                .iter()
+                .map(|ignored| ignored_at(ignored, MovedFile::to, repository))
+                .collect::<Vec<_>>(),
+            to_directory,
+            migrate_command,
+        ),
+        SeenDifferently::WouldNoLongerBeIgnored(files) => would_no_longer_be_ignored(
+            &files
+                .iter()
+                .map(|ignored| ignored_at(ignored, MovedFile::from, repository))
+                .collect::<Vec<_>>(),
+            to_directory,
+            migrate_command,
+        ),
+        SeenDifferently::AttributesWouldChange(changes) => attributes_would_change(
+            &changes
+                .iter()
+                .map(|change| attribute_change_named(change, repository))
+                .collect::<Vec<_>>(),
+            to_directory,
+            migrate_command,
+        ),
+        SeenDifferently::OutsideSparseCheckout(files) => outside_the_sparse_checkout(
+            &files
+                .iter()
+                .map(|file| repository.shown(file.to()))
+                .collect::<Vec<_>>(),
+            to_directory,
+            migrate_command,
+        ),
+        SeenDifferently::Unwatched(files) => unwatched_by_git(
+            &files
+                .iter()
+                .map(|file| unwatched_named(file, repository))
+                .collect::<Vec<_>>(),
+            migrate_command,
+        ),
+    }
+}
+
+/// `it` for one file and `them` for more, for a sentence about the files.
+const fn it_or_them(count: usize) -> &'static str {
+    if count == 1 { "it" } else { "them" }
+}
+
+/// A file with the rule that ignores it: `tasks/greet/.env (`.env` in
+/// .gitignore:2)`. `place` says which of the file's two places is named.
+fn ignored_at(
+    ignored: &IgnoredFile,
+    place: fn(&MovedFile) -> &Path,
+    repository: &Repository,
+) -> String {
+    format!(
+        "{} ({})",
+        repository.shown(place(ignored.file())),
+        rule_named(ignored.rule(), repository)
+    )
+}
+
+/// A rule as `` `pattern` in source:line``, the source spelled from the
+/// project's root when it is in the repository, and as git gave it, which is
+/// absolute, when it is not.
+fn rule_named(rule: &IgnoreRule, repository: &Repository) -> String {
+    let source = if rule.source().is_absolute() {
+        rule.source().display().to_string()
+    } else {
+        repository.shown(rule.source())
+    };
+    format!("`{}` in {source}:{}", rule.pattern(), rule.line())
+}
+
+/// A file with its attributes at both places: `tasks/greet/a.bin
+/// (`filter=lfs` now, none at .rituals/greet/a.bin)`.
+fn attribute_change_named(change: &AttributeChange, repository: &Repository) -> String {
+    let named = |attributes: &[git::Attribute]| {
+        if attributes.is_empty() {
+            "none".to_string()
+        } else {
+            attributes
+                .iter()
+                .map(|attribute| format!("`{attribute}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    };
+    let to = repository.shown(change.file().to());
+    format!(
+        "{} ({} now, {} at {to})",
+        repository.shown(change.file().from()),
+        named(change.before()),
+        named(change.after())
+    )
+}
+
+/// A file git has been told not to look at, with the flag: `tasks/greet/a.rs
+/// (assume-unchanged)`.
+fn unwatched_named(file: &Unwatched, repository: &Repository) -> String {
+    let flag = match file.flag() {
+        Flag::AssumeUnchanged => "assume-unchanged",
+        Flag::SkipWorktree => "skip-worktree",
+    };
+    format!("{} ({flag})", repository.shown(file.path()))
+}
+
+/// `files` are each file git would ignore at its new place, with the rule.
+fn would_be_ignored(files: &[String], to_directory: &str, migrate_command: &str) -> Failure {
+    Failure::new(format!(
+        "refusing to migrate: git would ignore {}, so a commit after the move would leave out \
+         what is committed now; change the rules named so they do not match under \
+         {to_directory}/, then run `{migrate_command}` again",
+        listed(files)
+    ))
+}
+
+/// `files` are each file git ignores now, with the rule.
+fn would_no_longer_be_ignored(
+    files: &[String],
+    to_directory: &str,
+    migrate_command: &str,
+) -> Failure {
+    let them = it_or_them(files.len());
+    Failure::new(format!(
+        "refusing to migrate: git ignores {}, and nothing would ignore {them} under \
+         {to_directory}/, so a commit after the move would add {them}; add a rule that ignores \
+         {them} there, then run `{migrate_command}` again",
+        listed(files)
+    ))
+}
+
+/// `files` are each file whose attributes would differ, with both sets.
+fn attributes_would_change(files: &[String], to_directory: &str, migrate_command: &str) -> Failure {
+    Failure::new(format!(
+        "refusing to migrate: git would give {} other attributes under {to_directory}/ than it \
+         gives {} now; give {to_directory}/ the same attributes in .gitattributes, then run \
+         `{migrate_command}` again",
+        listed(files),
+        it_or_them(files.len())
+    ))
+}
+
+/// `files` are each new place the sparse checkout leaves out.
+fn outside_the_sparse_checkout(
+    files: &[String],
+    to_directory: &str,
+    migrate_command: &str,
+) -> Failure {
+    let them = it_or_them(files.len());
+    Failure::new(format!(
+        "refusing to migrate: {} would be outside this checkout's sparse-checkout patterns, so \
+         git would not add {them}; add {them} with `git sparse-checkout add {to_directory}`, \
+         then run `{migrate_command}` again",
+        listed(files)
+    ))
+}
+
+/// `files` are each tracked file git has been told not to look at, with the
+/// flag.
+fn unwatched_by_git(files: &[String], migrate_command: &str) -> Failure {
+    Failure::new(format!(
+        "refusing to migrate: git has been told not to look at changes to {}, so a commit after \
+         the move could carry an edit git does not show; clear the flag with `git update-index \
+         --no-assume-unchanged` or `--no-skip-worktree`, commit what changed, then run \
+         `{migrate_command}` again",
+        listed(files)
+    ))
+}
+
+fn sight_unknown(git_words: &str) -> Failure {
+    Failure::new(format!(
+        "refusing to migrate: git could not say how it would see the files that move: \
+         {git_words}"
+    ))
+}
+
 fn tracking_unknown(git_words: &str) -> Failure {
     Failure::new(format!(
         "refusing to migrate: git could not say which of the manifests migrate edits it \
@@ -232,13 +455,16 @@ mod tests {
     use rituals_compose::git::fixture::git;
 
     use super::{
-        Member, destination_exists, destination_is_not_a_directory, ensure_destinations_are_free,
-        ensure_git_tracks_every_edited_manifest, ensure_none_holds_a_submodule,
-        ensure_none_holds_other_members, holds_a_submodule, holds_members, manifest_is_not_tracked,
-        tracking_unknown,
+        Member, attributes_would_change, destination_exists, destination_is_not_a_directory,
+        ensure_destinations_are_free, ensure_git_tracks_every_edited_manifest,
+        ensure_none_holds_a_submodule, ensure_none_holds_other_members,
+        ensure_the_moves_keep_what_git_sees, holds_a_submodule, holds_members,
+        manifest_is_not_tracked, outside_the_sparse_checkout, sight_unknown, tracking_unknown,
+        unwatched_by_git, would_be_ignored, would_no_longer_be_ignored,
     };
     use crate::precondition::WorkTree;
     use crate::test_support::{ScratchDir, TestOutcome, init_and_commit, write_files};
+    use rituals_compose::relocation::Relocation;
 
     const MIGRATE: &str = "cargo ritual migrate";
 
@@ -591,6 +817,182 @@ mod tests {
                 .starts_with("refusing to move tasks/greet: tasks/greet is a git submodule")),
             "the directory itself is the gitlink"
         );
+        Ok(())
+    }
+
+    fn named(places: &[&str]) -> Vec<String> {
+        places.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn a_file_git_would_ignore_is_refused_with_the_rule_and_how_to_change_it() {
+        assert_eq!(
+            would_be_ignored(
+                &named(&[".rituals/greet/Cargo.toml (`.*` in .gitignore:2)"]),
+                ".rituals",
+                MIGRATE
+            )
+            .to_string(),
+            "refusing to migrate: git would ignore .rituals/greet/Cargo.toml (`.*` in \
+             .gitignore:2), so a commit after the move would leave out what is committed now; \
+             change the rules named so they do not match under .rituals/, then run `cargo \
+             ritual migrate` again"
+        );
+        assert!(
+            would_be_ignored(&named(&["a (r)", "b (r)"]), ".rituals", MIGRATE)
+                .to_string()
+                .contains("git would ignore a (r), b (r), so a commit")
+        );
+    }
+
+    #[test]
+    fn an_ignored_file_the_new_place_would_not_ignore_is_refused_in_the_singular() {
+        assert_eq!(
+            would_no_longer_be_ignored(
+                &named(&["tasks/greet/.env (`.env` in .gitignore:2)"]),
+                ".rituals",
+                MIGRATE
+            )
+            .to_string(),
+            "refusing to migrate: git ignores tasks/greet/.env (`.env` in .gitignore:2), and \
+             nothing would ignore it under .rituals/, so a commit after the move would add it; \
+             add a rule that ignores it there, then run `cargo ritual migrate` again"
+        );
+    }
+
+    #[test]
+    fn ignored_files_the_new_place_would_not_ignore_are_refused_in_the_plural() {
+        assert_eq!(
+            would_no_longer_be_ignored(
+                &named(&["a (`x` in .gitignore:1)", "b (`x` in .gitignore:1)"]),
+                ".rituals",
+                MIGRATE
+            )
+            .to_string(),
+            "refusing to migrate: git ignores a (`x` in .gitignore:1), b (`x` in \
+             .gitignore:1), and nothing would ignore them under .rituals/, so a commit after the \
+             move would add them; add a rule that ignores them there, then run `cargo ritual \
+             migrate` again"
+        );
+    }
+
+    #[test]
+    fn a_file_that_would_have_other_attributes_is_refused_in_the_singular_and_the_plural() {
+        assert_eq!(
+            attributes_would_change(
+                &named(&[
+                    "tasks/greet/a.bin (`filter=lfs`, `-text` now, none at .rituals/greet/a.bin)"
+                ]),
+                ".rituals",
+                MIGRATE
+            )
+            .to_string(),
+            "refusing to migrate: git would give tasks/greet/a.bin (`filter=lfs`, `-text` now, \
+             none at .rituals/greet/a.bin) other attributes under .rituals/ than it gives it \
+             now; give .rituals/ the same attributes in .gitattributes, then run `cargo ritual \
+             migrate` again"
+        );
+        assert!(
+            attributes_would_change(&named(&["a", "b"]), ".rituals", MIGRATE)
+                .to_string()
+                .contains("than it gives them now;")
+        );
+    }
+
+    #[test]
+    fn a_new_place_outside_the_sparse_checkout_is_refused_with_how_to_add_it() {
+        assert_eq!(
+            outside_the_sparse_checkout(
+                &named(&[".rituals/greet/Cargo.toml"]),
+                ".rituals",
+                MIGRATE
+            )
+            .to_string(),
+            "refusing to migrate: .rituals/greet/Cargo.toml would be outside this checkout's \
+             sparse-checkout patterns, so git would not add it; add it with `git \
+             sparse-checkout add .rituals`, then run `cargo ritual migrate` again"
+        );
+        assert!(
+            outside_the_sparse_checkout(&named(&["a", "b"]), ".rituals", MIGRATE)
+                .to_string()
+                .contains("so git would not add them; add them with")
+        );
+    }
+
+    #[test]
+    fn a_file_git_was_told_not_to_look_at_is_refused_with_how_to_clear_the_flag() {
+        assert_eq!(
+            unwatched_by_git(&named(&["tasks/greet/a.rs (assume-unchanged)"]), MIGRATE).to_string(),
+            "refusing to migrate: git has been told not to look at changes to \
+             tasks/greet/a.rs (assume-unchanged), so a commit after the move could carry an \
+             edit git does not show; clear the flag with `git update-index \
+             --no-assume-unchanged` or `--no-skip-worktree`, commit what changed, then run \
+             `cargo ritual migrate` again"
+        );
+    }
+
+    #[test]
+    fn a_git_that_could_not_say_how_it_would_see_the_files_is_refused_in_its_own_words() {
+        assert_eq!(
+            sight_unknown("bad object").to_string(),
+            "refusing to migrate: git could not say how it would see the files that move: bad \
+             object"
+        );
+    }
+
+    /// The whole check against a real repository: a project ignore file that
+    /// would ignore the new directory is refused, naming each file where it
+    /// would be, the rule, and the line it is on, and fixing the rule lets
+    /// the same check through.
+    #[test]
+    fn the_check_refuses_a_rule_that_would_ignore_the_new_directory_and_passes_once_it_is_fixed()
+    -> TestOutcome {
+        let scratch = ScratchDir::new("refusals-sight")?;
+        let root = scratch.path();
+        write_files(
+            root,
+            &[
+                ("tasks/greet/Cargo.toml", "[package]\n"),
+                (".gitignore", "/target\n.*\n!.gitignore\n"),
+            ],
+        )?;
+        init_and_commit(root)?;
+        let work_tree = WorkTree::take(root);
+        let repository = work_tree
+            .ensure_clean(MIGRATE)
+            .map_err(|failure| failure.to_string())?;
+        let relocation = Relocation::new(
+            &root.join("tasks"),
+            &root.join(".rituals"),
+            [root.join("tasks/greet")],
+        );
+        let check = || {
+            ensure_the_moves_keep_what_git_sees(
+                &relocation,
+                &root.join(".rituals"),
+                repository,
+                root,
+                MIGRATE,
+            )
+            .err()
+            .map(|failure| failure.to_string())
+        };
+
+        assert_eq!(
+            check().as_deref(),
+            Some(
+                "refusing to migrate: git would ignore .rituals/greet/Cargo.toml (`.*` in \
+                 .gitignore:2), so a commit after the move would leave out what is committed \
+                 now; change the rules named so they do not match under .rituals/, then run \
+                 `cargo ritual migrate` again"
+            )
+        );
+
+        write_files(
+            root,
+            &[(".gitignore", "/target\n.*\n!.gitignore\n!.rituals\n")],
+        )?;
+        assert_eq!(check(), None);
         Ok(())
     }
 }

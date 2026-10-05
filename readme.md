@@ -333,7 +333,7 @@ For each task under `tasks/` that the CLI crate's `[package.metadata.ritual]
 tasks` list imports, it:
 
 - moves the directory to the same place under `.rituals/`, ignored files
-  included;
+  included, once git would see every file there as it does now (see below);
 - changes the workspace's `members`, `default-members` and `exclude`, keeping a
   glob a glob (`tasks/*` becomes `.rituals/*`) and keeping an explicit list
   explicit, each entry changed where it stands;
@@ -374,9 +374,23 @@ It only runs where git can give everything back, and refuses before it writes
 anything when:
 
 - the project is not in a git repository, or the work tree has changes that
-  are not committed or files that are not tracked (files git ignores are fine:
-  they move with their task). A project with nothing to migrate is told so
-  whatever its work tree holds;
+  are not committed or files that are not tracked (files git ignores do not
+  count here, and move with their task). A project with nothing to migrate is
+  told so whatever its work tree holds;
+- git would see a file under a task differently at its new place. Git decides
+  by path whether to ignore a file, which attributes to give it and whether
+  the sparse checkout includes it, so a commit after the move could leave out
+  a file that is committed now (a rule such as `.*` ignores `.rituals/`),
+  add a file that is ignored now (a rule that names `tasks/greet/.env`), or
+  store a file through another filter (a `.gitattributes` rule for Git LFS
+  that names `tasks/`). The same goes for a file that would be outside a
+  sparse checkout, and for a tracked file git has been told not to look at
+  (`assume-unchanged` or `skip-worktree`), whose edits a commit would carry
+  without `git status` showing them. The rules count wherever they are:
+  your `.gitignore` and `.gitattributes`, `.git/info/exclude`, and a global
+  file such as the one `core.excludesFile` names. An ignore file inside a task
+  moves with it and counts at its new place. The refusal names the file and
+  the rule, and what to change;
 - a task's directory holds other workspace members, or a git submodule, or
   its destination in `.rituals/` is taken, or `.rituals` is a file;
 - a path in a manifest reaches a task through a symbolic link or another

@@ -654,15 +654,76 @@ moved to one that stayed is repointed.
 
 **It only runs where git can give everything back.** A work tree with changes
 that are not committed, files that are untracked, or no repository at all is
-refused, before anything is written. Ignored files do not count, because a
-rename carries them with their directory. The question is asked before the
-first `cargo metadata`, which can rewrite `Cargo.lock` and would make a clean
-tree dirty, and acted on only once a step applies. A project with nothing to
-migrate is therefore told so whatever git says, including right after a
-migration that has not been committed yet. The check reuses `remove`'s code, in
-`rituals_compose::git`, and asks only the question `migrate` needs: unlike
-`remove`, it deletes nothing, so the checks for files git has been told not to
-watch and for filters do not apply.
+refused, before anything is written. Ignored files do not count against the
+clean tree, because a rename carries them with their directory; whether git
+would still ignore them once they have moved is a separate question, below.
+The question is asked before the first `cargo metadata`, which can rewrite
+`Cargo.lock` and would make a clean tree dirty, and acted on only once a step
+applies. A project with nothing to migrate is therefore told so whatever git
+says, including right after a migration that has not been committed yet. The
+check reuses `remove`'s code, in `rituals_compose::git`, and asks only the
+question `migrate` needs: unlike `remove`, it deletes nothing, so what it must
+have is that git sees the files the same way after the rename, not that git
+can give back every byte, and `remove`'s checks for filters and for ignored
+files do not apply.
+
+**It refuses a move that changes what git sees.** Git decides some things by a
+file's path alone, and a rename changes the path: whether it is ignored, which
+attributes it has, and whether the sparse checkout includes it. A rule keyed on
+`tasks/` stops applying after the move and one that matches under `.rituals/`
+starts. The tree is clean now, and the commit after the move would then leave
+out a file that is committed (a `.*` rule ignores the new directory, and a
+tracked file whose new path is ignored is deleted and not added, whatever rule
+matched the old path), add a file that is ignored now (a secret named in a rule
+for the old place), or store a file through another filter (a `.gitattributes`
+rule for Git LFS keyed on `tasks/`), and `git status` shows each as an
+ordinary change. So, while planning and before any write, `migrate` lists
+every file under every task, tracked, untracked and ignored, and compares
+what git says at the old path with what it would say at the new one:
+
+1. Ignore status, by `git check-ignore -v -n --no-index`, which reports the
+   rule that decided. A tracked file counts as seen at its old path whatever
+   the rules say, because tracking is not undone by a rule; an untracked file
+   is seen when no rule ignores it.
+2. Attributes, by `git check-attr -a`, compared as whole sets so that a
+   filter, an end-of-line setting and a macro such as `binary` are all
+   covered. Only a file git sees at both places is compared; one it ignores
+   is not stored, so its attributes decide nothing.
+3. The sparse checkout, by `git sparse-checkout check-rules`, asked only when
+   `core.sparseCheckout` is on, since otherwise it fails or prints nothing.
+4. The index flags assume-unchanged and skip-worktree, which are not decided
+   by path: a commit after the move can carry an edit `git status` never
+   showed. A skip-worktree file that is not on disk is not moved by a rename,
+   so it is left out.
+
+The new places do not exist yet, and the files that decide them move too: a
+`.gitignore` or `.gitattributes` inside a task goes with it, so asked in the
+real tree before the move, git cannot see it at the new place and the check
+would refuse a move that is safe. So the new places are asked about in a work
+tree of copies in the system's temporary directory, named for the process and
+removed when the check returns, that holds the project's ignore and attribute
+files where they will be: every one in the directories above each new place,
+and every one under a task at its new place. Git is given the repository's own
+git directory beside it, so `info/exclude`, the configuration, a global
+`core.excludesFile` and the index are read exactly as for the real tree. Only
+regular files are copied, because git does not follow a link for these files.
+Nothing is written to the project or the repository. The alternatives were
+asking the real tree before the move, which gets that wrong, and reproducing
+git's precedence by hand, which is a second reading of git's rules that could
+only disagree with the first.
+
+The check is only worth trusting if the copies answer as the real tree will, so
+a test asks for it: over every repository the unit tests judge, it takes the
+prediction, really renames the directory, asks git itself about the new paths,
+and requires the two to agree, including which files a `git add --all` after
+the rename stages.
+
+The first kind found is reported, with every file it holds for, since each kind
+has its own remedy. The refusal opens `refusing to migrate` rather than naming
+a task, because one rule can catch every task, names the first ten files and
+counts the rest, and names the rule and the file it is in, at the line, so the
+person can open it. A rule that sits in a file that moves with a task is named
+where the file is now.
 
 **The order of writes, and the failure story.** `migrate` makes the promise
 `remove` makes: it leaves a project that builds in the new layout, or leaves it
@@ -670,9 +731,10 @@ as it found it, or says exactly how to put it back.
 
 1. Refusals first, from reading only: a task directory that holds other
    workspace members, a destination that is taken (`.rituals` being a file
-   counts), a git submodule at or inside a task directory, and a manifest that
-   reaches a task in a way that cannot be repointed, or that needs an edit
-   while git does not track it.
+   counts), a git submodule at or inside a task directory, a file that git
+   would see differently at its new place, and a manifest that reaches a task
+   in a way that cannot be repointed, or that needs an edit while git does not
+   track it.
 2. Every manifest with edits is written in place.
 3. Each task directory is renamed.
 4. `cargo metadata` runs again, and the project must still resolve its task

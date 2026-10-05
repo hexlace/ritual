@@ -164,11 +164,26 @@ pub(crate) fn assert_migrate_is_refused_and_writes_nothing(
     expected: &[&str],
 ) -> TestOutcome {
     let before = snapshot_tree(project.root())?;
-    let bin_name = project.bin_name()?;
-
     let refused = project.run_cli(&["migrate"])?;
+    assert_refusal_wrote_nothing(project, &before, &refused, expected)
+}
 
-    let message = assert_a_refusal(&refused, &bin_name, "`migrate`").to_lowercase();
+/// Asserts `refused`, the output of a `migrate` run on `project`, is a
+/// refusal by ritual naming each of `expected` (compared without regard to
+/// case), and that the whole tree is byte-identical to `before`, a snapshot
+/// taken before the run.
+///
+/// For a story that has to run `migrate` itself, such as one that hands the
+/// binary a global git configuration of its own.
+#[track_caller]
+pub(crate) fn assert_refusal_wrote_nothing(
+    project: &Project,
+    before: &Snapshot,
+    refused: &RunOutput,
+    expected: &[&str],
+) -> TestOutcome {
+    let bin_name = project.bin_name()?;
+    let message = assert_a_refusal(refused, &bin_name, "`migrate`").to_lowercase();
     for name in expected {
         assert!(
             message.contains(&name.to_lowercase()),
@@ -178,7 +193,7 @@ pub(crate) fn assert_migrate_is_refused_and_writes_nothing(
     }
     assert_trees_identical(
         "a refused `migrate` must write nothing",
-        &before,
+        before,
         &snapshot_tree(project.root())?,
     );
     Ok(())
