@@ -318,7 +318,8 @@ To upgrade:
    `Cargo.toml`, and `rituals-core` in the CLI crate's `Cargo.toml`
    (`ritual/Cargo.toml`, where it is written `ritual = { package =
    "rituals-core", ... }`), to the new release. Both: tasks built on `rituals`
-   0.1 do not fit a bundle built on 0.2, and `regenerate` refuses that.
+   0.1 do not fit a bundle built on 0.2, and the command line will not compile
+   until both match.
 2. Run `cargo build`, so `Cargo.lock` follows, and commit everything.
 3. Run `cargo ritual migrate`.
 4. Review the changes with `git status` and `git diff`, and commit them.
@@ -360,7 +361,8 @@ workflow or a script, which it does not edit:
 ```text
 moved tasks/greet to .rituals/greet
 moved tasks/shout to .rituals/shout
-updated Cargo.toml ([workspace] members `tasks/*` is now `.rituals/*`)
+updated Cargo.toml ([workspace] members `tasks/greet` is now `.rituals/greet`)
+updated Cargo.toml ([workspace] members `tasks/shout` is now `.rituals/shout`)
 updated ritual/Cargo.toml ([dependencies] greet path `../tasks/greet` is now `../.rituals/greet`)
 updated ritual/Cargo.toml ([dependencies] shout path `../tasks/shout` is now `../.rituals/shout`)
 deleted tasks/ (empty once its tasks moved out)
@@ -407,7 +409,7 @@ else now stands where the directory belongs, because `mv` would put one inside
 the other. The run's last steps come after that, and cannot
 undo it: deleting the empty directories and searching for files that mention
 `tasks/`. If one of them fails, `migrate` says what failed and that every task
-has already moved and the project builds.
+has already moved and Cargo reads the project as it should.
 
 ### Inside a project, use `cargo ritual`
 

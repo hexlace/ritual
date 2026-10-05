@@ -61,8 +61,8 @@ pub(crate) fn still_mentions(path: &str) -> String {
 /// An empty directory that could not be removed, after every task had moved.
 pub(crate) fn deletion_failed(directory: &str, cause: std::io::Error) -> String {
     Failure::new(format!(
-        "deleting {directory}/ failed after every task had moved, and the project builds as \
-         it is; delete {directory}/ by hand"
+        "deleting {directory}/ failed after every task had moved, and Cargo reads the \
+         project as it should; delete {directory}/ by hand"
     ))
     .caused_by(cause)
     .to_string()
@@ -73,7 +73,7 @@ pub(crate) fn deletion_failed(directory: &str, cause: std::io::Error) -> String 
 pub(crate) fn listing_failed(unanswered: &Unanswered) -> String {
     format!(
         "git could not list the files that still mention tasks/: {unanswered}; every task has \
-         already moved and the project builds, so look for them by hand"
+         already moved and Cargo reads the project as it should, so look for them by hand"
     )
 }
 
@@ -152,11 +152,11 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_deletion_leads_with_what_failed_and_says_the_project_builds() {
+    fn a_failed_deletion_leads_with_what_failed_and_says_cargo_reads_the_project() {
         assert_eq!(
             deletion_failed("tasks", Error::new(ErrorKind::PermissionDenied, "denied")),
-            "deleting tasks/ failed after every task had moved, and the project builds as it \
-             is; delete tasks/ by hand: denied"
+            "deleting tasks/ failed after every task had moved, and Cargo reads the project \
+             as it should; delete tasks/ by hand: denied"
         );
     }
 
@@ -165,7 +165,8 @@ mod tests {
         assert_eq!(
             listing_failed(&Unanswered::Failed("bad pattern".to_string())),
             "git could not list the files that still mention tasks/: bad pattern; every task \
-             has already moved and the project builds, so look for them by hand"
+             has already moved and Cargo reads the project as it should, so look for them by \
+             hand"
         );
     }
 

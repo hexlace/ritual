@@ -726,8 +726,8 @@ person can open it. A rule that sits in a file that moves with a task is named
 where the file is now.
 
 **The order of writes, and the failure story.** `migrate` makes the promise
-`remove` makes: it leaves a project that builds in the new layout, or leaves it
-as it found it, or says exactly how to put it back.
+`remove` makes: it leaves a project Cargo reads as it should in the new layout,
+or leaves it as it found it, or says exactly how to put it back.
 
 1. Refusals first, from reading only: a task directory that holds other
    workspace members, a destination that is taken (`.rituals` being a file

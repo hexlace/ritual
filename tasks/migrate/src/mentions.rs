@@ -101,8 +101,8 @@ mod tests {
             listed,
             [
                 "git could not list the files that still mention tasks/: the directory is not \
-                 in a git repository; every task has already moved and the project builds, so \
-                 look for them by hand"
+                 in a git repository; every task has already moved and Cargo reads the \
+                 project as it should, so look for them by hand"
             ]
         );
         Ok(())

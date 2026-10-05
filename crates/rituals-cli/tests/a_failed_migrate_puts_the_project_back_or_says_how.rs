@@ -1,7 +1,7 @@
 //! A `migrate` that fails partway keeps the promise `remove` makes: it
-//! leaves a project that builds in the new layout, or leaves it as it found
-//! it, or says plainly that git has everything back and gives the command
-//! that does it.
+//! leaves a project Cargo reads as it should in the new layout, or leaves it
+//! as it found it, or says plainly that git has everything back and gives the
+//! command that does it.
 //!
 //! Each story makes `migrate` fail where a person could meet it, from
 //! outside the process, then holds the result to whichever of those the run
