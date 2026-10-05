@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use rituals::Failure;
 use toml_edit::{DocumentMut, Item, TableLike, Value};
 
-use super::path_dependencies::DEPENDENCY_TABLES;
+use super::dependency_places::{PLACES, Place};
 use super::{Manifest, PathChange};
 use crate::paths::{lies_under, normalize};
 use crate::relocation::Relocation;
@@ -147,20 +147,33 @@ impl Repointer<'_> {
         let root = document.as_table_mut();
         self.package(root)?;
         self.targets(root)?;
-        self.dependency_tables(root, "")?;
-        if let Some(targets) = root.get_mut("target").and_then(Item::as_table_like_mut) {
-            for (target, tables) in targets.iter_mut() {
-                if let Some(tables) = tables.as_table_like_mut() {
-                    let prefix = format!("target.{}.", target.get());
-                    self.dependency_tables(tables, &prefix)?;
-                }
-            }
-        }
+        // A report lists the `[workspace]` table's own paths ahead of
+        // `[workspace.dependencies]` and after the places that come before
+        // the workspace in the list.
+        let workspace_at = PLACES
+            .iter()
+            .position(|place| place.is_in("workspace"))
+            .unwrap_or(PLACES.len());
+        let (before, from_workspace) = PLACES.split_at(workspace_at);
+        self.dependency_places(root, before)?;
         if let Some(workspace) = root.get_mut("workspace").and_then(Item::as_table_like_mut) {
             self.workspace(workspace)?;
         }
-        self.patches(root)?;
-        self.replacements(root)
+        self.dependency_places(root, from_workspace)
+    }
+
+    /// The `path` of every dependency declared at each of `places`.
+    fn dependency_places(
+        &mut self,
+        root: &mut dyn TableLike,
+        places: &[Place],
+    ) -> Result<(), Failure> {
+        for place in places {
+            for located in place.tables_mut(&mut *root) {
+                self.declarations(located.table, &located.label, located.quote_keys)?;
+            }
+        }
+        Ok(())
     }
 
     /// `[package]`'s `build`, `workspace`, `readme` and `license-file`.
@@ -201,41 +214,33 @@ impl Repointer<'_> {
         Ok(())
     }
 
-    /// Every dependency table in `holder`, which is the manifest's root or a
-    /// `[target.<t>]` table, named `[<prefix><table>]` in a report.
-    fn dependency_tables(
-        &mut self,
-        holder: &mut dyn TableLike,
-        prefix: &str,
-    ) -> Result<(), Failure> {
-        for table in DEPENDENCY_TABLES {
-            if let Some(declarations) = holder.get_mut(table).and_then(Item::as_table_like_mut) {
-                self.declarations(declarations, &format!("[{prefix}{table}]"))?;
-            }
-        }
-        Ok(())
-    }
-
     /// The `path` of every dependency declared in `declarations`, which is
-    /// named `label` in a report.
+    /// named `label` in a report, each declaration by its key, in backticks
+    /// when `quote_keys` says so.
     fn declarations(
         &mut self,
         declarations: &mut dyn TableLike,
         label: &str,
+        quote_keys: bool,
     ) -> Result<(), Failure> {
         for (key, declaration) in declarations.iter_mut() {
             let Some(declaration) = declaration.as_table_like_mut() else {
                 continue;
             };
             if let Some(item) = declaration.get_mut("path") {
-                self.repoint_item(item, &format!("{label} {} path", key.get()))?;
+                let name = key.get();
+                let place = if quote_keys {
+                    format!("{label} `{name}` path")
+                } else {
+                    format!("{label} {name} path")
+                };
+                self.repoint_item(item, &place)?;
             }
         }
         Ok(())
     }
 
-    /// `[workspace.dependencies]`, `[workspace.package]` and the lists of
-    /// members.
+    /// `[workspace.package]` and the lists of members.
     fn workspace(&mut self, workspace: &mut dyn TableLike) -> Result<(), Failure> {
         self.member_lists(workspace)?;
         if let Some(package) = workspace
@@ -246,41 +251,6 @@ impl Repointer<'_> {
                 if let Some(item) = package.get_mut(field) {
                     self.repoint_item(item, &format!("[workspace.package] {field}"))?;
                 }
-            }
-        }
-        if let Some(declarations) = workspace
-            .get_mut("dependencies")
-            .and_then(Item::as_table_like_mut)
-        {
-            self.declarations(declarations, "[workspace.dependencies]")?;
-        }
-        Ok(())
-    }
-
-    /// Every `[patch.<source>]` entry's `path`.
-    fn patches(&mut self, root: &mut dyn TableLike) -> Result<(), Failure> {
-        let Some(sources) = root.get_mut("patch").and_then(Item::as_table_like_mut) else {
-            return Ok(());
-        };
-        for (source, declarations) in sources.iter_mut() {
-            if let Some(declarations) = declarations.as_table_like_mut() {
-                self.declarations(declarations, &format!("[patch.{}]", source.get()))?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Every `[replace]` entry's `path`, each named by its specification.
-    fn replacements(&mut self, root: &mut dyn TableLike) -> Result<(), Failure> {
-        let Some(replacements) = root.get_mut("replace").and_then(Item::as_table_like_mut) else {
-            return Ok(());
-        };
-        for (specification, declaration) in replacements.iter_mut() {
-            let Some(declaration) = declaration.as_table_like_mut() else {
-                continue;
-            };
-            if let Some(item) = declaration.get_mut("path") {
-                self.repoint_item(item, &format!("[replace] `{}` path", specification.get()))?;
             }
         }
         Ok(())

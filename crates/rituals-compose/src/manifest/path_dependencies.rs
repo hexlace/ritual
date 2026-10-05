@@ -1,9 +1,9 @@
 //! The directories a manifest's path dependencies lead to.
 //!
 //! Cargo reads a path dependency from a good many places, and a crate it
-//! reaches that way can be one the workspace never lists. This is the one
-//! list of those places, shared by what finds the manifests Cargo reads and
-//! what repoints them.
+//! reaches that way can be one the workspace never lists. The places are the
+//! one list in [`super::dependency_places`], shared by this and by what
+//! repoints them.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -11,17 +11,8 @@ use std::path::PathBuf;
 use toml_edit::{Item, TableLike};
 
 use super::Manifest;
+use super::dependency_places::PLACES;
 use crate::paths::normalize;
-
-/// The tables of dependencies a manifest, or one of its `[target.<t>]`
-/// tables, can hold, in both spellings Cargo accepts for the dashed ones.
-pub(super) const DEPENDENCY_TABLES: [&str; 5] = [
-    "dependencies",
-    "dev-dependencies",
-    "build-dependencies",
-    "dev_dependencies",
-    "build_dependencies",
-];
 
 impl Manifest {
     /// Lists the directory every path dependency of this manifest leads to,
@@ -72,31 +63,10 @@ impl Manifest {
         let root = self.document.as_table();
         let mut written: Vec<&str> = Vec::new();
 
-        dependency_tables(root, &mut written);
-        if let Some(targets) = root.get("target").and_then(Item::as_table_like) {
-            for (_target, tables) in targets.iter() {
-                if let Some(tables) = tables.as_table_like() {
-                    dependency_tables(tables, &mut written);
-                }
+        for place in PLACES {
+            for located in place.tables(root) {
+                paths_of(located.table, &mut written);
             }
-        }
-        if let Some(declarations) = root
-            .get("workspace")
-            .and_then(Item::as_table_like)
-            .and_then(|workspace| workspace.get("dependencies"))
-            .and_then(Item::as_table_like)
-        {
-            paths_of(declarations, &mut written);
-        }
-        if let Some(sources) = root.get("patch").and_then(Item::as_table_like) {
-            for (_source, declarations) in sources.iter() {
-                if let Some(declarations) = declarations.as_table_like() {
-                    paths_of(declarations, &mut written);
-                }
-            }
-        }
-        if let Some(replacements) = root.get("replace").and_then(Item::as_table_like) {
-            paths_of(replacements, &mut written);
         }
 
         written
@@ -105,16 +75,6 @@ impl Manifest {
             .collect::<BTreeSet<PathBuf>>()
             .into_iter()
             .collect()
-    }
-}
-
-/// Collects the `path` of every dependency in each dependency table `holder`
-/// has, `holder` being the manifest's root or a `[target.<t>]` table.
-fn dependency_tables<'a>(holder: &'a dyn TableLike, written: &mut Vec<&'a str>) {
-    for table in DEPENDENCY_TABLES {
-        if let Some(declarations) = holder.get(table).and_then(Item::as_table_like) {
-            paths_of(declarations, written);
-        }
     }
 }
 

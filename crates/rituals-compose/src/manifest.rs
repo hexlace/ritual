@@ -10,6 +10,7 @@ use toml_edit::{Array, DocumentMut, InlineTable, Item, RawString, Value};
 use crate::generated_file::TaskKey;
 use crate::rollback::Changes;
 
+mod dependency_places;
 mod entry_removal;
 mod member_globs;
 mod package_name;
