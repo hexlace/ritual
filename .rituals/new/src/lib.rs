@@ -282,7 +282,7 @@ mod tests {
 
     /// A directory under the system temp root that removes itself on drop —
     /// this crate's own copy of `rituals-compose`'s `test_support::ScratchDir`
-    /// and `tasks/create`'s copy of the same: a different crate is a genuine
+    /// and `.rituals/create`'s copy of the same: a different crate is a genuine
     /// boundary none of the three can share across.
     struct ScratchDir(PathBuf);
 

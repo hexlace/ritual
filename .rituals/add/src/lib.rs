@@ -329,7 +329,7 @@ mod tests {
     };
 
     /// A `Name` from a literal already known to be valid — mirrors
-    /// `tasks/create`'s own `demo_name` helper: unwrapping a `Result` this
+    /// `.rituals/create`'s own `demo_name` helper: unwrapping a `Result` this
     /// test module already controls, without `.unwrap()` itself.
     fn valid_name(value: &str) -> Name {
         Name::new(value).expect("a test passes only names it knows are valid")

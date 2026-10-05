@@ -4,7 +4,7 @@
 //! A story scaffolds its project with `ritual new --path <checkout>`, so the
 //! project builds against ritual's crates exactly as they are on disk —
 //! `crates/rituals`, `crates/rituals-core` and the task crates under
-//! `tasks/`. That needs the workspace this crate is a member of. A copy of
+//! `.rituals/`. That needs the workspace this crate is a member of. A copy of
 //! this crate on its own (the package `cargo package` produces, unpacked
 //! somewhere) has none, and a story run there has nothing to import from.
 

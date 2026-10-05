@@ -1,7 +1,7 @@
 //! A scratch directory helper for this crate's own tests.
 //!
 //! `rituals-compose` already has one, but a different crate is a genuine
-//! boundary that module cannot cross — `tasks/new` and `tasks/create` each
+//! boundary that module cannot cross — `.rituals/new` and `.rituals/create` each
 //! keep their own copy for the same reason, and this is this crate's.
 //
 // `redundant_pub_crate` (clippy nursery) wants `pub` here because this

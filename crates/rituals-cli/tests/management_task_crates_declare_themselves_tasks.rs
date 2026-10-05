@@ -43,13 +43,13 @@ fn the_management_bundle_and_its_tasks_declare_themselves_tasks() -> TestOutcome
     in_checkout(|checkout| {
         for (directory, package_name) in [
             ("crates/rituals-core", "rituals-core"),
-            ("tasks/add", "rituals-core-add"),
-            ("tasks/regenerate", "rituals-core-regenerate"),
-            ("tasks/new", "rituals-core-new"),
-            ("tasks/create", "rituals-core-create"),
-            ("tasks/import", "rituals-core-import"),
-            ("tasks/remove", "rituals-core-remove"),
-            ("tasks/migrate", "rituals-core-migrate"),
+            (".rituals/add", "rituals-core-add"),
+            (".rituals/regenerate", "rituals-core-regenerate"),
+            (".rituals/new", "rituals-core-new"),
+            (".rituals/create", "rituals-core-create"),
+            (".rituals/import", "rituals-core-import"),
+            (".rituals/remove", "rituals-core-remove"),
+            (".rituals/migrate", "rituals-core-migrate"),
         ] {
             assert_declares_itself_a_task(checkout, directory, package_name)?;
         }
