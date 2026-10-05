@@ -254,7 +254,8 @@ mod tests {
                 (
                     "Cargo.toml",
                     "[workspace]\nmembers = [\"cli\", \"tasks/greet\"]\nexclude = [\"vendor/x\"]\n\
-                     resolver = \"3\"\n\n[patch.crates-io]\nunused = { path = \"patches/unused\" }\n",
+                     resolver = \"3\"\n\n[patch.crates-io]\n\
+                     unused = { path = \"patches/unused\" }\n",
                 ),
                 (
                     "patches/unused/Cargo.toml",

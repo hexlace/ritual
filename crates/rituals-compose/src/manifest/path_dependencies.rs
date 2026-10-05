@@ -46,7 +46,8 @@ impl Manifest {
     /// # std::fs::write(
     /// #     &manifest_path,
     /// #     "[dependencies]\nserde = \"1\"\ngreet = { path = \"tasks/greet\", optional = true }\n\
-    /// #      \n[target.'cfg(unix)'.dev-dependencies]\nshout = { path = \"tasks/../tasks/shout\" }\n",
+    /// #      \n[target.'cfg(unix)'.dev-dependencies]\n\
+    /// #      shout = { path = \"tasks/../tasks/shout\" }\n",
     /// # )?;
     /// let manifest = Manifest::read(&manifest_path)?;
     ///

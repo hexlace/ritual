@@ -40,15 +40,17 @@ struct Case {
 
 /// Every case in the table.
 fn cases() -> Vec<Case> {
-    let mut cases = ignore_cases();
+    let mut cases = ignore_cases_that_change_what_git_sees();
+    cases.extend(ignore_cases_that_keep_what_git_sees());
     cases.extend(rules_outside_the_project_cases());
     cases.extend(attribute_cases());
     cases.extend(index_and_checkout_cases());
     cases
 }
 
-/// The cases about which files the project's own ignore files ignore.
-fn ignore_cases() -> Vec<Case> {
+/// The cases where the project's own ignore files ignore a file at one place
+/// and not the other.
+fn ignore_cases_that_change_what_git_sees() -> Vec<Case> {
     vec![
         Case {
             name: "a rule for dot directories with the usual negations",
@@ -84,21 +86,6 @@ fn ignore_cases() -> Vec<Case> {
             ],
         },
         Case {
-            name: "an ignore file inside the task moves with it",
-            build: an_ignore_file_inside_the_task,
-            expected: &[],
-        },
-        Case {
-            name: "a pattern that matches at both places",
-            build: a_pattern_that_matches_at_both_places,
-            expected: &[],
-        },
-        Case {
-            name: "a negation that re-includes the new directory",
-            build: a_negation_that_re_includes_the_new_directory,
-            expected: &[],
-        },
-        Case {
             name: "an ignored nested repository the new place would not ignore",
             build: an_ignored_nested_repository_the_new_place_would_not_ignore,
             expected: &[
@@ -114,6 +101,28 @@ fn ignore_cases() -> Vec<Case> {
                 ".rituals/greet/notes.txt (`.rituals/greet/notes.txt` in .gitignore:2)",
             ],
         },
+    ]
+}
+
+/// The cases where the project's own ignore files, moved or not, leave every
+/// file as git sees it now.
+fn ignore_cases_that_keep_what_git_sees() -> Vec<Case> {
+    vec![
+        Case {
+            name: "an ignore file inside the task moves with it",
+            build: an_ignore_file_inside_the_task,
+            expected: &[],
+        },
+        Case {
+            name: "a pattern that matches at both places",
+            build: a_pattern_that_matches_at_both_places,
+            expected: &[],
+        },
+        Case {
+            name: "a negation that re-includes the new directory",
+            build: a_negation_that_re_includes_the_new_directory,
+            expected: &[],
+        },
         Case {
             name: "file names with a space and with non-ASCII letters",
             build: file_names_with_a_space_and_non_ascii_letters,
@@ -122,7 +131,8 @@ fn ignore_cases() -> Vec<Case> {
     ]
 }
 
-/// The cases about ignore rules that are not in a file of the project: the repository's own `info/exclude`, and a developer's global file.
+/// The cases about ignore rules that are not in a file of the project: the
+/// repository's own `info/exclude`, and a developer's global file.
 fn rules_outside_the_project_cases() -> Vec<Case> {
     vec![
         Case {

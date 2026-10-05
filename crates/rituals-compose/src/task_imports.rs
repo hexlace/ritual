@@ -896,8 +896,8 @@ mod tests {
                  [dependencies]\n{dependency}\n"
             )
         };
-        let workspace = "[workspace]\nmembers = [\"cli\", \"tasks/greet\"]\nexclude = [\"vendor/x\"]\n\
-                         resolver = \"3\"\n";
+        let workspace = "[workspace]\nmembers = [\"cli\", \"tasks/greet\"]\n\
+                         exclude = [\"vendor/x\"]\nresolver = \"3\"\n";
         let files = [
             ("Cargo.toml", workspace.to_string()),
             (
