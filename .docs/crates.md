@@ -14,6 +14,11 @@ principles themselves are in [design.md](design.md).
 | `rituals-cli` | the `ritual` binary | `rituals`, `rituals-core` |
 | `xtask` | release tooling, never published | — |
 
+The management tasks and their bundle are rituals like any other, so they live
+in `.rituals/`: the leaves as `.rituals/add`, `.rituals/regenerate` and so on,
+named for the task, and the bundle `rituals-core` as `.rituals/ritual`. The
+other crates are in `crates/`, and `xtask` is in `xtask/`.
+
 ## `rituals` — the floor
 
 What a task needs, and only that: the `Task` type and its three constructors
@@ -48,7 +53,7 @@ out where paths go when directories move. The management tasks depend on it
 because it is the library their job needs.
 
 **The layout is shared.** `layout` is the one place that says where a
-project's own tasks live, `.rituals/<name>`. A task that scaffolds a task
+scaffolder puts a ritual, `.rituals/<name>`. A task that scaffolds a task
 crate asks it for the directory, the member entry and the path to report, so
 `add` and any scaffolder after it agree and a change of directory is one edit.
 

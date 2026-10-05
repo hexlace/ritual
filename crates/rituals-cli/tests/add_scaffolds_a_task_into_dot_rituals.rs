@@ -1,6 +1,5 @@
-//! A project's own tasks live in `.rituals/<name>`, not `tasks/<name>`: they
-//! are tooling, not the project, and sit with `.docs/` and `.github/` rather
-//! than among the project's real directories.
+//! `add` scaffolds a ritual into `.rituals/<name>`, not `tasks/<name>`: every
+//! ritual lives in `.rituals/`, whoever it is for.
 //!
 //! `new` then `add <name>` leaves the task at `.rituals/<name>`, mounted
 //! through an explicit `[workspace] members` entry of the same path (never a

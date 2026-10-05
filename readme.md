@@ -191,10 +191,22 @@ It scaffolds `.rituals/lint`, adds it to the workspace and to the CLI crate's
 manifest, and regenerates. Edit `.rituals/lint/src/lib.rs`, then run
 `cargo ritual lint`.
 
-A project's own tasks are tooling, not the project, so they live in
-`.rituals/`, next to `.github/`, rather than among the project's real
-directories. A project made by ritual 0.1 keeps its tasks in `tasks/`, and
-they keep working there. [`cargo ritual migrate`](#move-a-01-project-into-rituals)
+**Where rituals live.** Every ritual lives in `.rituals/`, whoever it is for:
+one directory, in every project, with no exceptions. Subdirectories of
+`.rituals/`, at any depth, are yours to arrange (`.rituals/private/lint`), and
+ritual reads no meaning into their names. Who a ritual is for is Cargo's own
+`publish` key in its manifest, the key Cargo already uses to say whether a
+crate ships: `publish = false` keeps it private to the project, and leaving it
+out shares it. `add` writes none, since it cannot know who a ritual is for.
+
+One Cargo rule to know when you group rituals. A `.rituals/*` glob in
+`[workspace] members` (which is what `migrate` turns `tasks/*` into) also
+matches a grouping directory that has no manifest of its own, and Cargo then
+refuses to load the workspace. List that directory under `exclude`, or list
+the members explicitly, as `add` writes them.
+
+A project made by ritual 0.1 keeps its tasks in `tasks/`, and they keep
+working there. [`cargo ritual migrate`](#move-a-01-project-into-rituals)
 moves them.
 
 ### Import a task from somewhere else
@@ -307,10 +319,10 @@ anywhere in the project.
 
 ### Move a 0.1 project into `.rituals/`
 
-Ritual 0.1 put a project's tasks in `tasks/`. From 0.2 they go in `.rituals/`,
-and `cargo ritual migrate` moves a project that has them in `tasks/`. A project
-with its tasks in `tasks/` keeps building and running on 0.2 until you do, so
-there is no hurry.
+Ritual 0.1 put a project's tasks in `tasks/`. From 0.2 they go in `.rituals/`
+([where rituals live](#add-a-task-to-a-project)), and `cargo ritual migrate`
+moves a project that has them in `tasks/`. A project with its tasks in
+`tasks/` keeps building and running on 0.2 until you do, so there is no hurry.
 
 To upgrade:
 
@@ -347,6 +359,9 @@ For each workspace member under `tasks/` that is a task, it:
   wrote it;
 - leaves `tasks/` in place when something that is not a task is still in it,
   and says what is left.
+
+It never writes `publish`: 0.1 wrote none, so who a task is for is not
+something `migrate` can know.
 
 It edits manifests in place, so your comments and formatting stay. It then
 checks that Cargo still reads the project, and prints what it did, then every

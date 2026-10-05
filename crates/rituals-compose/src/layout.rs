@@ -1,10 +1,11 @@
-//! Where a project keeps its own tasks.
+//! Where a scaffolder puts a ritual.
 //!
-//! A project's tasks are tooling, not the project, so they live in
-//! `.rituals/`, the way `.docs/` holds a project's design documents and
-//! `.github/` its workflows. This module is the one place that says so: a
-//! task that scaffolds a task crate asks [`place_for`] where it goes and
-//! writes nothing under a directory name of its own.
+//! Every ritual lives in `.rituals/`, whoever it is for. This module is the
+//! one place that names that directory: a task that scaffolds a task crate
+//! asks [`place_for`] where it goes and writes nothing under a directory name
+//! of its own. It places a new ritual directly in `.rituals/`; a ritual
+//! already further down is the project's own arrangement, and nothing here
+//! reads a meaning into the names above it.
 //!
 //! # Examples
 //!
@@ -29,7 +30,7 @@ use std::path::{Path, PathBuf};
 
 use rituals::Name;
 
-/// The directory a project's own tasks live in, named from the workspace
+/// The directory every ritual lives in, named from the workspace
 /// root. Private so that nothing spells it on its own: a caller asks
 /// [`tasks_directory`] or [`place_for`].
 const TASKS_DIRECTORY: &str = ".rituals";
@@ -114,12 +115,12 @@ impl TaskPlace {
     }
 }
 
-/// Returns the directory every task the layout places lives under.
+/// Returns the directory every ritual lives under.
 ///
 /// # Examples
 ///
-/// Whether a directory is one of the project's own tasks, as a task that
-/// lists them asks:
+/// Whether a directory is inside the one every ritual lives in, as a task
+/// that lists them asks:
 ///
 /// ```
 /// use std::path::Path;

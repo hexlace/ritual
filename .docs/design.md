@@ -390,12 +390,48 @@ inherits `rituals.workspace = true`, so its dependency on `rituals` does not
 change when the crate moves. `add` therefore needs `rituals` in the
 workspace's `[workspace.dependencies]`, and refuses without it.
 
-**Why `.rituals/`.** A project's own tasks are tooling, not the project, so
-they sit with `.docs/` and `.github/` rather than among the project's real
-directories, where `tasks/` would sort into the middle of them. Where a task
-goes is decided in one place, `rituals_compose::layout`, which a scaffolder
-asks and does not answer for itself, so the member entry, the dependency path
-and the report all agree.
+**Why `.rituals/`.** Every ritual lives in `.rituals/`, whoever it is for,
+with no exception: not a project's private ones only, and not ritual's own
+repository, where the published `rituals-core-*` crates sit beside any private
+ones. A rule with an exception has to be asked of every ritual, and a
+repository whose product is rituals would have to answer it for each one. With
+none, a person, a tool or a script finds every ritual of every project in the
+same place, and a ritual that changes who it is for does not move.
+
+*Audience is `publish`, not a folder.* Whether a ritual is private to its
+project or shared with others is already a fact about a crate, and Cargo
+already has a key for it: `publish`, which says whether a crate ships. A
+second encoding in the directory tree, such as a `private/` folder every tool
+must know to treat differently, would be a second source of the same fact,
+free to disagree with the manifest. Reading `publish` keeps one source, and it
+is Cargo's own, so every tool that already understands a package understands
+it.
+
+*Subdirectories carry no meaning.* Beneath `.rituals/`, a project arranges
+rituals as it likes, at any depth, and ritual gives no name there a special
+reading. This is not extra work: no command finds a ritual by its directory.
+Each goes through Cargo's workspace membership and the CLI crate's
+dependencies, so a ritual at `.rituals/private/lint` is found the same way as
+one at `.rituals/lint`. A name ritual did read would be a vocabulary every
+project had to learn and could not extend. The one place Cargo's rules touch
+the arrangement is membership: a `.rituals/*` glob also matches a grouping
+directory that has no manifest, and Cargo then refuses the workspace. That is
+Cargo's rule about globs, so ritual documents it and does not paper over it,
+and the person lists the directory under `exclude` or lists members
+explicitly, as `add` does. `remove` deletes only the ritual's own directory
+and leaves a grouping directory it does not own.
+
+*`migrate` never writes `publish`.* A 0.1 task has no `publish` key, because
+0.1 wrote none, and the absence says nothing about who the task is for: the
+same missing key is a private tool in one project and a shared crate in
+another. Writing `publish = false` would claim the first for every project,
+a guess about something only the person knows. Leaving the key alone claims
+nothing new: Cargo reads the task exactly as it did before the move, and
+`migrate` changes where a ritual lives, never who it is for.
+
+Where a ritual goes is decided in one place, `rituals_compose::layout`, which
+a scaffolder asks and does not answer for itself, so the member entry, the
+dependency path and the report all agree.
 
 **Why the member is explicit.** The entry written is `".rituals/<name>"`, one
 per task, and `new` writes no `.rituals/*` glob. Cargo reads a glob that
