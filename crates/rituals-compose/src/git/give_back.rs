@@ -8,7 +8,7 @@ use std::process::Command;
 use super::index::{Flag, IndexEntry, Unwatched, parse_attributes, parse_index};
 use super::status::{IgnoredFiles, uncommitted};
 use super::{
-    Unanswered, canonical, counted, counted_with_verb, from_the_top_level, run_git,
+    Unanswered, canonical, counted, counted_with_verb, from_the_top_level, nul_terminated, run_git,
     run_git_with_input, top_level_of,
 };
 
@@ -258,11 +258,11 @@ fn ensure_none_filtered(
     index: &[IndexEntry],
     from_top_level: &Path,
 ) -> Result<(), CannotGiveBack> {
-    let mut paths = Vec::new();
-    for entry in index {
-        paths.extend_from_slice(entry.path.as_os_str().as_encoded_bytes());
-        paths.push(0);
-    }
+    let paths = nul_terminated(
+        index
+            .iter()
+            .map(|entry| entry.path.as_os_str().as_encoded_bytes()),
+    );
     let filters = parse_attributes(&run_git_with_input(
         new_git,
         directory,

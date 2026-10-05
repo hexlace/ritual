@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::Command;
 
-use crate::git::{Unanswered, failure_of, run_git_for_output, run_git_with_input};
+use crate::git::{Unanswered, failure_of, nul_terminated, run_git_for_output, run_git_with_input};
 
 /// Whether the checkout the work tree at `top_level` belongs to is a sparse
 /// one.
@@ -38,11 +38,7 @@ pub(super) fn included(
     if paths.is_empty() {
         return Ok(BTreeSet::new());
     }
-    let mut input = Vec::new();
-    for path in paths {
-        input.extend_from_slice(path.as_bytes());
-        input.push(0);
-    }
+    let input = nul_terminated(paths.iter().map(String::as_bytes));
     let output = run_git_with_input(
         new_git,
         top_level,

@@ -47,7 +47,10 @@
 //! }
 //! ```
 
+use std::path::Path;
 use std::process::Command;
+
+use crate::relocation::Relocation;
 
 mod attributes;
 mod ignore;
@@ -65,9 +68,15 @@ pub use outcome::{
     Attribute, AttributeChange, AttributeState, IgnoreRule, IgnoredFile, MovedFile, SeenDifferently,
 };
 
-use std::path::Path;
-
-use crate::relocation::Relocation;
+/// The arguments of a question put to git about `scope`'s tree: `scope`'s
+/// options, which choose the tree, ahead of `command`.
+fn scoped<'a>(scope: &'a [String], command: &[&'static str]) -> Vec<&'a str> {
+    scope
+        .iter()
+        .map(String::as_str)
+        .chain(command.iter().copied())
+        .collect()
+}
 
 /// Checks, with the `git` on `PATH`, that moving the directories `relocation`
 /// moves changes nothing about what git sees of the files in them.

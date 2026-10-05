@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::outcome::IgnoreRule;
-use crate::git::{Unanswered, failure_of, run_git_for_output};
+use super::scoped;
+use crate::git::{Unanswered, failure_of, nul_terminated, run_git_for_output};
 
 /// What `git check-ignore -v -n --no-index -z --stdin` is asked, after the
 /// leading options that choose which tree it asks about.
@@ -33,16 +34,8 @@ pub(super) fn ask(
     if paths.is_empty() {
         return Ok(Vec::new());
     }
-    let arguments: Vec<&str> = scope
-        .iter()
-        .map(String::as_str)
-        .chain(CHECK_IGNORE)
-        .collect();
-    let mut input = Vec::new();
-    for path in paths {
-        input.extend_from_slice(path.as_bytes());
-        input.push(0);
-    }
+    let arguments = scoped(scope, &CHECK_IGNORE);
+    let input = nul_terminated(paths.iter().map(String::as_bytes));
     let output = run_git_for_output(new_git, directory, &arguments, &input)?;
     // Exit 0 says at least one path is ignored and exit 1 that none is: both
     // are answers, and anything else is git failing.

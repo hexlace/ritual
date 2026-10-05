@@ -198,6 +198,17 @@ fn run_git(
     run_git_with_input(new_git, directory, arguments, &[])
 }
 
+/// The paths as git reads them from standard input under `-z`: each one
+/// followed by a NUL, in order.
+fn nul_terminated<'a>(paths: impl IntoIterator<Item = &'a [u8]>) -> Vec<u8> {
+    let mut input = Vec::new();
+    for path in paths {
+        input.extend_from_slice(path);
+        input.push(0);
+    }
+    input
+}
+
 /// Runs `git -C <directory> <arguments>` with `input` on its standard input,
 /// and returns what it printed to standard output.
 ///

@@ -5,8 +5,9 @@ use std::path::Path;
 use std::process::Command;
 
 use super::outcome::Attribute;
+use super::scoped;
 use crate::git::index::parse_attributes;
-use crate::git::{Unanswered, run_git_with_input};
+use crate::git::{Unanswered, nul_terminated, run_git_with_input};
 
 /// What `git check-attr -a -z --stdin` is asked, after the leading options
 /// that choose which tree it asks about. `-a` lists every attribute the path
@@ -29,12 +30,8 @@ pub(super) fn ask(
     if paths.is_empty() {
         return Ok(BTreeMap::new());
     }
-    let arguments: Vec<&str> = scope.iter().map(String::as_str).chain(CHECK_ATTR).collect();
-    let mut input = Vec::new();
-    for path in paths {
-        input.extend_from_slice(path.as_bytes());
-        input.push(0);
-    }
+    let arguments = scoped(scope, &CHECK_ATTR);
+    let input = nul_terminated(paths.iter().map(String::as_bytes));
     let output = run_git_with_input(new_git, directory, &arguments, &input)?;
     let mut answers: BTreeMap<String, Vec<Attribute>> = paths
         .iter()
