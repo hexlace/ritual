@@ -428,7 +428,8 @@ impl Changes {
     ///
     /// When the undo cannot move the directory back, the report names both
     /// paths and, when `to` still holds it and `from` is empty, the `mv`
-    /// command that puts it back from any directory. When `from` exists
+    /// command that puts it back, with where to run it from, its paths
+    /// spelled as the report's are. When `from` exists
     /// again, no command is offered, because `mv` would put one directory
     /// inside the other.
     ///
