@@ -10,14 +10,21 @@
 //! name, with `sync` one bundle further down, under `db`. The remedy it
 //! prints is then run, word for word, through `cargo` in the project, and
 //! reaches the same task: that is what makes it one a person can paste.
+//!
+//! Ritual's own bundle is a bundle like any other, so a project may mount it
+//! under `tools` too, and then its hints go through `tools`:
+//! `cargo ritual tools regenerate`, or `cargo acme tools regenerate` under
+//! `--cli acme`. That hint is run the same way.
 
 mod support;
 
 use std::fmt::Write as _;
 
 use support::{
-    Outcome, Project, RunOutput, TempDir, TestOutcome, crates, failure, in_checkout, manifest,
+    Outcome, Project, RunOutput, TempDir, TestOutcome, crates, created, failure, generated,
+    in_checkout, manifest, read_text, write_text,
 };
+use toml_edit::Item;
 
 /// The bundle's crate name, which a project could mount it under as it is.
 const CRATE_NAME: &str = "acme-tools";
@@ -112,6 +119,102 @@ fn assert_the_remedy_is_the_command_typed(
     Ok(())
 }
 
+/// The key `new` mounts ritual's own bundle under.
+const RITUAL_KEY: &str = "ritual";
+
+/// The task the remounted bundle's stories create, then take out of the
+/// task list so `create` refuses it.
+const TASK: &str = "lint";
+
+/// Mounts ritual's own bundle under [`MOUNT_KEY`] instead of [`RITUAL_KEY`],
+/// and regenerates through the new key.
+///
+/// Cargo refuses one package under two keys, so the command line cannot be
+/// built with the bundle under both while it regenerates. The manifest's key
+/// and task entry change together, the generated file's one mount line is
+/// changed by hand to match so the command line builds, and `regenerate`,
+/// reached through the new key, then writes the file from the manifest.
+fn remount_rituals_bundle(project: &Project) -> TestOutcome {
+    manifest::edit(&project.cli_manifest_path(), |document| {
+        let Some(dependencies) = document
+            .get_mut("dependencies")
+            .and_then(Item::as_table_like_mut)
+        else {
+            return failure("no [dependencies] table in the command line's manifest");
+        };
+        let Some(declaration) = dependencies.remove(RITUAL_KEY) else {
+            return failure(format!("no dependency `{RITUAL_KEY}` in [dependencies]"));
+        };
+        dependencies.insert(MOUNT_KEY, declaration);
+        manifest::remove_task(document, RITUAL_KEY)?;
+        manifest::push_task(document, MOUNT_KEY)
+    })?;
+
+    let path = project.generated_file_path();
+    let generated_file = read_text(&path)?;
+    let mounted = format!("(\"{RITUAL_KEY}\", {RITUAL_KEY}::task())");
+    if generated_file.matches(&mounted).count() != 1 {
+        return failure(format!(
+            "expected the generated file to mount `{mounted}` once; it was:\n{generated_file}"
+        ));
+    }
+    let remounted = format!("(\"{MOUNT_KEY}\", {MOUNT_KEY}::task())");
+    write_text(&path, &generated_file.replace(&mounted, &remounted))?;
+
+    project
+        .run_cli(&[MOUNT_KEY, "regenerate"])?
+        .expect_success("`tools regenerate` after remounting ritual's bundle under `tools`");
+    Ok(())
+}
+
+/// Creates [`TASK`] through the remounted bundle, then takes it out of the
+/// task list, leaving its dependency: the state `create` refuses with a
+/// `regenerate` hint.
+fn create_a_task_and_take_it_out_of_the_list(project: &Project) -> TestOutcome {
+    project
+        .run_cli(&[MOUNT_KEY, "create", TASK])?
+        .expect_success("`tools create lint` through the remounted bundle");
+    manifest::edit(&project.cli_manifest_path(), |document| {
+        manifest::remove_task(document, TASK)
+    })
+}
+
+/// Runs `tools create lint` again, asserts its refusal ends with `expected`,
+/// then runs that hint word for word through `cargo` in the project and
+/// asserts it reached ritual's `regenerate`: the file it writes mounts the
+/// bundle and no longer `lint`.
+fn assert_rituals_hint_is_the_command_typed(
+    project: &Project,
+    bin_name: &str,
+    expected: &str,
+) -> TestOutcome {
+    let package = manifest::package_name(&project.cli_manifest()?)?;
+    let output = project.run_cli(&[MOUNT_KEY, "create", TASK])?;
+    let refusal = created::the_refusal(&output, bin_name);
+    assert_eq!(
+        refusal,
+        format!(
+            "`{package}` already has a dependency called `{TASK}` that is not in \
+             [package.metadata.ritual] tasks; add `\"{TASK}\"` to that list and run `{expected}`"
+        )
+    );
+
+    let command = named_command(refusal)?;
+    let Some(arguments) = command.strip_prefix("cargo ") else {
+        return failure(format!("expected a cargo command; it was `{command}`"));
+    };
+    let words: Vec<&str> = arguments.split(' ').collect();
+    project
+        .cargo(&words)?
+        .expect_success(&format!("`{command}`, pasted from the refusal"));
+    assert_eq!(
+        generated::mounted_entries(&project.generated_file()?),
+        [(MOUNT_KEY.to_string(), MOUNT_KEY.to_string())],
+        "expected `{command}` to regenerate without `{TASK}`"
+    );
+    Ok(())
+}
+
 #[test]
 fn a_bundle_under_a_key_of_the_project_s_choosing_names_that_key_in_its_remedy() -> TestOutcome {
     in_checkout(|checkout| {
@@ -131,5 +234,34 @@ fn under_a_named_cli_the_remedy_names_that_cli() -> TestOutcome {
 
         write_and_mount_the_bundle(&project, &["ritual", "regenerate"])?;
         assert_the_remedy_is_the_command_typed(&project, "acme", "cargo acme tools db sync")
+    })
+}
+
+#[test]
+fn rituals_own_bundle_under_a_key_of_the_project_s_choosing_names_that_key_in_its_hints()
+-> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("rituals-bundle-names-its-command")?;
+        let project = Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
+
+        remount_rituals_bundle(&project)?;
+        create_a_task_and_take_it_out_of_the_list(&project)?;
+        assert_rituals_hint_is_the_command_typed(
+            &project,
+            "ritual",
+            "cargo ritual tools regenerate",
+        )
+    })
+}
+
+#[test]
+fn under_a_named_cli_rituals_own_hints_name_that_cli() -> TestOutcome {
+    in_checkout(|checkout| {
+        let working_dir = TempDir::new("rituals-bundle-names-its-command-named-cli")?;
+        let project = Project::scaffold(checkout, working_dir.path(), "demo", &["--cli", "acme"])?;
+
+        remount_rituals_bundle(&project)?;
+        create_a_task_and_take_it_out_of_the_list(&project)?;
+        assert_rituals_hint_is_the_command_typed(&project, "acme", "cargo acme tools regenerate")
     })
 }
