@@ -363,6 +363,12 @@ To upgrade:
 3. Run `cargo ritual migrate`.
 4. Review the changes with `git status` and `git diff`, and commit them.
 
+A task made from 0.2 on is private unless you say otherwise: `create`, and
+`add` with it, writes `publish = false` into the new task's manifest unless you
+give `--public`, which 0.1's `add` never did. Give `--public` for a ritual you
+mean to publish, or remove the key from its manifest later
+([where rituals live](#add-a-task-to-a-project)).
+
 `migrate` is for any release's change to the layout. It runs every migration
 that applies, oldest first, and stores nothing, so there is no version to keep
 in step and a project that needs nothing is told `nothing to migrate`. It runs
