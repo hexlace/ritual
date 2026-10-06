@@ -25,6 +25,11 @@ provenance beyond what the lockfile records are for tooling built on top of
 it. The lockfile is most of provenance for free: it pins exactly which
 version of every imported task a project carries.
 
+**Paths are assumed to be UTF-8.** A file or directory name that isn't, or
+that holds a newline or a glob character (`*`, `?`, `[`), is not supported.
+Ritual skips such a name, or passes it through as Cargo reads it, and never
+handles it specially.
+
 ## Location independence
 
 **The boundary between global and local is a move, not a decision.** A task
