@@ -934,6 +934,29 @@ only a build started from a member's own directory reads is not seen by it, and
 such a project would still resolve from the root and then fail when built from
 that directory.
 
+## The lockfile
+
+A committed `Cargo.lock` can be current without being byte for byte what Cargo
+writes. A merge conflict resolved by hand can leave one with its blank lines
+gone or a comment added. `cargo metadata --locked`
+reads such a lockfile as it is. The unlocked `cargo metadata`, and `cargo run`,
+rewrite it into Cargo's layout without changing any locked version.
+
+**The alias is not `--locked`.** `cargo ritual` is `cargo run`, so it
+reformats such a lockfile. With `--locked`, editing a dependency in
+`Cargo.toml` and then running `cargo ritual` would be refused until some other
+Cargo command had updated the lockfile. That would put an everyday flow behind
+a rare one, to save a change that is only layout.
+
+**A task that promises to put the project back records the lockfile first.**
+`create`, `add`, `import`, `remove` and `migrate` make their first full
+`cargo metadata` call inside their rollback, through a fetch that records
+`Cargo.lock` before Cargo runs. Before that they ask Cargo only questions that
+write nothing: `cargo locate-project`, and `cargo metadata --no-deps`. So a
+run that fails puts a non-canonical lockfile back as it was committed, not in
+the layout Cargo would have written. `regenerate` makes no such promise and
+fetches without recording.
+
 ## Refusals
 
 Every task checks what it can before it writes anything. A refusal names what
