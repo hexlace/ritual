@@ -379,11 +379,9 @@ mod tests {
             Ok(())
         });
 
-        // Restore permissions before any assertion can return early, so the
-        // scratch directory this test made is still removable on drop
-        // whether or not the assertions below pass.
-        std::fs::set_permissions(&project_dir, std::fs::Permissions::from_mode(0o755))?;
-
+        // A process that ignores the write bit, such as root, removed the
+        // directory in the undo, so there is nothing to restore and nothing
+        // to show.
         if !permission_is_enforced {
             report_skip(
                 "a_write_failure_reports_the_root_when_removal_also_fails could \
@@ -392,6 +390,11 @@ mod tests {
             );
             return Ok(());
         }
+
+        // Restore permissions before any assertion can return early, so the
+        // scratch directory this test made is still removable on drop
+        // whether or not the assertions below pass.
+        std::fs::set_permissions(&project_dir, std::fs::Permissions::from_mode(0o755))?;
 
         let failure = outcome
             .err()
