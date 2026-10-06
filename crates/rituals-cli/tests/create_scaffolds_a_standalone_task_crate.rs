@@ -1,8 +1,8 @@
 //! Outside any project, `create` scaffolds an ordinary Cargo crate that marks
 //! itself a task, as `[package.metadata.ritual] task = true`, and builds
 //! entirely on its own — no enclosing project required. Wherever Cargo would
-//! place that crate inside a workspace, it is inside a project and `create`
-//! scaffolds into that project instead.
+//! place that crate inside a declared workspace that is not the command
+//! line's own, it would not build on its own, and `create` refuses.
 
 mod support;
 
@@ -50,10 +50,9 @@ fn create_scaffolds_a_task_crate_that_builds_on_its_own() -> TestOutcome {
 
 /// A directory the workspace root's `exclude` covers, but which has no
 /// `Cargo.toml` of its own, is still inside that workspace to Cargo:
-/// `cargo locate-project` walks past it to the root. So `create` there is
-/// inside a project, not standing alone, and takes the in-project path, where
-/// this workspace, with no members, is refused in Cargo's own words and
-/// nothing is written.
+/// `cargo locate-project` walks past it to the root. No command line owns
+/// that workspace, and a crate made there would not build on its own, so
+/// `create` is refused naming the workspace root, and nothing is written.
 #[test]
 fn create_in_an_excluded_directory_with_no_manifest_is_refused_and_writes_nothing() -> TestOutcome {
     let workspace = TempDir::new("create-excluded-empty")?;
@@ -68,13 +67,14 @@ fn create_in_an_excluded_directory_with_no_manifest_is_refused_and_writes_nothin
     let refused = run_ritual(&scratch, &["create", "ex"])?;
     refused.expect_failure("`ritual create ex` in an excluded directory with no manifest");
     let message = refused.sole_line_prefixed_with("ritual");
-    assert!(
-        message.contains("contains no package"),
-        "expected Cargo's own words about the workspace; message was:\n{message}"
-    );
-    assert!(
-        message.contains(path_to_str(workspace.path())?),
-        "expected the refusal to name the workspace root; message was:\n{message}"
+    assert_eq!(
+        message,
+        format!(
+            "refusing `create ex`: {} is inside the Cargo workspace rooted at {}, and a crate \
+             made there would not build on its own; run create outside any Cargo workspace",
+            scratch.canonicalize()?.display(),
+            workspace.path().canonicalize()?.display()
+        )
     );
 
     assert_trees_identical(

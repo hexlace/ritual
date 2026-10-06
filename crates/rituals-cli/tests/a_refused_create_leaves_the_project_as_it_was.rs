@@ -10,7 +10,8 @@
 //!
 //! `create` run in a project that is not the one its command line belongs to
 //! is refused with the command to run in the right one, as `import` and
-//! `remove` refuse, and writes nothing there either.
+//! `remove` refuse, or to make a ritual of its own outside any workspace, and
+//! writes nothing there either.
 
 mod support;
 
@@ -102,7 +103,11 @@ fn a_refused_add_leaves_no_lockfile_where_there_was_none() -> TestOutcome {
 
 /// A project's own command line, run in another project, is not that
 /// project's; so is the global `ritual`, which belongs to none. Both are
-/// handed the command to run in the right place, and nothing is written.
+/// handed the two ways out: the command to run in the right place, or
+/// `create` outside any workspace for a ritual of its own. `--path` changes
+/// nothing about that, so it gets the same refusal rather than being told to
+/// drop the flag. Nothing is written, `Cargo.lock` included: whose project
+/// it is is asked before anything that could write one.
 #[test]
 fn create_in_a_project_that_is_not_the_command_lines_own_is_refused_with_its_remedy() -> TestOutcome
 {
@@ -113,23 +118,26 @@ fn create_in_a_project_that_is_not_the_command_lines_own_is_refused_with_its_rem
         let binary = project.build()?;
         let before = snapshot_tree(other.root())?;
 
-        // `other` has never been built, so it has no lockfile: finding out
-        // whose project it is runs `cargo metadata`, which writes one, and the
-        // refusal that follows takes it back out. The project really was put
-        // back, so the refusal says so after its remedy.
+        // `other` has never been built, so it has no lockfile, and any
+        // `cargo metadata` that resolved it would leave one behind.
         assert!(
             !other.root().join("Cargo.lock").exists(),
             "fixture precondition: `other` starts with no Cargo.lock"
         );
         let remedy = "`create` works inside the project this command line belongs to; in your \
                       project, run `cargo ritual create lint` (or `cargo <name> ritual create \
-                      lint` if it was made with `--cli <name>`); ritual put the project back as \
-                      it found it";
+                      lint` if it was made with `--cli <name>`); or, for a ritual of its own, \
+                      run create outside any Cargo workspace";
+        let with_path = ["create", "lint", "--path", checkout.path_argument()?];
 
         let foreign = run_binary(&binary, other.root(), &["create", "lint"])?;
         assert_eq!(the_refusal(&foreign, "ritual"), remedy);
+        let foreign = run_binary(&binary, other.root(), &with_path)?;
+        assert_eq!(the_refusal(&foreign, "ritual"), remedy);
 
         let global = support::run_ritual(other.root(), &["create", "lint"])?;
+        assert_eq!(the_refusal(&global, "ritual"), remedy);
+        let global = support::run_ritual(other.root(), &with_path)?;
         assert_eq!(the_refusal(&global, "ritual"), remedy);
 
         assert_eq!(

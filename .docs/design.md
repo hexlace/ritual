@@ -340,12 +340,23 @@ instead:
   `Cargo.toml`, and a walk gets that case wrong. An excluded directory with
   no manifest of its own is still inside the workspace to Cargo, so `new`
   refuses there.
-- **`create` chooses by where it runs.** It asks `cargo locate-project`
-  whether Cargo finds a manifest at or above the current directory, which
-  writes nothing. Inside a project it puts a task in `.rituals/` and
-  regenerates; outside any project it writes a crate of its own in the
-  current directory. Nothing else decides it: a plain package with no
-  `[workspace]` is a project to Cargo, so `create` run there is in a project.
+- **`create` chooses by whose workspace it runs in.** A project is the
+  running command line's own workspace, found the way `import` and `remove`
+  find it: a member is the package the command line was built from. There
+  `create` puts a task in `.rituals/` and regenerates. Anywhere else it asks
+  Cargo, as `new` does, whether a crate made in the current directory would
+  build on its own. Under no manifest at all, or under an ordinary package
+  with no `[workspace]`, it would, and `create` writes a crate of its own
+  there, as 0.1 did. Inside a declared workspace, or under a manifest Cargo
+  cannot place in a workspace, it would not, and `create` refuses with the
+  ways out that place has: in another ritual project, that project's own
+  `cargo ritual create`, or a ritual of its own made outside any Cargo
+  workspace; in any other workspace, only the second. Whose workspace it is
+  is asked with `cargo locate-project` and `cargo metadata --no-deps`,
+  neither of which resolves anything, so no `Cargo.lock` is written and a
+  refusal has nothing to put back. `--path` and `--git` are refused only in
+  its own project, once that is known, so the first refusal a person sees is
+  the true one.
 - **`create` inside a project, `import`, `regenerate`, `remove` and `migrate`
   refuse outside their own project.** So does `add`. They look for the
   package their own command line was built from, by name. In any other
@@ -401,7 +412,7 @@ rather than by the project's first build.
 `create` does one of two things, chosen by where it runs (see
 [Each task owns its precondition](#each-task-owns-its-precondition)).
 
-**Inside a project,** `create <name>` scaffolds a task crate in
+**In its own project,** `create <name>` scaffolds a task crate in
 `.rituals/<name>`, appends it to the workspace's `members`, adds a path
 dependency and a `tasks` entry to the CLI crate's manifest, and then runs the
 same path `regenerate` runs. `create` keeps no task list of its own, so the
@@ -417,8 +428,8 @@ found it. When the CLI crate is the workspace root, the workspace's manifest
 and the CLI crate's are one file, so they are read as one document, edited
 together and written once.
 
-**Outside any project,** `create <name>` writes a crate of its own in the
-current directory, which depends on `rituals` from wherever `--path`, `--git`
+**Where a crate stands alone,** `create <name>` writes a crate of its own in
+the current directory, which depends on `rituals` from wherever `--path`, `--git`
 or crates.io says, and ends with the `import` command to run in a project.
 It takes a bare name there. A path is refused: with no `.rituals/` to place it
 in, the crate goes in the current directory.

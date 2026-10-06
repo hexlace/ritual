@@ -267,8 +267,9 @@ whether another release or the same release from another source, and whether
 the crate depends on it directly or through a crate whose task it re-exports.
 A refusal leaves the project as it found it.
 
-To write a task crate that several projects can share, run this outside any
-project, since the crate has to build on its own:
+To write a task crate that several projects can share, run this where the
+crate can build on its own: outside any Cargo workspace, or inside an ordinary
+package that declares no `[workspace]`:
 
 ```sh
 ritual create lint
@@ -276,7 +277,9 @@ ritual create lint
 
 It takes a bare name, makes the crate in the current directory, and ends by
 printing the `import` command to run in a project, with the crate's path
-filled in. It takes `--public` here too.
+filled in. It takes `--public` here too. Inside a Cargo workspace that is not
+your project's, a crate would not build on its own, so `create` refuses there
+and says what to run instead.
 
 ### Remove a task
 

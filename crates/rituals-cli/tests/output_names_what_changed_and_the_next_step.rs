@@ -164,22 +164,17 @@ fn a_command_line_run_outside_its_project_hands_back_the_command_to_run() -> Tes
         let working_dir = TempDir::new("output-outside-project")?;
         let project = Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
 
-        // The scaffolded project has never been built, so it has no
-        // lockfile: finding out whose project it is runs `cargo metadata`,
-        // which writes one, and the refusal that follows takes it back out.
-        // The project really was put back, so the refusal says so after its
-        // remedy.
-        assert!(
-            !project.root().join("Cargo.lock").exists(),
-            "fixture precondition: the project starts with no Cargo.lock"
-        );
+        // `create` asks whose project this is before it reads anything that
+        // could write, so the refusal has nothing to put back; it adds the
+        // other way out `create` has, a ritual of its own made elsewhere.
         let global = run_ritual(project.root(), &["create", "lint"])?;
         global.expect_failure("the global `ritual create lint` inside a project");
         assert_eq!(
             global.sole_line_prefixed_with("ritual"),
             "`create` works inside the project this command line belongs to; in your project, \
              run `cargo ritual create lint` (or `cargo <name> ritual create lint` if it was \
-             made with `--cli <name>`); ritual put the project back as it found it"
+             made with `--cli <name>`); or, for a ritual of its own, run create outside any \
+             Cargo workspace"
         );
 
         // The same holds for a project's own command line run from inside

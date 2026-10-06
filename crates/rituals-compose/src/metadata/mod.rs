@@ -14,6 +14,7 @@
 
 pub(crate) mod manifest_walk;
 mod manifests_cargo_reads;
+mod owner;
 mod schema;
 mod workspace_member;
 
@@ -26,6 +27,7 @@ use crate::generated_file::Entry;
 use crate::rollback::Changes;
 use crate::workspace::{self, Located, locate_project};
 
+pub use owner::{Owner, whose_workspace};
 pub use schema::Metadata;
 pub(crate) use schema::{DepKind, Dependency, Node, NodeDependency, Package};
 pub use workspace_member::WorkspaceMember;
@@ -182,55 +184,9 @@ pub fn fetch_recording(changes: &mut Changes, directory: &Path) -> Result<Metada
 /// # Ok::<(), rituals::Failure>(())
 /// ```
 pub fn ensure_inside_a_project(current_dir: &Path, command: &str, arguments: &str) -> Outcome {
-    match surroundings(current_dir)? {
-        Surroundings::OutsideAnyProject => Err(outside_its_project_refusal(command, arguments)),
-        Surroundings::InsideAProject => Ok(()),
-    }
-}
-
-/// Whether Cargo finds a project around a directory.
-///
-/// What [`surroundings`] answers, for a task whose behaviour depends on where
-/// it runs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Surroundings {
-    /// Cargo finds a manifest at or above the directory.
-    InsideAProject,
-    /// Cargo finds no manifest at or above the directory.
-    OutsideAnyProject,
-}
-
-/// Asks whether Cargo finds a manifest at or above `current_dir`.
-///
-/// Asked with `cargo locate-project`, which writes nothing, so a task asks
-/// it before its run begins, when no command has run and nothing has been
-/// recorded. [`ensure_inside_a_project`] is this question for a task that
-/// only works inside a project; a task that does something else outside one
-/// asks it directly.
-///
-/// # Errors
-///
-/// Returns a [`Failure`] saying so when `cargo` cannot be run at all.
-///
-/// # Examples
-///
-/// ```no_run
-/// use std::path::Path;
-///
-/// use rituals_compose::metadata::{self, Surroundings};
-///
-/// // Runs `cargo locate-project` against the directory on disk, so this
-/// // example is `no_run`.
-/// match metadata::surroundings(Path::new("."))? {
-///     Surroundings::InsideAProject => println!("scaffold into the project"),
-///     Surroundings::OutsideAnyProject => println!("scaffold on its own"),
-/// }
-/// # Ok::<(), rituals::Failure>(())
-/// ```
-pub fn surroundings(current_dir: &Path) -> Result<Surroundings, Failure> {
     match locate_project(current_dir, false)? {
-        Located::NotFound(_no_manifest) => Ok(Surroundings::OutsideAnyProject),
-        Located::Found(_manifest) => Ok(Surroundings::InsideAProject),
+        Located::NotFound(_no_manifest) => Err(outside_its_project_refusal(command, arguments)),
+        Located::Found(_manifest) => Ok(()),
     }
 }
 
@@ -722,8 +678,24 @@ impl Metadata {
 ///
 /// The running binary cannot see what the project the person stands in
 /// calls its own command line, so the remedy names the default, `ritual`,
-/// and the shape a `--cli` project uses.
-fn outside_its_project_refusal(command: &str, arguments: &str) -> Failure {
+/// and the shape a `--cli` project uses. `command` and `arguments` are what
+/// the person typed after the binary's name, as for
+/// [`Metadata::ensure_runs_in_its_own_project`], which refuses with it.
+///
+/// # Examples
+///
+/// ```
+/// use rituals_compose::metadata;
+///
+/// assert_eq!(
+///     metadata::outside_its_project_refusal("import", "greeter").to_string(),
+///     "`import` works inside the project this command line belongs to; in your project, \
+///      run `cargo ritual import greeter` (or `cargo <name> ritual import greeter` if it was \
+///      made with `--cli <name>`)"
+/// );
+/// ```
+#[must_use]
+pub fn outside_its_project_refusal(command: &str, arguments: &str) -> Failure {
     let typed = if arguments.is_empty() {
         command.to_string()
     } else {
@@ -743,8 +715,8 @@ mod tests {
     use rituals::{Failure, Name};
 
     use super::{
-        Metadata, Surroundings, WorkspaceMember, ensure_inside_a_project, fetch_in_its_own_project,
-        outside_its_project_refusal, parse, surroundings,
+        Metadata, WorkspaceMember, ensure_inside_a_project, fetch_in_its_own_project,
+        outside_its_project_refusal, parse,
     };
     use crate::rollback::{Wording, attempt};
     use crate::test_support::{ScratchDir, TestOutcome};
@@ -837,20 +809,21 @@ mod tests {
 
     /// `cargo locate-project` is the authority on whether a manifest is
     /// found at or above a directory: a package the test writes is inside, a
-    /// directory it leaves empty is outside, and a directory below the
-    /// package is inside too.
+    /// directory below the package is inside too, and a directory it leaves
+    /// empty is outside.
     #[test]
-    fn surroundings_reports_a_scratch_package_as_inside_and_an_empty_directory_as_outside()
-    -> TestOutcome {
-        let package = scratch_package("surroundings-inside")?;
-        let empty = ScratchDir::new("surroundings-outside")?;
+    fn a_scratch_package_is_inside_a_project_and_an_empty_directory_is_not() -> TestOutcome {
+        let package = scratch_package("inside-a-package")?;
+        let empty = ScratchDir::new("inside-nothing")?;
 
-        assert_eq!(surroundings(package.path())?, Surroundings::InsideAProject);
+        ensure_inside_a_project(package.path(), "import", "greeter")?;
+        ensure_inside_a_project(&package.path().join("src"), "import", "greeter")?;
         assert_eq!(
-            surroundings(&package.path().join("src"))?,
-            Surroundings::InsideAProject
+            ensure_inside_a_project(empty.path(), "import", "greeter")
+                .err()
+                .map(|failure| failure.to_string()),
+            Some(outside_its_project_refusal("import", "greeter").to_string())
         );
-        assert_eq!(surroundings(empty.path())?, Surroundings::OutsideAnyProject);
         Ok(())
     }
 

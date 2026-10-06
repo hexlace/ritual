@@ -1,5 +1,6 @@
-//! `create` outside any project: scaffold a task crate on its own, in the
-//! current directory, for a project to import later.
+//! `create` where a crate builds on its own, outside any project: scaffold a
+//! task crate on its own, in the current directory, for a project to import
+//! later.
 //
 // `redundant_pub_crate` (clippy nursery) wants `pub` here because this
 // module is private, but `pub(crate)` is the visibility that is actually

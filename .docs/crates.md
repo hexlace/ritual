@@ -62,11 +62,16 @@ it plus the directory they typed it in, folds it as a shell would, and refuses
 one that does not lead strictly below `.rituals/`. A `TaskPlace` carries the
 task's name, the last component, so a caller never re-reads it from the path.
 
-**Where a command runs is asked in one place.** `metadata::surroundings` says
-whether Cargo finds a manifest at or above a directory, `InsideAProject` or
-`OutsideAnyProject`, with `cargo locate-project`, which writes nothing. A task
-that does one thing inside a project and another outside it, as `create` does,
-asks it, and so does `ensure_inside_a_project`, so there is one way to ask.
+**Whose workspace a command runs in is asked in one place.**
+`metadata::whose_workspace` says which command line owns the workspace a
+directory is in: `TheCommandLine` asking, `AnotherCommandLine` (a declared
+workspace with a member that declares a `tasks` list), or `NoCommandLine`. It
+asks with `cargo locate-project` and `cargo metadata --no-deps`, which resolve
+nothing and write nothing, so a task asks it before its run begins. Its own
+project is the same test `fetch_in_its_own_project` makes. `create` asks it,
+and where no command line owns the workspace, asks
+`workspace::ensure_the_directory_stands_alone`, as `new` does, whether a crate
+made there would build on its own.
 
 **Manifests are edited as one set.** `manifest::Manifests` reads the workspace's
 manifest and the command line crate's, from a `ManifestPaths` that names which
