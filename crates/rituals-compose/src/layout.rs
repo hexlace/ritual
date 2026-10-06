@@ -251,8 +251,9 @@ pub fn place_for(workspace_root: &Path, name: &Name) -> TaskPlace {
 ///
 /// # Errors
 ///
-/// Returns a [`Failure`] naming `typed.path` as it was typed, and the tasks
-/// directory, when the path does not lead strictly below it, and one naming
+/// Returns a [`Failure`] naming `typed.path` as it was typed, where it leads
+/// from the workspace root, and the tasks directory, when the path does not
+/// lead strictly below it, and one naming
 /// the problem when its last component is not a valid [`Name`].
 ///
 /// # Examples
@@ -295,7 +296,10 @@ pub fn place_at(workspace_root: &Path, typed: TypedPath<'_>) -> Result<TaskPlace
     let tasks = tasks_directory(workspace_root);
     let folded = paths::normalize(&typed.current_dir.join(typed.path));
     if !folded.starts_with(&tasks) || folded == tasks {
-        return Err(outside_the_tasks_directory(typed.path));
+        return Err(outside_the_tasks_directory(
+            typed.path,
+            &paths::relative(workspace_root, &folded),
+        ));
     }
 
     // Strictly below `tasks`, so there is a last component and a path from
@@ -321,13 +325,17 @@ pub fn place_at(workspace_root: &Path, typed: TypedPath<'_>) -> Result<TaskPlace
 }
 
 /// The refusal for a path that does not lead strictly below the tasks
-/// directory.
-fn outside_the_tasks_directory(typed: &Path) -> Failure {
-    let typed = typed.display();
+/// directory: what was typed, and `landed`, where it leads, spelled from the
+/// workspace root. Naming where it led, and that a path is read from the
+/// current directory, is what makes the refusal make sense when what was
+/// typed looks as if it is below the tasks directory but was typed from
+/// somewhere else.
+fn outside_the_tasks_directory(typed: &Path, landed: &str) -> Failure {
     Failure::new(format!(
-        "refusing to create {typed}: inside a project every ritual lives below \
-         {TASKS_DIRECTORY}/, and {typed} is not; give a bare name, or a path below \
-         {TASKS_DIRECTORY}/"
+        "refusing to create {}: a path is read from the current directory, and this one \
+         leads to {landed}; inside a project every ritual lives below {TASKS_DIRECTORY}/ at \
+         the project's root, so give a bare name, or a path that leads below it",
+        typed.display()
     ))
 }
 
@@ -448,22 +456,25 @@ mod tests {
 
     /// The paths that do not lead strictly below `.rituals/`: a sibling of
     /// it, the directory itself with and without a trailing slash, out of
-    /// the project, and outside by an absolute path. Each is refused naming
-    /// what was typed and `.rituals/`.
+    /// the project, outside by an absolute path, and one that names
+    /// `.rituals/` but was typed from another directory. Each is refused
+    /// naming what was typed, where it leads from the workspace root, and
+    /// `.rituals/`.
     #[test]
     fn a_path_that_does_not_lead_strictly_below_the_tasks_directory_is_refused() {
         let cases = [
-            (ROOT, "src/lint"),
-            (ROOT, ".rituals"),
-            (ROOT, ".rituals/"),
-            (ROOT, "./.rituals/./.."),
-            (ROOT, ".rituals/../lint"),
-            (ROOT, "../x"),
-            ("/work/demo/.rituals/first", "../../lint"),
-            (ROOT, "/etc/lint"),
-            (ROOT, "/work/demo/.rituals"),
+            (ROOT, "src/lint", "src/lint"),
+            (ROOT, ".rituals", ".rituals"),
+            (ROOT, ".rituals/", ".rituals"),
+            (ROOT, "./.rituals/./..", "."),
+            (ROOT, ".rituals/../lint", "lint"),
+            (ROOT, "../x", "../x"),
+            ("/work/demo/.rituals/first", "../../lint", "lint"),
+            (ROOT, "/etc/lint", "../../etc/lint"),
+            (ROOT, "/work/demo/.rituals", ".rituals"),
+            ("/work/demo/ritual", ".rituals/lint", "ritual/.rituals/lint"),
         ];
-        for (current_dir, path) in cases {
+        for (current_dir, path, landed) in cases {
             let refused = place_at(Path::new(ROOT), typed(current_dir, path));
             assert!(
                 refused.is_err(),
@@ -473,6 +484,13 @@ mod tests {
                 let message = failure.to_string();
                 assert!(
                     message.contains(&format!("refusing to create {path}:")),
+                    "{message}"
+                );
+                assert!(
+                    message.contains(&format!(
+                        "a path is read from the current directory, and this one leads to \
+                         {landed};"
+                    )),
                     "{message}"
                 );
                 assert!(message.contains("below .rituals/"), "{message}");

@@ -3,7 +3,8 @@
 //! the workspace root, and it runs as a command under its last component.
 //! A path is read the way a shell reads it, from the directory the command
 //! is run in. A path that does not lead strictly below `.rituals/` is
-//! refused, naming `.rituals/`, and leaves the project byte-identical.
+//! refused, naming `.rituals/` and where the path led from the project root,
+//! and leaves the project byte-identical.
 //! `--path` and `--git` choose where an outside crate's dependency comes
 //! from, so inside a project, where the task inherits it, they are refused.
 
@@ -160,6 +161,31 @@ fn a_path_that_climbs_out_of_dot_rituals_from_below_is_refused() -> TestOutcome 
             &project.root().join(".rituals/first"),
             &["create", "../../lint"],
             |message| message.contains(".rituals/"),
+        )
+    })
+}
+
+/// `.rituals/lint` typed from `ritual/` leads to `ritual/.rituals/lint`, so
+/// the refusal says where it led and how a path is read, rather than that
+/// `.rituals/lint` is not below `.rituals/`.
+#[test]
+fn a_path_typed_from_a_subdirectory_is_refused_saying_where_it_led() -> TestOutcome {
+    in_checkout(|checkout| {
+        let (_working_dir, project, binary) =
+            project_with_a_first_task(checkout, "create-nested-from-subdirectory")?;
+
+        assert_refused_and_left_alone(
+            &project,
+            &binary,
+            &project.root().join("ritual"),
+            &["create", ".rituals/lint"],
+            |message| {
+                message
+                    == "refusing to create .rituals/lint: a path is read from the current \
+                        directory, and this one leads to ritual/.rituals/lint; inside a project \
+                        every ritual lives below .rituals/ at the project's root, so give a bare \
+                        name, or a path that leads below it"
+            },
         )
     })
 }
