@@ -92,14 +92,14 @@ A task runs inside a project's command line. The `ritual` binary, from
 cargo install --locked rituals-cli
 ritual new demo
 cd demo
-cargo ritual add hello
+cargo ritual create hello
 cargo ritual hello world
 ```
 
-`add` writes the manifest and the `task()` above into `.rituals/hello`, imports
-it, and regenerates the command line. To write a task crate outside any
-project, for several projects to share, run `ritual create hello` and
-[import it](https://github.com/hexlace/ritual#import-a-task-from-somewhere-else).
+`create` writes the manifest and the `task()` above into `.rituals/hello`,
+imports it, and regenerates the command line. Run outside any project, `ritual
+create hello` writes a task crate of its own instead, for several projects to
+share; [import it](https://github.com/hexlace/ritual#import-a-task-from-somewhere-else).
 
 ## More than one command
 

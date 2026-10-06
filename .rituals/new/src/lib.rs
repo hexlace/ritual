@@ -204,16 +204,16 @@ fn validate_source(source: Source) -> Result<Source, Failure> {
 ///
 /// `name` is the input a person already typed, already validated by
 /// [`Name::new`] before this is called. The remedy names *the enclosing
-/// project's own* `add` rather than a binary, for the same reason
-/// `create`'s own `refusal` does: the project being stood in may call its
-/// command line anything, and `new` has not read its manifest to find out.
+/// project's own* `create` rather than a binary, because the project being
+/// stood in may call its command line anything, and `new` has not read its
+/// manifest to find out.
 fn refusal(name: &Name) -> workspace::Refusal {
     workspace::Refusal {
         attempted_command: format!("new {name}"),
         why_not_here: "a project does not belong inside another project's workspace".to_string(),
         what_to_do_instead: format!(
             "run new outside any Cargo workspace, or, if you meant a new command rather than \
-             a new project, add it with the enclosing project's own `add {name}`"
+             a new project, add it with the enclosing project's own `create {name}`"
         ),
     }
 }

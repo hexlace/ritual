@@ -12,6 +12,6 @@ directories move, and putting a project back when a run does not finish.
 **You do not need this crate to write a task.** A task depends on
 [`rituals`](https://crates.io/crates/rituals) alone. This crate is for
 scaffolders, meaning tasks that write or rewrite a project's command line.
-Ritual's own management tasks, such as `add` and `regenerate`, are built on it.
+Ritual's own management tasks, such as `create` and `regenerate`, are built on it.
 
 License: MIT.

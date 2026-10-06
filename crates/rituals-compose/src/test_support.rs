@@ -5,7 +5,7 @@
 //! filesystem test", used by every test module in this crate that needs
 //! one: two copies of the same type in one crate can drift apart without
 //! anything noticing. Every task crate that
-//! also needs one — `new`, `create`, `add` — keeps its own copy instead: a
+//! also needs one — `new`, `create`, `import` — keeps its own copy instead: a
 //! different crate is a genuine boundary this module cannot cross.
 //!
 //! Declared behind `#[cfg(test)]` at the `mod test_support;` site in

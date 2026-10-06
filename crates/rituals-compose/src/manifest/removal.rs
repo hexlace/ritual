@@ -3,7 +3,7 @@
 //! entry — each as an edit in place that leaves the rest of the file
 //! as a human wrote it.
 //!
-//! The counterpart of what `add` appends. Each edit that takes an entry out
+//! The counterpart of what `create` appends. Each edit that takes an entry out
 //! of an array removes the entry's own line, including a comment written on
 //! it, and every line the entry did not own stays.
 
@@ -937,7 +937,7 @@ mod tests {
         Ok(())
     }
 
-    /// The shapes `add` and a person write keep it the same way: a dotted
+    /// The shapes `create` and a person write keep it the same way: a dotted
     /// key, whose line's text `toml_edit` holds on the key under it, and a
     /// table under its own header, whose text is in front of the header.
     #[test]

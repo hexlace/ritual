@@ -205,7 +205,7 @@ impl Manifest {
     ///
     /// The two writes happen together because they are one operation: a
     /// dependency with no matching `tasks` entry, or a `tasks` entry with
-    /// no matching dependency, is a state `add` itself refuses to leave a
+    /// no matching dependency, is a state `create` itself refuses to leave a
     /// project in. This method holds that itself rather than leaning on
     /// its one caller: both destinations are checked before either is
     /// written, so nothing changes in this document unless both are
@@ -515,7 +515,7 @@ fn raw_text(raw: Option<&RawString>) -> String {
 /// Reports whether the manifest at `path` parses and declares
 /// `[package.metadata.ritual] task = true`.
 ///
-/// Used to tell a leftover task crate `add` can finish importing from an
+/// Used to tell a leftover task crate `create` can finish importing from an
 /// unrelated collision. Any failure to read or parse answers `false`: an
 /// unreadable directory is exactly the unrelated-collision case. Twin of
 /// [`declares_a_workspace`], which shares this contract: both parse
@@ -969,7 +969,7 @@ mod tests {
     }
 
     /// Cargo reads `metadata = { ritual = { tasks = [] } }` as the same list
-    /// as `[package.metadata.ritual] tasks`, so `add` and `import` must both
+    /// as `[package.metadata.ritual] tasks`, so `create` and `import` must both
     /// find it there rather than one of them refusing a manifest Cargo
     /// accepts.
     #[test]

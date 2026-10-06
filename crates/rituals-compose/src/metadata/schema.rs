@@ -75,7 +75,7 @@ pub(crate) struct Package {
     pub(crate) manifest_path: PathBuf,
     pub(crate) targets: Vec<Target>,
     /// Every dependency the manifest declares, of every kind, on every
-    /// target, optional or not, whatever the features. Read by `add`, to
+    /// target, optional or not, whatever the features. Read by `create`, to
     /// distinguish "not a dependency at all" from "a dependency, but not
     /// listed in `tasks`", and by `remove`, to find everything that would
     /// still point into a directory once it is deleted.

@@ -53,9 +53,30 @@ out where paths go when directories move. The management tasks depend on it
 because it is the library their job needs.
 
 **The layout is shared.** `layout` is the one place that says where a
-scaffolder puts a ritual, `.rituals/<name>`. A task that scaffolds a task
+scaffolder puts a ritual, below `.rituals/`. A task that scaffolds a task
 crate asks it for the directory, the member entry and the path to report, so
-`add` and any scaffolder after it agree and a change of directory is one edit.
+`create` and any scaffolder after it agree and a change of directory is one
+edit. There are two ways to ask: `place_for` takes a name and answers
+`.rituals/<name>`, and `place_at` takes a `TypedPath`, a path as a person typed
+it plus the directory they typed it in, folds it as a shell would, and refuses
+one that does not lead strictly below `.rituals/`. A `TaskPlace` carries the
+task's name, the last component, so a caller never re-reads it from the path.
+
+**Where a command runs is asked in one place.** `metadata::surroundings` says
+whether Cargo finds a manifest at or above a directory, `InsideAProject` or
+`OutsideAnyProject`, with `cargo locate-project`, which writes nothing. A task
+that does one thing inside a project and another outside it, as `create` does,
+asks it, and so does `ensure_inside_a_project`, so there is one way to ask.
+
+**Manifests are edited as one set.** `manifest::Manifests` reads the workspace's
+manifest and the command line crate's, from a `ManifestPaths` that names which
+is which, and when they are one file, as they are where the command line crate
+is the workspace root, it holds one document, so two edits cannot overwrite
+each other and the file is written once. `create` and `remove` edit through it.
+
+**Who a ritual is for is written in one place.** `task_crate::manifest` takes an
+`Audience`, `Private` or `Public`, and writes `publish = false` for the first,
+so every scaffolder spells it the same way and none can leave it out.
 
 **Git is asked in one place.** `git` answers whether git can give back every
 file in a directory about to be deleted, whether the work tree is clean, which
@@ -108,7 +129,7 @@ Beyond `rituals`, its dependencies are here because of what the job is:
 - **`serde`** and **`serde_json`**, because `cargo metadata` speaks JSON
   and nothing else, and it is the only thing that can say what a dependency
   resolved to and what that crate declares about itself.
-- **`toml_edit`**, because `add` and `import` append to manifests a person
+- **`toml_edit`**, because `create` and `import` append to manifests a person
   wrote. A round trip through a plain TOML parser would reformat them and drop
   their comments; `toml_edit` edits in place. It is the crate Cargo's own
   `cargo add` uses.

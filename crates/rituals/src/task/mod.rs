@@ -196,7 +196,7 @@ impl Task {
     /// let bundle = Task::group(
     ///     "maintain this project",
     ///     [
-    ///         ("add", Task::new("scaffold a task", run)),
+    ///         ("create", Task::new("scaffold a task", run)),
     ///         ("regenerate", Task::new("rewrite the generated task list", run)),
     ///     ],
     /// );

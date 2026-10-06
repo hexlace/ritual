@@ -1278,7 +1278,7 @@ mod tests {
         let reported = fail_after(|changes| {
             changes.reserve_directory(&lint)?;
             changes.reserve_directory(&format)?;
-            // As `add` fills its directory: creating what is already there
+            // As `create` fills its directory: creating what is already there
             // is not an error.
             std::fs::create_dir_all(&lint)
                 .and_then(|()| std::fs::create_dir_all(&format))

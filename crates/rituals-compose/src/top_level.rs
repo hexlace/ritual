@@ -1,4 +1,4 @@
-//! The one check `add`, `import` and `regenerate` run before they write:
+//! The one check `create`, `import` and `regenerate` run before they write:
 //! whether a command name a project is about to mount is still free at the
 //! top level of the command line currently running.
 
@@ -10,12 +10,12 @@ use rituals::{CommandLine, Failure, Outcome};
 /// built as, or `help`, which clap adds to every command that has
 /// subcommands.
 ///
-/// The command name comes from what a person typed (`add`) or from the
+/// The command name comes from what a person typed (`create`) or from the
 /// project's own manifest (`regenerate`); the flattened commands come from the
 /// binary that person is running — both are this project's own, not supplied by
 /// anyone else. Only exact name equality is checked: unusable spellings are
 /// already refused before this ever runs — by [`rituals::Name::new`] for the
-/// name `add` was given, and by the task-list resolver, along with duplicates,
+/// name `create` was given, and by the task-list resolver, along with duplicates,
 /// for the names `regenerate` reads.
 ///
 /// A `command` equal to the bin's own name always passes, checked before
@@ -32,11 +32,11 @@ use rituals::{CommandLine, Failure, Outcome};
 /// question is not this function's to catch at all; it surfaces at the
 /// command line's next startup instead.
 ///
-/// `add`'s own `ensure_the_name_is_not_the_bin_name` refuses that same name
-/// earlier and on `add`'s own behalf, before this check ever runs — so the
+/// `create`'s own `ensure_the_name_is_not_the_bin_name` refuses that same name
+/// earlier and on `create`'s own behalf, before this check ever runs — so the
 /// exemption above is exactly what it says, a rule about `regenerate`'s
 /// manifest entry and a bundle's promoted child, and not a statement that
-/// `add` will scaffold a task there.
+/// `create` will scaffold a task there.
 ///
 /// # Examples
 ///

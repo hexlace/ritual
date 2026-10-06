@@ -10,7 +10,7 @@ wiring up clap for your own repo is a chore that only happens once the pain
 gets bad enough.
 
 Ritual makes it the starting point. `ritual new` gives a project its CLI, and
-every task you add shows up in it.
+every task you create shows up in it.
 
 Tasks are crates, so they travel like crates. Group them into a **bundle**
 (also a crate) and a whole team shares one toolkit: add one dependency, and
@@ -36,7 +36,7 @@ project, everything runs through Cargo.
 ```sh
 ritual new demo
 cd demo
-cargo ritual add hello
+cargo ritual create hello
 cargo ritual hello
 ```
 
@@ -47,7 +47,7 @@ hello has nothing to do yet
 The first `cargo ritual` builds the project's command line, so Cargo prints
 its progress before the output. Later runs reuse the build.
 
-`new` made a Cargo workspace, and `add` put a task in it:
+`new` made a Cargo workspace, and `create` put a task in it:
 
 ```text
 demo/
@@ -57,7 +57,7 @@ demo/
 ├── ritual/               the CLI crate (package demo-ritual)
 │   ├── Cargo.toml        says which of its dependencies are tasks
 │   └── src/main.rs       generated from that list, never edited by hand
-└── .rituals/hello/       the task add scaffolded
+└── .rituals/hello/       the task create scaffolded
     ├── Cargo.toml
     └── src/lib.rs
 ```
@@ -93,9 +93,10 @@ cargo ritual hello world
 hello, world
 ```
 
-`cargo ritual --help` lists `hello` beside ritual's own commands. `new` and
-`create` refuse inside a project; every command line carries all of them, so
-it looks the same wherever it runs.
+`cargo ritual --help` lists `hello` beside ritual's own commands. `new`
+makes a project, so it will not run inside one; `create` works inside a project
+and outside one. Every command line carries all of ritual's commands, so it looks
+the same wherever it runs.
 
 ## Concepts
 
@@ -167,12 +168,13 @@ task, and bundles nest.
 
 ### Ritual's own commands are a bundle too
 
-`add`, `regenerate`, `new`, `create`, `import`, `remove` and `migrate` come
-from the bundle `rituals-core`, imported under the key `ritual`. A new project's
-command line is also called `ritual`, so those commands appear directly:
-`cargo ritual add`, not `cargo ritual ritual add`. If you name your command line something else,
-with `ritual new demo --cli acme`, they stay grouped: your tasks run as
-`cargo acme <task>` and ritual's as `cargo acme ritual add`.
+`create`, `regenerate`, `new`, `import`, `remove` and `migrate` come from the
+bundle `rituals-core`, imported under the key `ritual`, and so does `add`, the
+old name of `create`. A new project's command line is also called `ritual`, so
+those commands appear directly: `cargo ritual create`, not `cargo ritual ritual
+create`. If you name your command line something else, with
+`ritual new demo --cli acme`, they stay grouped: your tasks run as
+`cargo acme <task>` and ritual's as `cargo acme ritual create`.
 
 The rule behind this, and what happens when two commands would share a name,
 is in [the design](.docs/design.md#bundles-and-the-top-level).
@@ -184,12 +186,33 @@ is in [the design](.docs/design.md#bundles-and-the-top-level).
 Run this anywhere inside the project:
 
 ```sh
-cargo ritual add lint
+cargo ritual create lint
+```
+
+```text
+created .rituals/lint/Cargo.toml
+created .rituals/lint/src/lib.rs
+updated Cargo.toml
+updated ritual/Cargo.toml
+updated ritual/src/main.rs (tasks: ritual, lint)
+next: edit .rituals/lint/src/lib.rs, then run cargo ritual lint
 ```
 
 It scaffolds `.rituals/lint`, adds it to the workspace and to the CLI crate's
 manifest, and regenerates. Edit `.rituals/lint/src/lib.rs`, then run
-`cargo ritual lint`.
+`cargo ritual lint`. A run that is refused or fails leaves the project as it
+found it.
+
+To put the task in a subdirectory, give a path below `.rituals/`:
+
+```sh
+cargo ritual create .rituals/private/lint
+```
+
+The path is read from where you are, as a shell reads it, so
+`cargo ritual create private/lint` from inside `.rituals/` means the same
+place. Its last part, `lint`, is the task's name. A path that does not lead
+below `.rituals/` is refused.
 
 **Where rituals live.** Every ritual lives in `.rituals/`, whoever it is for:
 one directory, in every project, with no exceptions. Subdirectories of
@@ -197,12 +220,14 @@ one directory, in every project, with no exceptions. Subdirectories of
 ritual reads no meaning into their names. Who a ritual is for is Cargo's own
 `publish` key in its manifest, the key Cargo already uses to say whether a
 crate ships: `publish = false` keeps it private to the project, and leaving it
-out shares it. `add` writes none, since it cannot know who a ritual is for.
+out shares it. `create` writes `publish = false` unless you give `--public`, so
+a ritual is never published by accident; remove the key when you want to share
+one.
 
 One Cargo rule to know when you group rituals. A `.rituals/*` glob in
 `[workspace] members` also matches a grouping directory that has no manifest
 of its own, and Cargo then refuses to load the workspace. List that directory
-under `exclude`, or list the members explicitly, as `add` writes them. A 0.1
+under `exclude`, or list the members explicitly, as `create` writes them. A 0.1
 project that already did this in `tasks/` needs nothing more: `migrate` moves
 the `exclude` entry with the group, so `tasks/group` becomes `.rituals/group`.
 
@@ -243,14 +268,15 @@ the crate depends on it directly or through a crate whose task it re-exports.
 A refusal leaves the project as it found it.
 
 To write a task crate that several projects can share, run this outside any
-Cargo workspace, since the crate has to build on its own:
+project, since the crate has to build on its own:
 
 ```sh
 ritual create lint
 ```
 
-It ends by printing the `import` command to run in a project, with the
-crate's path filled in.
+It takes a bare name, makes the crate in the current directory, and ends by
+printing the `import` command to run in a project, with the crate's path
+filled in. It takes `--public` here too.
 
 ### Remove a task
 
@@ -263,7 +289,7 @@ cargo ritual remove lint
 
 `remove` takes the key out of `tasks`, regenerates the command line, and only
 then removes the dependency line, the order the build needs. If the task is a
-crate in your workspace, as `add` creates, it also removes its `members`
+crate in your workspace, as `create` creates, it also removes its `members`
 entry and deletes its directory. A path dependency outside the workspace
 loses only its dependency line: its directory stays where it is. Nothing is
 committed for you. Look at the change, and commit it when it is what you
@@ -428,8 +454,10 @@ has already moved and Cargo reads the project as it should.
 ### Inside a project, use `cargo ritual`
 
 `cargo ritual` works from any directory inside the project. The global
-`ritual` carries `add`, `regenerate`, `import`, `remove` and `migrate` too, but
-they refuse in your project: use `cargo ritual add`.
+`ritual` carries `create`, `regenerate`, `import`, `remove` and `migrate` too,
+but they refuse in your project: use `cargo ritual create`. `add` is `create`'s
+old name: it still works in 0.2.0, says on standard error that it is
+deprecated, and goes in 0.3.0.
 
 ## Where next
 

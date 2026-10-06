@@ -220,7 +220,7 @@ fn render_entries(output: &mut String, entries: &[Entry]) {
 /// The whole operation: read the current directory, fetch the resolved
 /// dependency graph, resolve the task list and locate the project on it,
 /// [`render`] the text, and write it if it changed. Lives here, beside
-/// [`render`], rather than in either task that calls it — both `add` and
+/// [`render`], rather than in either task that calls it — both `create` and
 /// `regenerate` run this same path, and neither can depend on the other, so
 /// the one place both can reach it without a dependency between them is the
 /// module that already renders the file both act on. `render` is the text;

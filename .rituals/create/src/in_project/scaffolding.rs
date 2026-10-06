@@ -304,8 +304,8 @@ mod tests {
         Ok(())
     }
 
-    /// Two manifests are two writes, reported workspace first, as `add`
-    /// always has, with both spelled from the workspace root.
+    /// Two manifests are two writes, reported workspace first, as 0.1's
+    /// `add` did, with both spelled from the workspace root.
     #[test]
     fn two_manifests_are_written_and_reported_workspace_first() -> TestOutcome {
         let project = ScratchProject::new("two-manifests")?;

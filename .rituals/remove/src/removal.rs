@@ -150,7 +150,7 @@ impl Removal {
             .iter()
             .any(|task| task.key() == self.key);
         // A key that is not a valid name could not have been imported by
-        // `add` or by a person following the design, and its dependency is
+        // `create` or by a person following the design, and its dependency is
         // not checked here; the generated file already no longer mounts it.
         let still_a_dependency = match Name::new(&self.key) {
             Ok(name) => document

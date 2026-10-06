@@ -61,7 +61,7 @@ const SUPPORTED_FORMAT_VERSION: u64 = 1;
 /// Invokes the cargo that launched this process, through [`cargo::command`],
 /// so a nested call never uses a different cargo than the one in charge. No flags beyond
 /// `--format-version 1`: `--offline` would break a project whose
-/// dependencies are not yet fetched, and `--locked` would break `add`,
+/// dependencies are not yet fetched, and `--locked` would break `create`,
 /// which must update the lockfile.
 ///
 /// # Errors
@@ -615,7 +615,7 @@ impl Metadata {
 
     /// Reports whether any workspace member in this document is already
     /// named `name` — a task's crate is named after the command, so this is
-    /// what tells `add` a name is already taken by an unrelated package.
+    /// what tells `create` a name is already taken by an unrelated package.
     ///
     /// # Examples
     ///
@@ -643,7 +643,7 @@ impl Metadata {
     /// `package_name`.
     ///
     /// A command line is identified with its project by package name, and
-    /// nothing more. That catches the global binary's `add` run inside a
+    /// nothing more. That catches the global binary's `create` run inside a
     /// project, and a project's own command line run inside another project
     /// whose CLI crate has a different package name.
     ///
@@ -672,7 +672,7 @@ impl Metadata {
     /// startup.
     ///
     /// `command` and `arguments` are what the person typed after the
-    /// binary's name, such as `add` and `lint`; the refusal hands them back
+    /// binary's name, such as `create` and `lint`; the refusal hands them back
     /// as the command to run in their own project. `arguments` is empty for
     /// a command that takes none.
     ///
@@ -691,7 +691,7 @@ impl Metadata {
     /// // Reads a document `fetch` already produced from a real
     /// // `cargo metadata` call, so this example stays `no_run`.
     /// let document = metadata::fetch(Path::new("."))?;
-    /// document.ensure_runs_in_its_own_project("demo-ritual", "add", "lint")?;
+    /// document.ensure_runs_in_its_own_project("demo-ritual", "create", "lint")?;
     /// # Ok::<(), rituals::Failure>(())
     /// ```
     pub fn ensure_runs_in_its_own_project(
@@ -749,9 +749,9 @@ mod tests {
     #[test]
     fn the_outside_project_refusal_hands_back_the_command_to_run() {
         assert_eq!(
-            outside_its_project_refusal("add", "lint").to_string(),
-            "`add` works inside the project this command line belongs to; in your project, run \
-             `cargo ritual add lint` (or `cargo <name> ritual add lint` if it was made with \
+            outside_its_project_refusal("create", "lint").to_string(),
+            "`create` works inside the project this command line belongs to; in your project, run \
+             `cargo ritual create lint` (or `cargo <name> ritual create lint` if it was made with \
              `--cli <name>`)"
         );
         assert_eq!(
