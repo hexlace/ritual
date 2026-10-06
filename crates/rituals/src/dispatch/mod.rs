@@ -26,9 +26,10 @@ use crate::task::Task;
 /// Every argument error clap raises on its own — an unknown flag, a missing
 /// value, an unknown subcommand — exits 2 with clap's own formatting.
 /// Everything ritual itself refuses, including a task's own [`crate::Failure`],
-/// exits 1 with `<bin name>: ` in front of the message and each of its
+/// is written with `<bin name>: ` in front of the message and each of its
 /// causes — the one place that prefix is added, so a task author never
-/// writes it.
+/// writes it — and exits 1, or with the [`crate::RefusalStatus`] the
+/// failure chose.
 ///
 /// # Examples
 ///
@@ -156,11 +157,12 @@ fn refusal_line(binary_name: &str, failure: &Failure) -> String {
 }
 
 /// Maps a task's [`Outcome`] to the process exit status a caller sees:
-/// success to [`ExitCode::SUCCESS`], any refusal to [`ExitCode::FAILURE`].
-const fn exit_code_for(outcome: &Outcome) -> ExitCode {
+/// success to [`ExitCode::SUCCESS`], a refusal to its own
+/// [`Failure::status`], which is 1 unless the task chose another.
+fn exit_code_for(outcome: &Outcome) -> ExitCode {
     match outcome {
         Ok(()) => ExitCode::SUCCESS,
-        Err(_) => ExitCode::FAILURE,
+        Err(failure) => ExitCode::from(failure.status().get()),
     }
 }
 
@@ -171,7 +173,7 @@ mod tests {
     use super::{build_command, exit_code_for, refusal_line, resolve};
     use crate::command_line::CommandLine;
     use crate::identity::Identity;
-    use crate::outcome::{Failure, Outcome};
+    use crate::outcome::{Failure, Outcome, RefusalStatus};
     use crate::task::Task;
     use crate::test_support::{NoArguments, run_ok};
 
@@ -190,6 +192,13 @@ mod tests {
     fn exit_code_for_err_is_failure() {
         let outcome: Outcome = Err(Failure::new("boom"));
         assert_eq!(exit_code_for(&outcome), ExitCode::FAILURE);
+    }
+
+    #[test]
+    fn exit_code_for_a_failure_with_a_status_is_that_status() {
+        let status = RefusalStatus::new(3).expect("3 is a usable refusal status");
+        let outcome: Outcome = Err(Failure::new("3 tasks differ").exiting_with(status));
+        assert_eq!(exit_code_for(&outcome), ExitCode::from(3));
     }
 
     #[test]

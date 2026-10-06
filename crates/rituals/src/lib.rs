@@ -3,7 +3,8 @@
 //! ## What this crate provides
 //!
 //! - For writing a task: [`Task`], [`Outcome`], [`Failure`], [`report()`], [`warn()`],
-//!   and [`clap`].
+//!   and [`clap`]; and for a refusal that exits with a status other than 1,
+//!   [`RefusalStatus`] and [`InvalidRefusalStatus`].
 //! - For a task that needs the command line it runs in:
 //!   [`Task::receiving_command_line`], [`CommandLine`] and [`Identity`].
 //! - For generated code and scaffolding tools rather than tasks: [`run`],
@@ -25,7 +26,7 @@ pub use command_line::CommandLine;
 pub use dispatch::run;
 pub use identity::Identity;
 pub use name::{InvalidName, Name};
-pub use outcome::{Failure, Outcome};
+pub use outcome::{Failure, InvalidRefusalStatus, Outcome, RefusalStatus};
 pub use report::{report, warn};
 pub use task::Task;
 

@@ -950,14 +950,21 @@ regenerate` in a default project, `cargo acme ritual regenerate` under
 ritual's bundle under, so a project that remounted it under a key of its own
 still reads `ritual` in those hints.
 
-One type, `rituals::Failure`, carries every refusal. Its only consumer is a
-person reading stderr, so the message is the contract, and a taxonomy
-nothing branches on would be surface without a use. Dispatch prefixes every
-refusal line with `<bin name>: `, in one place, so no task writes that prefix
-itself. A `Failure` follows the usual convention for an error: its `Display`
-is the message alone and its cause is `source()`. The refusal line walks that
-chain, joining each link with `: `, so a cause several levels down still
-reaches the person reading it and none is printed twice. Refusals exit with
-status 1. Argument errors clap raises on its own,
-such as an unknown flag or a missing value, keep clap's formatting and exit
-with status 2.
+One type, `rituals::Failure`, carries every refusal. The message is for a
+person reading stderr and is the contract, so a taxonomy of error types that
+nothing branches on would be surface without a use. The one thing a caller
+does branch on, the exit status, is a value on the `Failure` instead. Dispatch
+prefixes every refusal line with `<bin name>: `, in one place, so no task
+writes that prefix itself.
+
+A `Failure` follows the usual convention for an error: its `Display` is the
+message alone and its cause is `source()`. The refusal line walks that chain,
+joining each link with `: `, so a cause several levels down still reaches the
+person reading it and none is printed twice.
+
+Refusals exit with status 1, or with a `RefusalStatus` the task chose, for a
+caller that has to tell two refusals apart without reading stderr. Only 1 and
+3 to 125 can be built: 0 is success, 2 is clap's usage error, and 126 and
+above belong to the shell. When one `Failure` wraps another, the outer one's
+status decides. Argument errors clap raises on its own, such as an unknown
+flag or a missing value, keep clap's formatting and exit with status 2.

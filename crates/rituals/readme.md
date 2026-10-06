@@ -59,7 +59,7 @@ needs no parser dependency of its own.
 ## Refusing
 
 A task that cannot do its job returns a `Failure`. The command line prints
-it after its own name and exits with status 1:
+it after its own name and exits with status 1, unless the task chose another:
 
 ```rust
 use std::path::PathBuf;
@@ -91,6 +91,29 @@ The line names the cause after the message, then the cause's own
 follows the usual convention for an error: its `Display` is the message
 alone, and the cause is its `source()`. To write a `Failure` into text of your
 own, with every cause, use `failure.with_causes()`.
+
+A task with more than one way to refuse can give each its own exit status, so
+a caller such as a CI job can tell "the check found differences" from "the
+check could not run" without reading stderr:
+
+```rust
+use rituals::{Failure, Outcome, RefusalStatus};
+
+const COULD_NOT_RUN: RefusalStatus = match RefusalStatus::new(4) {
+    Ok(status) => status,
+    Err(_) => panic!("4 is a refusal status"),
+};
+
+fn sync() -> Outcome {
+    Err(Failure::new("the registry did not answer").exiting_with(COULD_NOT_RUN))
+}
+```
+
+A status is 1 or anything from 3 to 125. `RefusalStatus::new` refuses 0, which
+is success, 2, which a usage error exits with, and 126 and above, which a
+shell uses for itself. When one `Failure` wraps another, the outer one's
+status is the one the process exits with. `new` is `const`, so a status
+named as a constant, as above, is checked when the task compiles.
 
 ## Running a task
 
