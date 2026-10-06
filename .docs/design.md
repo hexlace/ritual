@@ -838,9 +838,10 @@ so with git as the way back every failure after a move would need a recovery
 command, and git cannot give back the ignored files a directory holds, such
 as a stray `target/`. A rename carries them both ways, so they end up where
 they started on every path. If a rename cannot be undone, the message names
-both paths and the `mv` that puts the directory back, with absolute paths so
-it works from any directory. It names no command when both places hold
-something again, because that `mv` would move one inside the other.
+both paths and the `mv` that puts the directory back, spelled from the
+project root like every path the report names, and says to run it from
+there. It names no command when both places hold something again, because
+that `mv` would move one inside the other.
 
 **What is repointed.** A task can depend on another, and any member can depend
 on a task, so the command line crate's manifest is not the only one that names
