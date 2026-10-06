@@ -600,11 +600,16 @@ fn isolating_git_stops_configuration_injected_through_parameters() -> TestOutcom
 }
 
 /// A fresh task's manifest as `create` writes it for each audience.
-const PRIVATE_MANIFEST: &str = "[package]\nname = \"lint\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\
-    publish = false\n\n[dependencies]\nrituals.workspace = true\n\n[package.metadata.ritual]\n\
-    task = true\n";
-const PUBLIC_MANIFEST: &str = "[package]\nname = \"lint\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
-    [dependencies]\nrituals.workspace = true\n\n[package.metadata.ritual]\ntask = true\n";
+const PRIVATE_MANIFEST: &str = concat!(
+    "[package]\nname = \"lint\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    "publish = false\n\n[dependencies]\nrituals.workspace = true\n\n",
+    "[package.metadata.ritual]\ntask = true\n",
+);
+const PUBLIC_MANIFEST: &str = concat!(
+    "[package]\nname = \"lint\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n",
+    "[dependencies]\nrituals.workspace = true\n\n",
+    "[package.metadata.ritual]\ntask = true\n",
+);
 
 /// The audience check tells the two manifests apart, in both directions, and
 /// names what differs, so a story that asserts on it cannot pass on either.

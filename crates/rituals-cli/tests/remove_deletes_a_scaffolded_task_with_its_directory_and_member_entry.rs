@@ -36,8 +36,8 @@ fn removing_a_scaffolded_task_by_key_deletes_it_and_leaves_a_project_that_builds
             members_before
                 .iter()
                 .any(|member| member == ".rituals/greet"),
-            "fixture precondition: `create greet` should have made .rituals/greet a member; members \
-             were {members_before:?}"
+            "fixture precondition: `create greet` should have made .rituals/greet a member; \
+             members were {members_before:?}"
         );
         assert!(
             exists(&project.root().join(".rituals/greet/Cargo.toml")),

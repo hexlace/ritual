@@ -68,18 +68,18 @@ pub(super) struct RemedyCommands<'a> {
 /// reader sees all four states at once, and the compiler checks that none
 /// of them was left out.
 ///
-/// `add`, `create` and `regenerate` are not reserved names; this refusal is
-/// about a key already taken in this composed CLI's own manifest and nothing
-/// else. Whether `add` is free at the top level depends on where ritual's own
+/// `create` and `regenerate` are not reserved names; this refusal is about a
+/// key already taken in this composed CLI's own manifest and nothing else.
+/// Whether `create` is free at the top level depends on where ritual's own
 /// bundle is mounted. In a project whose binary is called `ritual`, the
-/// bundle is flattened into the top level and already provides `add`, so
-/// [`rituals_compose::top_level::ensure_command_is_free`] refuses the name before this
-/// runs. In a project that named its own command line — `acme`, say — the
-/// bundle stays under its own key, `add` is free, and the project may
-/// scaffold a task of its own called `add`. That is the design, not an
-/// oversight: a composed command line's top level is its own namespace, so
-/// `acme add` can mean the project's own scaffolder while `acme ritual add`
-/// stays ritual's.
+/// bundle is flattened into the top level and already provides `create`, so
+/// [`rituals_compose::top_level::ensure_command_is_free`] refuses the name
+/// before this runs. In a project that named its own command line — `acme`,
+/// say — the bundle stays under its own key, `create` is free, and the
+/// project may scaffold a task of its own called `create`. That is the
+/// design, not an oversight: a composed command line's top level is its own
+/// namespace, so `acme create` runs the project's own task while
+/// `acme ritual create` stays ritual's scaffolder.
 ///
 /// A dependency counts as already declared when its key reads as `name` to
 /// rustc, with `-` as `_` (see [`rituals_compose::metadata::Project::declares_dependency_key`]),
@@ -287,7 +287,8 @@ mod tests {
             assert!(message.contains("no dependency called `zzz`"));
             assert!(
                 message.contains(
-                    "drop it from the list, then run create again or `cargo ritual import <crate> zzz`"
+                    "drop it from the list, then run create again or \
+                     `cargo ritual import <crate> zzz`"
                 ),
                 "expected the drop first, then either add or the import command; message was: \
                  {message}"

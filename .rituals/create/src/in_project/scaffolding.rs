@@ -21,7 +21,9 @@ use rituals_compose::layout::TaskPlace;
 use rituals_compose::manifest::Manifests;
 use rituals_compose::rollback::Changes;
 use rituals_compose::source::Source;
-use rituals_compose::task_crate::{self, Audience};
+use rituals_compose::task_crate::Audience;
+
+use crate::crate_files;
 
 /// Everything `create` is about to write, captured before the first write.
 pub(crate) struct Scaffolding {
@@ -55,7 +57,7 @@ impl Scaffolding {
         command_line: &CommandLine,
     ) -> Result<Vec<String>, Failure> {
         changes.reserve_directory(self.place.directory())?;
-        let mut lines = self.write_task_crate()?.to_vec();
+        let mut lines = self.write_task_crate()?;
         lines.extend(self.write_manifests(changes)?);
         let regenerated =
             generated_file::regenerate_recording(changes, command_line, &self.workspace_root)?;
@@ -73,30 +75,19 @@ impl Scaffolding {
     }
 
     /// Writes the task crate's `Cargo.toml` and `src/lib.rs`, and returns the
-    /// two lines that report them.
-    fn write_task_crate(&self) -> Result<[String; 2], Failure> {
+    /// lines that report them, spelled from the workspace root.
+    fn write_task_crate(&self) -> Result<Vec<String>, Failure> {
+        let written = crate_files::write(
+            self.place.directory(),
+            self.name.as_name(),
+            &Source::Inherited,
+            self.audience,
+        )?;
         let directory = self.place.from_the_root();
-        let source_directory = self.place.directory().join("src");
-        std::fs::create_dir_all(&source_directory).map_err(|error| {
-            Failure::new(format!("creating {} failed", source_directory.display())).caused_by(error)
-        })?;
-
-        let manifest_path = self.place.directory().join("Cargo.toml");
-        let manifest_text =
-            task_crate::manifest(self.name.as_name(), &Source::Inherited, self.audience);
-        std::fs::write(&manifest_path, manifest_text).map_err(|error| {
-            Failure::new(format!("writing {} failed", manifest_path.display())).caused_by(error)
-        })?;
-
-        let lib_path = source_directory.join("lib.rs");
-        std::fs::write(&lib_path, task_crate::lib(self.name.as_name())).map_err(|error| {
-            Failure::new(format!("writing {} failed", lib_path.display())).caused_by(error)
-        })?;
-
-        Ok([
-            format!("created {directory}/Cargo.toml"),
-            format!("created {directory}/src/lib.rs"),
-        ])
+        Ok(written
+            .iter()
+            .map(|file| format!("created {directory}/{file}"))
+            .collect())
     }
 
     /// Adds the task to the workspace's members and to the command line
@@ -155,9 +146,11 @@ mod tests {
     const WORKSPACE_MANIFEST: &str =
         "[workspace]\nmembers = [\n    \"ritual\",\n]\nresolver = \"3\"\n";
 
-    const CLI_MANIFEST: &str = "[package]\nname = \"demo-ritual\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
-         [dependencies]\nrituals.workspace = true\n\n\
-         [package.metadata.ritual]\ntasks = []\n";
+    const CLI_MANIFEST: &str = concat!(
+        "[package]\nname = \"demo-ritual\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n",
+        "[dependencies]\nrituals.workspace = true\n\n",
+        "[package.metadata.ritual]\ntasks = []\n",
+    );
 
     /// A scratch project: a workspace manifest with one member and a
     /// composed CLI manifest with no task imported yet, ready for the steps
@@ -275,37 +268,28 @@ mod tests {
     }
 
     /// The task crate's two files are reported as created, spelled from the
-    /// workspace root, and the manifest says who the ritual is for.
+    /// workspace root.
     #[test]
-    fn the_crate_is_written_for_its_audience_and_reported_from_the_root() -> TestOutcome {
-        for (audience, publish_line) in [(Audience::Private, true), (Audience::Public, false)] {
-            let project = ScratchProject::new("task-crate-audience")?;
-            let scaffolding = project.scaffolding("lint", audience)?;
-            std::fs::create_dir_all(scaffolding.place.directory())?;
+    fn the_crate_is_reported_from_the_root() -> TestOutcome {
+        let project = ScratchProject::new("task-crate-report")?;
+        let scaffolding = project.scaffolding("lint", Audience::Private)?;
 
-            let lines = scaffolding.write_task_crate()?;
+        let lines = scaffolding.write_task_crate()?;
 
-            assert_eq!(
-                lines,
-                [
-                    "created .rituals/lint/Cargo.toml",
-                    "created .rituals/lint/src/lib.rs"
-                ]
-            );
-            let manifest =
-                std::fs::read_to_string(scaffolding.place.directory().join("Cargo.toml"))?;
-            assert_eq!(
-                manifest.contains("publish = false\n"),
-                publish_line,
-                "{manifest}"
-            );
-            assert!(manifest.contains("rituals.workspace = true"), "{manifest}");
-        }
+        assert_eq!(
+            lines,
+            [
+                "created .rituals/lint/Cargo.toml",
+                "created .rituals/lint/src/lib.rs"
+            ]
+        );
+        assert!(scaffolding.place.directory().join("src/lib.rs").is_file());
         Ok(())
     }
 
-    /// Two manifests are two writes, reported workspace first, as 0.1's
-    /// `add` did, with both spelled from the workspace root.
+    /// Two manifests are two writes, reported workspace first because that
+    /// is the file the new member lands in, with both spelled from the
+    /// workspace root.
     #[test]
     fn two_manifests_are_written_and_reported_workspace_first() -> TestOutcome {
         let project = ScratchProject::new("two-manifests")?;

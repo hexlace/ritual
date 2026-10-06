@@ -77,8 +77,9 @@ fn assert_help_lists_the_bundles_children_in_order(project: &Project) -> TestOut
 }
 
 /// Phase 3 — a task created later is scaffolded depending on `rituals` alone,
-/// inherited from the workspace, and is listed after the bundle's children: `new` wrote the bundle into
-/// `tasks` first, `create` appends after it, and flattening keeps that order.
+/// inherited from the workspace, and is listed after the bundle's children:
+/// `new` wrote the bundle into `tasks` first, `create` appends after it, and
+/// flattening keeps that order.
 fn assert_a_later_task_follows_the_bundle(project: &Project) -> TestOutcome {
     project
         .alias(&["create", "greet"])?

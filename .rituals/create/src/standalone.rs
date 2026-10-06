@@ -17,9 +17,10 @@ use rituals::{Failure, Name, Outcome, report};
 use rituals_compose::rollback::{self, Wording};
 use rituals_compose::shell;
 use rituals_compose::source::{Source, SourceArguments, assert_is_a_ritual_checkout};
-use rituals_compose::task_crate::{self, Audience};
+use rituals_compose::task_crate::Audience;
 
 use crate::arguments::{NameOrPath, ScaffoldArguments};
+use crate::crate_files;
 
 /// Scaffolds the task crate `arguments` names in `current_dir`, taking
 /// `rituals` from `source`, and ends on the `import` command that brings it
@@ -89,29 +90,14 @@ fn next_step(name: &Name, crate_dir: &Path) -> String {
 }
 
 /// Writes every file `create` scaffolds into `target_dir`, which the caller
-/// has already reserved and refused to reuse. Stops at the first failure —
-/// the rollback [`scaffold`] holds removes `target_dir` wholesale on one,
-/// rather than this function trying to undo file by file.
+/// has already reserved and refused to reuse, and reports each as created
+/// under `name`, as typed. Stops at the first failure — the rollback
+/// [`scaffold`] holds removes `target_dir` wholesale on one, rather than this
+/// function trying to undo file by file.
 fn write_crate(target_dir: &Path, name: &Name, source: &Source, audience: Audience) -> Outcome {
-    let source_directory = target_dir.join("src");
-    std::fs::create_dir_all(&source_directory).map_err(|error| {
-        Failure::new(format!("creating {} failed", source_directory.display())).caused_by(error)
-    })?;
-
-    let manifest_path = target_dir.join("Cargo.toml");
-    std::fs::write(&manifest_path, task_crate::manifest(name, source, audience)).map_err(
-        |error| {
-            Failure::new(format!("writing {} failed", manifest_path.display())).caused_by(error)
-        },
-    )?;
-    report(format!("created {name}/Cargo.toml"));
-
-    let lib_path = source_directory.join("lib.rs");
-    std::fs::write(&lib_path, task_crate::lib(name)).map_err(|error| {
-        Failure::new(format!("writing {} failed", lib_path.display())).caused_by(error)
-    })?;
-    report(format!("created {name}/src/lib.rs"));
-
+    for file in crate_files::write(target_dir, name, source, audience)? {
+        report(format!("created {name}/{file}"));
+    }
     Ok(())
 }
 
@@ -207,32 +193,6 @@ mod tests {
         if let Ok(source) = result {
             assert_eq!(source, Source::Git("https://example.invalid/x".to_string()));
         }
-    }
-
-    /// The manifest a crate made on its own gets says who it is for: a
-    /// private ritual cannot be published, and a public one can.
-    #[test]
-    fn the_crate_is_written_for_its_audience() -> TestOutcome {
-        for (audience, private) in [(Audience::Private, true), (Audience::Public, false)] {
-            let scratch = ScratchDir::new("audience")?;
-            let target_dir = scratch.path().join("demo");
-            let write = rollback::attempt(
-                Wording::fresh_directory(Path::new("demo"), "running `create demo` again"),
-                |changes| {
-                    changes.reserve_directory(&target_dir)?;
-                    write_crate(&target_dir, &demo_name(), &Source::Registry, audience)
-                },
-            );
-            write?;
-
-            let manifest = std::fs::read_to_string(target_dir.join("Cargo.toml"))?;
-            assert_eq!(
-                manifest.contains("publish = false\n"),
-                private,
-                "{manifest}"
-            );
-        }
-        Ok(())
     }
 
     /// Runs `create`'s write inside the rollback it runs in: reserves

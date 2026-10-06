@@ -4,6 +4,7 @@
 //! later.
 
 mod arguments;
+mod crate_files;
 mod in_project;
 mod standalone;
 #[cfg(test)]
