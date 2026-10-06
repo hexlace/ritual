@@ -33,7 +33,7 @@ pub(crate) fn ran_line(name: &str) -> String {
     format!("{name} ran")
 }
 
-/// Renders a hand-written leaf task crate's `Cargo.toml`: the shape `add`
+/// Renders a hand-written leaf task crate's `Cargo.toml`: the shape `create`
 /// scaffolds — a workspace-inherited dependency on `rituals` and nothing
 /// else — and `[package.metadata.ritual] task = true`.
 pub(crate) fn leaf_manifest(crate_name: &str) -> String {
@@ -169,7 +169,7 @@ fn inline_handler(key: &str) -> String {
 
 /// Writes `crate_dir/Cargo.toml` and `crate_dir/src/lib.rs`, creating
 /// `crate_dir/src` first — the two files every hand-written crate in this
-/// suite is made of, the same pair `add` writes for a plain task crate.
+/// suite is made of, the same pair `create` writes for a plain task crate.
 pub(crate) fn write_crate(crate_dir: &Path, manifest: &str, lib: &str) -> TestOutcome {
     let source_directory = crate_dir.join("src");
     fs::create_dir_all(&source_directory)

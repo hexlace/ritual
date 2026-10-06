@@ -80,14 +80,20 @@ pub(super) fn declare_tree(task: &Task, name: &'static str) -> clap::Command {
 }
 
 /// Builds a leaf task's own `clap::Command`: its declared arguments, named
-/// `name`, with `about` applied after `augment` — see [`super::Task::declare`]'s
-/// doc comment for why the order matters.
+/// `name`, whose only description is `about`, in `-h` and in `--help` alike.
+///
+/// `augment` runs first, and then `about` is applied and `long_about` is
+/// cleared: the argument struct's doc comment is for readers of the code, yet
+/// `#[derive(clap::Args)]` makes it the command's about and, when it has more
+/// than one paragraph, its `long_about` too, which `--help` prefers to `about`.
 fn declare_leaf(
     augment: fn(clap::Command) -> clap::Command,
     about: &'static str,
     name: &'static str,
 ) -> clap::Command {
-    augment(clap::Command::new(name)).about(about)
+    augment(clap::Command::new(name))
+        .about(about)
+        .long_about(None::<&str>)
 }
 
 #[cfg(test)]
@@ -139,6 +145,66 @@ mod tests {
                 Some("the second child".to_string()),
             ]
         );
+    }
+
+    /// A leaf whose argument struct's doc comment has two paragraphs. Those
+    /// docs are for readers of the code, yet `derive(clap::Args)` makes the
+    /// first the command's `about` and, because there is a second, the whole
+    /// doc its `long_about`.
+    fn documented_command() -> clap::Command {
+        /// The first paragraph of the argument struct's doc.
+        ///
+        /// The second paragraph of the argument struct's doc, which makes clap
+        /// set a long description as well as a short one.
+        #[derive(clap::Args)]
+        struct TwoParagraphArguments {
+            /// A value to carry.
+            #[arg(long)]
+            value: Option<String>,
+        }
+        let task = Task::new(
+            "the task's own about",
+            |_arguments: TwoParagraphArguments| Ok(()),
+        );
+        declare_tree(&task, "greet")
+    }
+
+    /// Verifies a leaf's description is the task's `about` and nothing else:
+    /// declares a leaf whose argument struct has a two-paragraph doc comment,
+    /// renders both `-h` (short) and `--help` (long) help, and asserts the
+    /// description line is the task's about and no word of the struct doc
+    /// appears. Long help is the case a multi-paragraph doc reaches, because it also
+    /// sets `long_about`, which `--help` prefers to `about`.
+    #[test]
+    fn a_leafs_help_describes_the_task_and_never_its_argument_structs_doc() {
+        let task_about = "the task's own about";
+        for (label, render) in [
+            (
+                "-h",
+                clap::Command::render_help as fn(&mut clap::Command) -> _,
+            ),
+            ("--help", clap::Command::render_long_help),
+        ] {
+            let mut command = documented_command();
+            let rendered = render(&mut command).to_string();
+            assert_eq!(
+                rendered.lines().next(),
+                Some(task_about),
+                "expected `{label}` to open with the task's about and nothing else; \
+                 it was:\n{rendered}"
+            );
+            for leaked in [
+                "first paragraph",
+                "second paragraph",
+                "argument struct's doc",
+            ] {
+                assert!(
+                    !rendered.contains(leaked),
+                    "expected `{label}` not to carry the argument struct's doc ({leaked:?}); \
+                     it was:\n{rendered}"
+                );
+            }
+        }
     }
 
     /// Nesting is not limited to one level: a grandchild's command is

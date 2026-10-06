@@ -7,12 +7,13 @@ mod test_support;
 
 use std::path::{Path, PathBuf};
 
-use removal::{Manifests, Member, Removal};
+use removal::{Member, Removal};
 use rituals::{CommandLine, Failure, Outcome, Task, clap};
 use rituals_compose::git::{self, CannotGiveBack, Flag, Unanswered, Unwatched};
+use rituals_compose::manifest::{ManifestPaths, Manifests};
 use rituals_compose::metadata::{self, Metadata, TaskImport};
 use rituals_compose::sentence::join_with_and;
-use rituals_compose::{cargo_config, top_level};
+use rituals_compose::{cargo_config, top_level, workspace};
 
 /// The package every composed command line's own commands come from: the
 /// bundle of `add`, `regenerate` and the rest, which nothing could put back
@@ -50,10 +51,14 @@ pub fn task() -> Task {
 fn run(command_line: &CommandLine, arguments: &RemoveArguments) -> Outcome {
     let current_dir = std::env::current_dir()
         .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
-    // Where there is no project at all there is nothing to put back, so this
-    // is refused before the run that would say it put the project back.
+    // Where there is no project at all no command can run, so this is asked
+    // before the run begins, and the refusal names the command to run instead.
     metadata::ensure_inside_a_project(&current_dir, "remove", &arguments.name)?;
-    removal::finish(command_line, &arguments.name, |changes| {
+    // `cargo locate-project` writes nothing, and the run's first step asks it
+    // the same question, so a project it cannot find is refused in the same
+    // words either way.
+    let root = workspace::root(&current_dir)?;
+    removal::finish(command_line, &root, &arguments.name, |changes| {
         // `cargo metadata` creates or rewrites a missing or stale lockfile,
         // which this records first, so a refusal puts it back.
         let document = metadata::fetch_in_its_own_project(
@@ -107,7 +112,7 @@ fn prepare(
 
     let project = document.locate_project(package)?;
     let workspace_root = project.workspace_root().to_path_buf();
-    let manifests = Manifests::read(project.manifest_path(), &workspace_root.join("Cargo.toml"))?;
+    let manifests = Manifests::read(&ManifestPaths::of(&project))?;
 
     // Dropped only when nothing else depends on the crate: another package's
     // own dependency on it would otherwise stop inheriting.

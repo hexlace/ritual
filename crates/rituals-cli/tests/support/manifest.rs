@@ -1,7 +1,7 @@
 //! Reading and editing Cargo manifests as TOML documents.
 //!
 //! Every manifest a story reads or edits goes through `toml_edit`, the same
-//! parser `add` itself edits manifests with, rather than through substring
+//! parser `create` itself edits manifests with, rather than through substring
 //! searches: a substring cannot tell a table header from the same text in a
 //! comment, the `[package]` name from the `[[bin]]` name, or one array entry
 //! from a longer one that contains it. Lookups return what the document
@@ -355,7 +355,7 @@ pub(crate) fn dependency_path<'document>(
 }
 
 /// Appends `member` to `[workspace] members` on a line of its own, indented
-/// four spaces, with a trailing comma — the layout `add` leaves a member
+/// four spaces, with a trailing comma — the layout `create` leaves a member
 /// list in, which [`push_member`] does not.
 pub(crate) fn push_member_on_its_own_line(document: &mut DocumentMut, member: &str) -> TestOutcome {
     let array = array_mut(document, &MEMBERS)?;

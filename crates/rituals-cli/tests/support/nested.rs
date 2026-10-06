@@ -1,9 +1,9 @@
 //! Rituals kept in subdirectories of `.rituals/`, at any depth.
 //!
 //! A project may group its rituals however it likes beneath `.rituals/`, for
-//! instance `.rituals/private/lint` for one it never publishes. `add` only
-//! scaffolds `.rituals/<name>`, so a story that needs a ritual further down
-//! writes it here, the way a person moving a directory by hand would.
+//! instance `.rituals/private/lint` for one it never publishes. `create` given a bare
+//! name scaffolds `.rituals/<name>`, so a story that needs a ritual further
+//! down by hand writes it here, the way a person moving a directory by hand would.
 
 use std::path::PathBuf;
 

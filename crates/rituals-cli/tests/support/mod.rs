@@ -47,6 +47,7 @@
 
 pub(crate) mod checkout;
 pub(crate) mod crates;
+pub(crate) mod created;
 pub(crate) mod generated;
 pub(crate) mod git;
 pub(crate) mod help;
@@ -57,6 +58,7 @@ pub(crate) mod nested;
 pub(crate) mod process;
 pub(crate) mod project;
 pub(crate) mod removal;
+pub(crate) mod root_cli;
 pub(crate) mod task_sources;
 pub(crate) mod tree;
 

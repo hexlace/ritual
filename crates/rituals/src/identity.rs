@@ -96,7 +96,7 @@ impl Identity {
     /// them against: a hand-written call can only fabricate an identity for
     /// the caller's own command line, and the caller is then the one who
     /// reads a wrong name in `--version`, a wrong prefix on a refusal, or
-    /// watches `add` look for a package that is not theirs. Hidden, and named
+    /// watches `create` look for a package that is not theirs. Hidden, and named
     /// so the call reads as the claim it makes, is the strictest shape a
     /// constructor a macro expansion has to reach can take.
     #[doc(hidden)]

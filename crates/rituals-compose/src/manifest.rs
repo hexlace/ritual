@@ -12,6 +12,7 @@ use crate::rollback::Changes;
 
 mod dependency_places;
 mod entry_removal;
+mod manifests;
 mod member_globs;
 mod package_name;
 mod path_change;
@@ -20,6 +21,7 @@ mod removal;
 mod repointing;
 
 pub use dependency_places::ManifestRole;
+pub use manifests::{ManifestPaths, Manifests};
 pub use path_change::PathChange;
 
 /// A manifest a task is about to edit.
@@ -97,7 +99,7 @@ impl Manifest {
     ///
     /// ```
     /// use rituals_compose::manifest::Manifest;
-    /// use rituals_compose::rollback;
+    /// use rituals_compose::rollback::{self, Wording};
     ///
     /// # let directory = std::env::temp_dir()
     /// #     .join(format!("rituals-compose-doctest-manifest-write-{}", std::process::id()));
@@ -107,7 +109,8 @@ impl Manifest {
     /// let mut manifest = Manifest::read(&manifest_path)?;
     /// manifest.append_workspace_member(".rituals/lint")?;
     ///
-    /// rollback::attempt("running `add lint` again", |changes| manifest.write(changes))?;
+    /// let wording = Wording::project(&directory, "running `create lint` again");
+    /// rollback::attempt(wording, |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
     /// assert!(on_disk.contains(".rituals/lint"));
@@ -202,7 +205,7 @@ impl Manifest {
     ///
     /// The two writes happen together because they are one operation: a
     /// dependency with no matching `tasks` entry, or a `tasks` entry with
-    /// no matching dependency, is a state `add` itself refuses to leave a
+    /// no matching dependency, is a state `create` itself refuses to leave a
     /// project in. This method holds that itself rather than leaning on
     /// its one caller: both destinations are checked before either is
     /// written, so nothing changes in this document unless both are
@@ -219,7 +222,7 @@ impl Manifest {
     /// use rituals::Name;
     /// use rituals_compose::generated_file::TaskKey;
     /// use rituals_compose::manifest::Manifest;
-    /// use rituals_compose::rollback;
+    /// use rituals_compose::rollback::{self, Wording};
     ///
     /// # let directory = std::env::temp_dir()
     /// #     .join(format!("rituals-compose-doctest-manifest-import-{}", std::process::id()));
@@ -233,7 +236,8 @@ impl Manifest {
     /// let name = TaskKey::new(Name::new("lint")?)?;
     ///
     /// manifest.import_task(&name, "../.rituals/lint")?;
-    /// rollback::attempt("running `add lint` again", |changes| manifest.write(changes))?;
+    /// let wording = Wording::project(&directory, "running `create lint` again");
+    /// rollback::attempt(wording, |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
     /// assert!(on_disk.contains("lint = { path = \"../.rituals/lint\" }"));
@@ -314,7 +318,7 @@ impl Manifest {
     /// use rituals::Name;
     /// use rituals_compose::generated_file::TaskKey;
     /// use rituals_compose::manifest::Manifest;
-    /// use rituals_compose::rollback;
+    /// use rituals_compose::rollback::{self, Wording};
     ///
     /// # let directory = std::env::temp_dir()
     /// #     .join(format!("rituals-compose-doctest-manifest-append-task-{}", std::process::id()));
@@ -328,7 +332,8 @@ impl Manifest {
     ///
     /// // `cargo add` wrote the dependency; the list is what is left to edit.
     /// manifest.append_task(&TaskKey::new(Name::new("greeter")?)?)?;
-    /// rollback::attempt("running `import greeter` again", |changes| manifest.write(changes))?;
+    /// let wording = Wording::project(&directory, "running `import greeter` again");
+    /// rollback::attempt(wording, |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
     /// assert!(on_disk.contains("tasks = [\"new\", \"greeter\"]"));
@@ -510,7 +515,7 @@ fn raw_text(raw: Option<&RawString>) -> String {
 /// Reports whether the manifest at `path` parses and declares
 /// `[package.metadata.ritual] task = true`.
 ///
-/// Used to tell a leftover task crate `add` can finish importing from an
+/// Used to tell a leftover task crate `create` can finish importing from an
 /// unrelated collision. Any failure to read or parse answers `false`: an
 /// unreadable directory is exactly the unrelated-collision case. Twin of
 /// [`declares_a_workspace`], which shares this contract: both parse
@@ -964,7 +969,7 @@ mod tests {
     }
 
     /// Cargo reads `metadata = { ritual = { tasks = [] } }` as the same list
-    /// as `[package.metadata.ritual] tasks`, so `add` and `import` must both
+    /// as `[package.metadata.ritual] tasks`, so `create` and `import` must both
     /// find it there rather than one of them refusing a manifest Cargo
     /// accepts.
     #[test]
@@ -1170,9 +1175,13 @@ mod tests {
         let scratch = ScratchDir::new("declares-a-task-crate-true")?;
         let path = scratch.path().join("Cargo.toml");
         let name = Name::new("lint")?;
-        // Rendered by the same function `add`/`create` write, so this test
+        // Rendered by the same function `create` writes, so this test
         // cannot drift from what a real scaffolded manifest looks like.
-        let manifest_text = crate::task_crate::manifest(&name, &crate::source::Source::Inherited);
+        let manifest_text = crate::task_crate::manifest(
+            &name,
+            &crate::source::Source::Inherited,
+            crate::task_crate::Audience::Private,
+        );
         std::fs::write(&path, manifest_text)?;
 
         assert!(declares_a_task_crate(&path));

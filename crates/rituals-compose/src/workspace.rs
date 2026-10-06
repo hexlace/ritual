@@ -1,11 +1,11 @@
 //! Whether a crate can be written into a directory at all, given what Cargo
 //! resolves for it.
 //!
-//! Both `new` and `create` scaffold a crate that has to build on its own,
-//! and neither can do that inside another project's Cargo workspace: a
-//! member only builds as part of the workspace that claims it. This module
-//! answers that one question — can a crate be written here, standing
-//! alone — and renders the refusal when the answer is no.
+//! `new` scaffolds a project that has to build on its own, and it cannot do
+//! that inside another project's Cargo workspace: a member only builds as
+//! part of the workspace that claims it. This module answers that one
+//! question — can a crate be written here, standing alone — and renders the
+//! refusal when the answer is no.
 //!
 //! The input is the working directory the scaffolding task was run in,
 //! plus that task's own three clauses of wording — never anything a third
@@ -137,14 +137,17 @@ fn directory_of(root_manifest: &Path) -> Result<PathBuf, Failure> {
 ///
 /// ```no_run
 /// use rituals::Failure;
-/// use rituals_compose::{rollback, workspace};
+/// use rituals_compose::rollback::{self, Wording};
+/// use rituals_compose::workspace;
 ///
 /// // Needs a real project on disk and runs `cargo`, so this example is
 /// // `no_run`.
 /// let directory = std::env::current_dir()
 ///     .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
 /// let lockfile = workspace::lockfile(&directory)?;
-/// let created = rollback::attempt("running `import greeter` again", |changes| {
+/// let root = workspace::root(&directory)?;
+/// let wording = Wording::project(&root, "running `import greeter` again");
+/// let created = rollback::attempt(wording, |changes| {
 ///     changes.run_changing(&[lockfile.as_path()], || {
 ///         // ... a subprocess that may write the lockfile.
 ///         Ok(())
@@ -168,21 +171,21 @@ pub fn lockfile(directory: &Path) -> Result<PathBuf, Failure> {
 /// [`ensure_the_directory_stands_alone`]'s two rendered sentences can differ
 /// by caller without the decision tree itself changing.
 ///
-/// Both rendered sentences read, in full, for `create`:
+/// Both rendered sentences read, in full, for `new`:
 ///
 /// ```text
-/// refusing `create demo`: /work/acme/tools is inside the Cargo workspace
-/// rooted at /work/acme, and a crate scaffolded there does not build on
-/// its own; run create outside any Cargo workspace, or, if the enclosing
-/// project is a ritual project, add the task with that project's own
-/// `add demo`
+/// refusing `new demo`: /work/acme/tools is inside the Cargo workspace
+/// rooted at /work/acme, and a project does not belong inside another
+/// project's workspace; run new outside any Cargo workspace, or, if you
+/// meant a new command rather than a new project, add it with the
+/// enclosing project's own `create demo`
 /// ```
 ///
 /// `attempted_command` fills the first slot — the command as a person
-/// typed it, without the bin name (`"create demo"`, `"new demo"`).
+/// typed it, without the bin name (`"new demo"`).
 /// `why_not_here` fills the clause following "and" — one sentence fragment
-/// naming the rule (`"a crate scaffolded there does not build on its
-/// own"`). `what_to_do_instead` fills the clause following the semicolon —
+/// naming the rule (`"a project does not belong inside another project's
+/// workspace"`). `what_to_do_instead` fills the clause following the semicolon —
 /// one or more imperatives, naming this run's own name and never a binary,
 /// since the project being stood in may call its own command line
 /// anything.
@@ -242,13 +245,14 @@ pub struct Refusal {
 ///     workspace::ensure_the_directory_stands_alone(
 ///         directory,
 ///         &Refusal {
-///             attempted_command: format!("create {name}"),
-///             why_not_here: "a crate scaffolded there does not build on its own"
+///             attempted_command: format!("new {name}"),
+///             why_not_here: "a project does not belong inside another project's \
+///                            workspace"
 ///                 .to_string(),
 ///             what_to_do_instead: format!(
-///                 "run create outside any Cargo workspace, or, if the enclosing \
-///                  project is a ritual project, add the task with that project's \
-///                  own `add {name}`"
+///                 "run new outside any Cargo workspace, or, if you meant a new \
+///                  command rather than a new project, add it with the enclosing \
+///                  project's own `create {name}`"
 ///             ),
 ///         },
 ///     )?;
@@ -353,9 +357,10 @@ mod tests {
     /// reach the rendered message.
     fn a_refusal() -> Refusal {
         Refusal {
-            attempted_command: "create demo".to_string(),
-            why_not_here: "a crate scaffolded there does not build on its own".to_string(),
-            what_to_do_instead: "run create outside any Cargo workspace".to_string(),
+            attempted_command: "new demo".to_string(),
+            why_not_here: "a project does not belong inside another project's workspace"
+                .to_string(),
+            what_to_do_instead: "run new outside any Cargo workspace".to_string(),
         }
     }
 

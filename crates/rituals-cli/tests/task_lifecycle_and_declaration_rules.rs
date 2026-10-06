@@ -1,8 +1,8 @@
-//! The main chained story: scaffold a project, add a task to it, build and
+//! The main chained story: scaffold a project, create a task in it, build and
 //! run it, move it, and rebuild and rerun it — plus the declaration rules
 //! that only make sense once a real composed CLI exists to test them
 //! against (an unmarked dependency, a name collision with an already-mounted
-//! task, and an adversarial name given to `add`).
+//! task, and an adversarial name given to `create`).
 //!
 //! Everything in this file shares one scaffolded project, so ritual's crates
 //! and their dependencies compile once for the whole story. Each phase is its
@@ -98,17 +98,17 @@ fn assert_fresh_project_builds_and_lists_management_tasks(project: &Project) -> 
     Ok(())
 }
 
-/// Phase 3 — `add` scaffolds a new task crate under `.rituals/`, appends it to
+/// Phase 3 — `create` scaffolds a new task crate under `.rituals/`, appends it to
 /// the workspace's explicit member list, and the new task builds and runs
 /// immediately, with no hand-editing.
-fn add_a_task_and_verify_it_builds_and_runs(project: &Project) -> TestOutcome {
+fn create_a_task_and_verify_it_builds_and_runs(project: &Project) -> TestOutcome {
     project
-        .alias(&["add", "greet"])?
-        .expect_success("`cargo ritual add greet`");
+        .alias(&["create", "greet"])?
+        .expect_success("`cargo ritual create greet`");
 
     assert!(
         project.root().join(".rituals/greet/Cargo.toml").is_file(),
-        "expected `add greet` to scaffold .rituals/greet/Cargo.toml under {}",
+        "expected `create greet` to scaffold .rituals/greet/Cargo.toml under {}",
         project.root().display()
     );
 
@@ -116,7 +116,7 @@ fn add_a_task_and_verify_it_builds_and_runs(project: &Project) -> TestOutcome {
         .context("expected the workspace manifest to carry a member list")?;
     assert!(
         members.iter().any(|member| member == ".rituals/greet"),
-        "expected `add` to append `.rituals/greet` as an explicit workspace member; members \
+        "expected `create` to append `.rituals/greet` as an explicit workspace member; members \
          were {members:?}"
     );
     assert!(
@@ -124,9 +124,9 @@ fn add_a_task_and_verify_it_builds_and_runs(project: &Project) -> TestOutcome {
         "expected the appended member list to stay explicit; members were {members:?}"
     );
 
-    project
-        .alias(&["greet"])?
-        .expect_success("`cargo ritual greet` immediately after `add greet`, with no hand-editing");
+    project.alias(&["greet"])?.expect_success(
+        "`cargo ritual greet` immediately after `create greet`, with no hand-editing",
+    );
 
     Ok(())
 }
@@ -216,13 +216,13 @@ fn move_task_crate_and_verify_still_works(project: &Project) -> TestOutcome {
     Ok(())
 }
 
-/// Phase 7 — `add` refuses a name that would escape the project, naming the
+/// Phase 7 — `create` refuses a name that would escape the project, naming the
 /// offending name, and writes nothing anywhere.
-fn verify_add_rejects_an_adversarial_name(project: &Project) -> TestOutcome {
+fn verify_create_rejects_an_adversarial_name(project: &Project) -> TestOutcome {
     let before = snapshot_tree(project.root())?;
 
-    let result = project.run_cli(&["add", "../escape-attempt"])?;
-    result.expect_failure("`add ../escape-attempt`");
+    let result = project.run_cli(&["create", "../escape-attempt"])?;
+    result.expect_failure("`create ../escape-attempt`");
     assert!(
         result.stderr.contains("../escape-attempt"),
         "expected the refusal to name the offending name; stderr was:\n{}",
@@ -231,7 +231,7 @@ fn verify_add_rejects_an_adversarial_name(project: &Project) -> TestOutcome {
 
     let after = snapshot_tree(project.root())?;
     assert_trees_identical(
-        "a rejected `add` name must write nothing inside the project",
+        "a rejected `create` name must write nothing inside the project",
         &before,
         &after,
     );
@@ -242,7 +242,7 @@ fn verify_add_rejects_an_adversarial_name(project: &Project) -> TestOutcome {
         .context("the project has a parent")?;
     assert!(
         !parent_of_project.join("escape-attempt").exists(),
-        "a rejected `add ../escape-attempt` must not escape the project directory"
+        "a rejected `create ../escape-attempt` must not escape the project directory"
     );
 
     Ok(())
@@ -266,7 +266,7 @@ fn write_unmarked_crate(working_dir: &Path, crate_name: &str) -> support::Outcom
 /// refused, with an error naming that dependency, and the refusal does not
 /// disturb the tasks that already worked.
 ///
-/// The manual-import path an `add`-scaffolded crate never takes: an
+/// The manual-import path a `create`-scaffolded crate never takes: an
 /// ordinary crate is pulled in with plain `cargo add`, and its name is
 /// listed in `tasks = [...]` by hand.
 ///
@@ -313,8 +313,8 @@ fn verify_unmarked_dependency_is_refused(working_dir: &Path, project: &Project) 
 /// Phase 9 — giving a task the same name as `regenerate` is refused, naming
 /// the task, rather than shadowing the `regenerate` already mounted.
 fn verify_task_name_collision_is_refused(project: &Project) -> TestOutcome {
-    let collision = project.run_cli(&["add", "regenerate"])?;
-    collision.expect_failure("`add regenerate`, colliding with the mounted `regenerate` task");
+    let collision = project.run_cli(&["create", "regenerate"])?;
+    collision.expect_failure("`create regenerate`, colliding with the mounted `regenerate` task");
     assert!(
         collision
             .sole_line_prefixed_with("ritual")
@@ -338,11 +338,11 @@ fn task_lifecycle_from_new_through_move() -> TestOutcome {
 
         assert_new_writes_exactly_the_specified_things(&project)?;
         assert_fresh_project_builds_and_lists_management_tasks(&project)?;
-        add_a_task_and_verify_it_builds_and_runs(&project)?;
+        create_a_task_and_verify_it_builds_and_runs(&project)?;
         verify_generated_help_and_validation_plumbing(&project)?;
         verify_regenerate_is_idempotent(&project)?;
         move_task_crate_and_verify_still_works(&project)?;
-        verify_add_rejects_an_adversarial_name(&project)?;
+        verify_create_rejects_an_adversarial_name(&project)?;
         verify_unmarked_dependency_is_refused(working_dir.path(), &project)?;
         verify_task_name_collision_is_refused(&project)?;
 

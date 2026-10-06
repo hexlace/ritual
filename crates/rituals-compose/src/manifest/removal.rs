@@ -3,7 +3,7 @@
 //! entry — each as an edit in place that leaves the rest of the file
 //! as a human wrote it.
 //!
-//! The counterpart of what `add` appends. Each edit that takes an entry out
+//! The counterpart of what `create` appends. Each edit that takes an entry out
 //! of an array removes the entry's own line, including a comment written on
 //! it, and every line the entry did not own stays.
 
@@ -36,7 +36,7 @@ impl Manifest {
     ///
     /// ```
     /// use rituals_compose::manifest::Manifest;
-    /// use rituals_compose::rollback;
+    /// use rituals_compose::rollback::{self, Wording};
     ///
     /// # let directory = std::env::temp_dir()
     /// #     .join(format!("rituals-compose-doctest-manifest-unlist-{}", std::process::id()));
@@ -49,7 +49,8 @@ impl Manifest {
     /// let mut manifest = Manifest::read(&manifest_path)?;
     ///
     /// manifest.unlist_task("lint")?;
-    /// rollback::attempt("running `remove lint` again", |changes| manifest.write(changes))?;
+    /// let wording = Wording::project(&directory, "running `remove lint` again");
+    /// rollback::attempt(wording, |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
     /// assert_eq!(on_disk, "[package.metadata.ritual]\ntasks = [\n    \"ritual\",\n]\n");
@@ -103,7 +104,7 @@ impl Manifest {
     ///
     /// ```
     /// use rituals_compose::manifest::Manifest;
-    /// use rituals_compose::rollback;
+    /// use rituals_compose::rollback::{self, Wording};
     ///
     /// # let directory = std::env::temp_dir()
     /// #     .join(format!("rituals-compose-doctest-manifest-dependency-{}", std::process::id()));
@@ -118,7 +119,8 @@ impl Manifest {
     ///
     /// assert!(manifest.remove_dependency("lint"));
     /// assert!(!manifest.remove_dependency("lint"));
-    /// rollback::attempt("running `remove lint` again", |changes| manifest.write(changes))?;
+    /// let wording = Wording::project(&directory, "running `remove lint` again");
+    /// rollback::attempt(wording, |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
     /// assert_eq!(on_disk, "[dependencies]\n# tasks\nritual.workspace = true\n");
@@ -935,7 +937,7 @@ mod tests {
         Ok(())
     }
 
-    /// The shapes `add` and a person write keep it the same way: a dotted
+    /// The shapes `create` and a person write keep it the same way: a dotted
     /// key, whose line's text `toml_edit` holds on the key under it, and a
     /// table under its own header, whose text is in front of the header.
     #[test]

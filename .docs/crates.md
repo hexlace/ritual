@@ -23,8 +23,8 @@ other crates are in `crates/`, and `xtask` is in `xtask/`.
 
 What a task needs, and only that: the `Task` type and its three constructors
 (`new`, `receiving_command_line`, `group`), `Outcome` and `Failure`, `Name`,
-`report`, `Identity` and `identity!()`, `CommandLine`, and `run`, the dispatch
-a command line's generated file calls.
+`report` and `warn`, `Identity` and `identity!()`, `CommandLine`, and `run`,
+the dispatch a command line's generated file calls.
 
 A bundle is a task, so building a tree of tasks and dispatching over it is a
 task's need, not a command line's, and it lives here. What is left at a
@@ -53,9 +53,35 @@ out where paths go when directories move. The management tasks depend on it
 because it is the library their job needs.
 
 **The layout is shared.** `layout` is the one place that says where a
-scaffolder puts a ritual, `.rituals/<name>`. A task that scaffolds a task
+scaffolder puts a ritual, below `.rituals/`. A task that scaffolds a task
 crate asks it for the directory, the member entry and the path to report, so
-`add` and any scaffolder after it agree and a change of directory is one edit.
+`create` and any scaffolder after it agree and a change of directory is one
+edit. There are two ways to ask: `place_for` takes a name and answers
+`.rituals/<name>`, and `place_at` takes a `TypedPath`, a path as a person typed
+it plus the directory they typed it in, folds it as a shell would, and refuses
+one that does not lead strictly below `.rituals/`. A `TaskPlace` carries the
+task's name, the last component, so a caller never re-reads it from the path.
+
+**Whose workspace a command runs in is asked in one place.**
+`metadata::whose_workspace` says which command line owns the workspace a
+directory is in: `TheCommandLine` asking, `AnotherCommandLine` (a declared
+workspace with a member that declares a `tasks` list), or `NoCommandLine`. It
+asks with `cargo locate-project` and `cargo metadata --no-deps`, which resolve
+nothing and write nothing, so a task asks it before its run begins. Its own
+project is the same test `fetch_in_its_own_project` makes. `create` asks it,
+and where no command line owns the workspace, asks
+`workspace::ensure_the_directory_stands_alone`, as `new` does, whether a crate
+made there would build on its own.
+
+**Manifests are edited as one set.** `manifest::Manifests` reads the workspace's
+manifest and the command line crate's, from a `ManifestPaths` that names which
+is which, and when they are one file, as they are where the command line crate
+is the workspace root, it holds one document, so two edits cannot overwrite
+each other and the file is written once. `create` and `remove` edit through it.
+
+**Who a ritual is for is written in one place.** `task_crate::manifest` takes an
+`Audience`, `Private` or `Public`, and writes `publish = false` for the first,
+so every scaffolder spells it the same way and none can leave it out.
 
 **Git is asked in one place.** `git` answers whether git can give back every
 file in a directory about to be deleted, whether the work tree is clean, which
@@ -79,8 +105,18 @@ records each change before making it, and on failure every change is undone,
 the most recent first. A changed file gets its bytes back whether or not it
 is TOML, a file the run created is removed, a directory it created goes, and
 anything that could not be put back is named, with the caller's own words
-for trying again. The failure's own full stop is dropped so the report
-continues its sentence, and a run can ask what it found when it first
+for trying again. The caller also chooses the wording, through a `Wording`:
+one for a run that changes a project that was already there ("ritual put the
+project back as it found it"), one for a run that makes a directory from
+nothing and removes it on failure ("ritual removed `lint` so a retry starts
+clean"). Each names a path the way the rest of its run does: from the
+project root, or as typed, never absolutely. When the undo put nothing back,
+because nothing had been recorded or every change was already as found, the
+failure is returned exactly as the run raised it, so a refusal that came
+before anything changed never claims a recovery; when it put nothing back and
+could not put something back, it says only "ritual could not put back" what
+it could not. The failure's own full stop is dropped only when a clause continues
+its sentence, and a run can ask what it found when it first
 recorded a file, to say "created" rather than "updated". A directory the run
 moved goes back whole, ignored files included, which no version control could
 give back. A manifest can only
@@ -101,7 +137,7 @@ Beyond `rituals`, its dependencies are here because of what the job is:
 - **`serde`** and **`serde_json`**, because `cargo metadata` speaks JSON
   and nothing else, and it is the only thing that can say what a dependency
   resolved to and what that crate declares about itself.
-- **`toml_edit`**, because `add` and `import` append to manifests a person
+- **`toml_edit`**, because `create` and `import` append to manifests a person
   wrote. A round trip through a plain TOML parser would reformat them and drop
   their comments; `toml_edit` edits in place. It is the crate Cargo's own
   `cargo add` uses.
@@ -110,10 +146,14 @@ Beyond `rituals`, its dependencies are here because of what the job is:
 
 Ordinary task crates, one per management task. Each depends on
 `rituals` like any task, and on `rituals-compose` for the work. Each is
-marked `task = true` and exposes `task()`. None depends on another. `add`,
-`import` and `remove` finish by regenerating through the same rendering
-`regenerate` uses, `remove` inside its rollback. That rendering lives in
-`rituals-compose`, so each can reach it without depending on another.
+marked `task = true` and exposes `task()`. None depends on another, with one
+exception: `add` is `create`'s in-project path under its old name, so it
+depends on `rituals-core-create` and not on `rituals-compose`, and there is one
+copy of the scaffolding. `create`, `import` and `remove` finish by regenerating
+through the same rendering `regenerate` uses, `create` and `remove` inside
+their rollbacks. That
+rendering lives in `rituals-compose`, so each can reach it without depending on
+another.
 `migrate` regenerates nothing: it moves directories and repoints manifests,
 through the rollback, git and relocation code in `rituals-compose`, and
 keeps its steps in its own crate.

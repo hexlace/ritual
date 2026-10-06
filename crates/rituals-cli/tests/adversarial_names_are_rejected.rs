@@ -1,12 +1,13 @@
-//! `new`, `create`, and `add` all take a caller-supplied name and turn it
+//! `new` and `create` take a caller-supplied name and turn it
 //! into paths on disk. Each refuses a name that would escape the intended
 //! location — a path separator, `..`, an absolute path — or collide with
 //! something already there, rather than writing outside that location or
 //! overwriting something unrelated.
 //!
-//! `add` needs a scaffolded, built project to run in, so its case is a step
-//! of `task_lifecycle_and_declaration_rules.rs`, reusing that story's build.
-//! This file covers `new` and `create`, which need no build to be refused.
+//! `create` inside a project needs a scaffolded, built project to run in, so
+//! its case there is a step of `task_lifecycle_and_declaration_rules.rs`,
+//! reusing that story's build. This file covers `new` and `create` outside a
+//! project, which need no build to be refused.
 //!
 //! Every test checks two things: the refusal names the whole offending name,
 //! backticked, the way every name refusal quotes it; and the filesystem is
@@ -41,15 +42,32 @@ fn assert_refuses_naming(result: &RunOutput, name: &str) {
     );
 }
 
-/// A name containing a path separator must not create the directory it
-/// names, or anything beneath it.
+/// Asserts `result` is the refusal `create` gives a path outside any
+/// project, where it makes a crate in the current directory and so takes a
+/// bare name: it fails, and names the path as typed, the way every
+/// `refusing to create …` line names what it would have made.
+fn assert_refuses_the_path(result: &RunOutput, path: &str) {
+    result.expect_failure(&format!("the path `{path}` outside a project"));
+    assert!(
+        result
+            .stderr
+            .contains(&format!("refusing to create {path}: outside a project")),
+        "expected the refusal to name the path `{path}` and say it was given outside a \
+         project; stderr was:\n{}",
+        result.stderr
+    );
+}
+
+/// A name containing a path separator is a path, and outside a project a
+/// path is refused: it must not create the directory it names, or anything
+/// beneath it.
 #[test]
 fn create_rejects_a_name_containing_a_path_separator() -> TestOutcome {
     let working_dir = TempDir::new("create-path-separator")?;
     let before = snapshot_tree(working_dir.path())?;
 
-    let name = "escape-hatch/evil";
-    assert_refuses_naming(&run_scaffolder(working_dir.path(), "create", name)?, name);
+    let path = "escape-hatch/evil";
+    assert_refuses_the_path(&run_scaffolder(working_dir.path(), "create", path)?, path);
 
     assert_eq!(
         before,
@@ -81,7 +99,8 @@ fn create_rejects_a_name_of_dot_dot() -> TestOutcome {
     Ok(())
 }
 
-/// An absolute path used as a name must not be honoured as a destination.
+/// An absolute path used as a name must not be honoured as a destination:
+/// outside a project it is refused as a path.
 ///
 /// The absolute path points inside this test's own scope, so nothing else
 /// can create it, and a leftover from an earlier run cannot exist.
@@ -93,7 +112,7 @@ fn create_rejects_an_absolute_path_as_a_name() -> TestOutcome {
     let absolute_target = scope.path().join("absolute-escape-target");
     let absolute_name = path_to_str(&absolute_target)?;
 
-    assert_refuses_naming(
+    assert_refuses_the_path(
         &run_scaffolder(&working_dir, "create", absolute_name)?,
         absolute_name,
     );
@@ -132,7 +151,7 @@ fn create_rejects_a_name_that_collides_with_something_already_on_disk() -> TestO
     Ok(())
 }
 
-/// `new` validates names by the same one rule as `create` and `add`, so one
+/// `new` validates names by the same one rule as `create`, so one
 /// representative case covers it here.
 #[test]
 fn new_rejects_a_name_containing_a_path_separator() -> TestOutcome {

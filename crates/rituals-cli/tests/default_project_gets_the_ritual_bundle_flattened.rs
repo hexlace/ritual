@@ -6,7 +6,7 @@
 //! touched.
 //!
 //! Also: the workspace's dependency table names only `rituals`, and
-//! `regenerate` run immediately after `new`, or immediately after `add`,
+//! `regenerate` run immediately after `new`, or immediately after `create`,
 //! with no other change, changes nothing.
 
 mod support;
@@ -105,13 +105,13 @@ fn assert_regenerate_changes_nothing(project: &Project, after: &str) -> TestOutc
     Ok(())
 }
 
-/// `cargo ritual add my-task` scaffolds and mounts a task on the composed
+/// `cargo ritual create my-task` scaffolds and mounts a task on the composed
 /// CLI's top level beside the bundle, and `--help` then lists all five
 /// commands directly, the bundle's own key not among them.
-fn assert_an_added_task_sits_flat_beside_the_bundle(project: &Project) -> TestOutcome {
+fn assert_a_created_task_sits_flat_beside_the_bundle(project: &Project) -> TestOutcome {
     project
-        .alias(&["add", "my-task"])?
-        .expect_success("`cargo ritual add my-task`");
+        .alias(&["create", "my-task"])?
+        .expect_success("`cargo ritual create my-task`");
 
     assert_eq!(
         manifest::tasks(&project.cli_manifest()?)?,
@@ -211,8 +211,8 @@ fn a_default_project_gets_the_ritual_bundle_flattened_and_renaming_the_bin_nests
         assert_workspace_manifest_shape(&project)?;
         assert_generated_file_shape(&project)?;
         assert_regenerate_changes_nothing(&project, "`new`")?;
-        assert_an_added_task_sits_flat_beside_the_bundle(&project)?;
-        assert_regenerate_changes_nothing(&project, "`add`")?;
+        assert_a_created_task_sits_flat_beside_the_bundle(&project)?;
+        assert_regenerate_changes_nothing(&project, "`create`")?;
         assert_renaming_the_bin_nests_the_bundle(&project)?;
 
         Ok(())

@@ -137,7 +137,7 @@ impl Project {
     }
 
     /// Writes a hand-written leaf crate under `.rituals/<crate_name>`, where
-    /// this version's `add` puts a ritual, and adds it to the workspace's
+    /// this version's `create` puts a ritual, and adds it to the workspace's
     /// members. Returns the crate's directory.
     pub(crate) fn write_leaf(&self, crate_name: &str) -> Outcome<PathBuf> {
         self.write_member(
@@ -178,7 +178,7 @@ impl Project {
     /// the composed CLI under `mount_key`: a dependency under that key, and
     /// the key appended to `[package.metadata.ritual] tasks`.
     ///
-    /// The two edits `add` makes, made here by hand — `add` only mounts a
+    /// The two edits `create` makes, made here by hand — `create` only mounts a
     /// crate it scaffolded itself, and only under that crate's own name. The
     /// dependency goes in through `cargo add`, with `--rename` when the key
     /// differs from the package name, the ordinary way to import a crate

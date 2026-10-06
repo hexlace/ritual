@@ -1,6 +1,6 @@
 //! Running a project's own `new inner` from inside that project's checkout
 //! is refused before anything is written, naming the workspace root and
-//! pointing at the project's own `add`.
+//! pointing at the project's own `create`.
 //!
 //! The refusal is read from the built binary run directly: `cargo run`'s own
 //! progress lines on the same stream name the crate `rituals-core-add` and
@@ -35,8 +35,9 @@ fn new_run_inside_a_scaffolded_project_is_refused_before_writing() -> TestOutcom
             project.root().display()
         );
         assert!(
-            message.contains("`add"),
-            "expected the refusal to point at the project's own `add`; message was:\n{message}"
+            message.contains("`create inner`"),
+            "expected the refusal to point at the project's own `create inner`; \
+             message was:\n{message}"
         );
 
         assert_trees_identical(

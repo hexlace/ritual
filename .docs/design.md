@@ -25,6 +25,11 @@ provenance beyond what the lockfile records are for tooling built on top of
 it. The lockfile is most of provenance for free: it pins exactly which
 version of every imported task a project carries.
 
+**Paths are assumed to be UTF-8.** A file or directory name that isn't, or
+that holds a newline or a glob character (`*`, `?`, `[`), is not supported.
+Ritual skips such a name, or passes it through as Cargo reads it, and never
+handles it specially.
+
 ## Location independence
 
 **The boundary between global and local is a move, not a decision.** A task
@@ -170,16 +175,16 @@ could have. Nothing is special-cased for the global one.
 
 ## Management tasks are a bundle
 
-Every command line carries ritual's own management tasks, `add`,
-`regenerate`, `new`, `create`, `import`, `remove` and `migrate`, as one
-bundle: the crate `rituals-core`, imported under the key `ritual` with an
+Every command line carries ritual's own management tasks, `add` (the
+deprecated old name of `create`), `regenerate`, `new`, `create`, `import`,
+`remove` and `migrate`, as one bundle: the crate `rituals-core`, imported under the key `ritual` with an
 ordinary dependency line and an ordinary `tasks` entry. Inside a project there
 is therefore no globally installed tool to keep in sync with the project.
 
 They are an ordinary imported bundle rather than names built into the
 dispatcher. Built-in names would be reserved in every command line, which
 breaks the property that every command reaches its task the same way. It
-would also mean a tool built on ritual could never have its own `add` mean its
+would also mean a tool built on ritual could never have its own `create` mean its
 own scaffolder. The shape below meets these requirements:
 
 - no command line ever reads `ritual ritual`;
@@ -206,9 +211,9 @@ the command line refuse to start, naming the key and the bin name.
 
 | Command line | `ritual` bundle mounted as | What you type |
 |---|---|---|
-| a default project, bin `ritual` | flat, because it has the bin's name | `cargo ritual add`, `cargo ritual my-task` |
-| a project made with `new --cli acme`, bin `acme` | nested | `cargo acme my-task`, `cargo acme ritual add` |
-| a tool with bin `mytool` that mounts its own `mytool` bundle as well as ritual's | `mytool` flat, `ritual` nested | `mytool add` is its own; `mytool ritual add` is ritual's |
+| a default project, bin `ritual` | flat, because it has the bin's name | `cargo ritual create`, `cargo ritual my-task` |
+| a project made with `new --cli acme`, bin `acme` | nested | `cargo acme my-task`, `cargo acme ritual create` |
+| a tool with bin `mytool` that mounts its own `mytool` bundle as well as ritual's | `mytool` flat, `ritual` nested | `mytool create` is its own; `mytool ritual create` is ritual's |
 | the global binary, bin `ritual` | flat | `ritual new`, `ritual create` |
 
 **Flattening is keyed on the bin name, not on a flag.** It happens in
@@ -221,7 +226,7 @@ regenerate needed.
 An explicit `flatten` mark was considered and rejected. Suppose the bin is
 renamed by hand from `ritual` to `acme`. The name rule un-flattens ritual's
 bundle on the next build by itself. A flag would stay set and leave
-`acme add` meaning ritual's `add`, which is exactly the collision this design
+`acme create` meaning ritual's `create`, which is exactly the collision this design
 exists to remove. Keying on the name makes the rule the invariant, so it
 cannot drift from the bin.
 
@@ -232,7 +237,7 @@ on.
 
 ## Collisions
 
-**A dependency key is taken by the name Rust sees.** `add` and `import`
+**A dependency key is taken by the name Rust sees.** `create` and `import`
 refuse a key when a dependency of the CLI crate is already declared under it,
 with `-` read as `_`. Cargo does not: it accepts `a-b` beside an existing
 `a_b` and `cargo metadata` reports both, and only the build fails, because
@@ -262,11 +267,11 @@ least one child, that the names are distinct, and that none is `help`. These
 are contract violations in the bundle crate's own source, with no user input
 involved, so they panic, in both build profiles, at every depth.
 
-**Before writing,** `add`, `import` and `regenerate` check the name they are
+**Before writing,** `create`, `import` and `regenerate` check the name they are
 about to mount against the running command line's own top level, meaning the
 commands a flattened bundle supplies, plus `help`. They refuse with both names
-before anything is written. `add` and `import` also refuse the bin's own name.
-That slot has to hold a bundle. `add` only scaffolds plain tasks, nothing
+before anything is written. `create` and `import` also refuse the bin's own name.
+That slot has to hold a bundle. `create` only scaffolds plain tasks, nothing
 scaffolds a bundle, and nothing in a crate's manifest tells `import` a bundle
 from a plain task.
 
@@ -307,8 +312,9 @@ then handed a `CommandLine` at invocation, carrying the identity and the
 commands the top level got from a flattened bundle. The change is two edits:
 the constructor's name, and one prepended parameter.
 
-`add`, `import`, `regenerate`, `remove` and `migrate` use exactly this. They
-need it to find their own project among the workspace's members, and `add`,
+`create`, `import`, `regenerate`, `remove` and `migrate` use exactly this, and
+so does `add`, which is `create`'s in-project path under its old name. They
+need it to find their own project among the workspace's members, and `create`,
 `import` and `regenerate` also need it to check a name against the running
 top level before writing; `remove` and `migrate` need it to spell the command
 a refusal tells a person to run again.
@@ -316,31 +322,48 @@ a refusal tells a person to run again.
 ## Each task owns its precondition
 
 The whole bundle mounts everywhere. A project's command line carries `new`,
-and the global binary carries `add`, `import`, `regenerate`, `remove` and
+and the global binary carries `create`, `import`, `regenerate`, `remove` and
 `migrate`.
 The alternative was a conditional import, where a task is present or absent
 depending on where the command line stands. That would be the first exception
 to the tree being the same shape everywhere. So each task guards itself
 instead:
 
-- **`new` and `create` refuse inside a Cargo workspace.** That means under a
-  declared workspace root, or under a manifest Cargo cannot resolve a
-  workspace for. Each writes something that has to build on its own: a
-  project does not belong inside another project's workspace, and a
-  standalone crate written there would not build standalone. The refusal
-  names the workspace root and points at the enclosing project's own `add`.
+- **`new` refuses inside a Cargo workspace.** That means under a declared
+  workspace root, or under a manifest Cargo cannot resolve a workspace for.
+  It writes a project that has to build on its own, and a project does not
+  belong inside another project's workspace. The refusal names the workspace
+  root and points at the enclosing project's own `create`.
   The check asks `cargo locate-project` rather than walking up the tree
   looking for a `[workspace]` table, because Cargo treats a directory the
   root's `exclude` covers as its own root once that directory has its own
   `Cargo.toml`, and a walk gets that case wrong. An excluded directory with
-  no manifest of its own is still inside the workspace to Cargo, so `create`
-  and `new` refuse there.
-- **`add`, `import`, `regenerate`, `remove` and `migrate` refuse outside their own
-  project.** They look for the package their own command line was built from,
-  by name. In any other workspace they refuse and name the command to run in
-  the person's own project. So the global binary's `add`, `import`,
-  `regenerate`, `remove` and `migrate` work only inside the ritual repository, and a
-  project uses its own `cargo ritual add`.
+  no manifest of its own is still inside the workspace to Cargo, so `new`
+  refuses there.
+- **`create` chooses by whose workspace it runs in.** A project is the
+  running command line's own workspace, found the way `import` and `remove`
+  find it: a member is the package the command line was built from. There
+  `create` puts a task in `.rituals/` and regenerates. Anywhere else it asks
+  Cargo, as `new` does, whether a crate made in the current directory would
+  build on its own. Under no manifest at all, or under an ordinary package
+  with no `[workspace]`, it would, and `create` writes a crate of its own
+  there, as 0.1 did. Inside a declared workspace, or under a manifest Cargo
+  cannot place in a workspace, it would not, and `create` refuses with the
+  ways out that place has: in another ritual project, that project's own
+  `cargo ritual create`, or a ritual of its own made outside any Cargo
+  workspace; in any other workspace, only the second. Whose workspace it is
+  is asked with `cargo locate-project` and `cargo metadata --no-deps`,
+  neither of which resolves anything, so no `Cargo.lock` is written and a
+  refusal has nothing to put back. `--path` and `--git` are refused only in
+  its own project, once that is known, so the first refusal a person sees is
+  the true one.
+- **`create` inside a project, `import`, `regenerate`, `remove` and `migrate`
+  refuse outside their own project.** So does `add`. They look for the
+  package their own command line was built from, by name. In any other
+  workspace they refuse and name the command to run in the person's own
+  project. So the global binary's `create` inside a project, `import`,
+  `regenerate`, `remove` and `migrate` work only inside the ritual repository,
+  and a project uses its own `cargo ritual create`.
   Identity by package name is all this checks. A project's built binary run
   by hand inside a different project whose CLI crate has the same package
   name is taken for that project's own, and its collision check then reads
@@ -374,8 +397,8 @@ One constant supplies the bundle's dependency key, its `tasks` entry and its
 mount in the generated file, so the three cannot drift apart.
 
 **Where ritual's own crates come from.** With no flags, `new` takes
-`rituals` and `rituals-core` from crates.io, and `create` takes `rituals`,
-at the version the running `ritual` was built as. What they write then
+`rituals` and `rituals-core` from crates.io, and `create`, outside a project,
+takes `rituals`, at the version the running `ritual` was built as. What they write then
 matches the tool that made it. `--path <checkout>` or `--git <url>` takes the
 crates from a ritual checkout or a git repository instead, for work against
 an unreleased revision. Naming both is an argument error. A `--path` checkout
@@ -384,15 +407,50 @@ project will name, `crates/rituals` and ritual's own tasks in
 `.rituals/ritual`, so a checkout whose tasks are elsewhere is refused by `new`
 rather than by the project's first build.
 
-## What `add` writes
+## What `create` writes
 
-`add <name>` scaffolds a task crate in `.rituals/<name>`, appends it to the
-workspace's `members`, adds a path dependency and a `tasks` entry to the
-CLI crate's manifest, and then runs the same path `regenerate` runs. `add`
-keeps no task list of its own, so the two cannot drift apart. The new crate
-inherits `rituals.workspace = true`, so its dependency on `rituals` does not
-change when the crate moves. `add` therefore needs `rituals` in the
-workspace's `[workspace.dependencies]`, and refuses without it.
+`create` does one of two things, chosen by where it runs (see
+[Each task owns its precondition](#each-task-owns-its-precondition)).
+
+**In its own project,** `create <name>` scaffolds a task crate in
+`.rituals/<name>`, appends it to the workspace's `members`, adds a path
+dependency and a `tasks` entry to the CLI crate's manifest, and then runs the
+same path `regenerate` runs. `create` keeps no task list of its own, so the
+two cannot drift apart. The new crate inherits `rituals.workspace = true`, so
+its dependency on `rituals` does not change when the crate moves. `create`
+therefore needs `rituals` in the workspace's `[workspace.dependencies]`, and
+refuses without it, and refuses `--path` and `--git`, which choose where a
+crate made outside a project gets `rituals` from. It runs as one rollback from
+its first `cargo metadata`: the lockfile is recorded before it is read,
+regenerating happens inside the run so a regenerate that refuses leaves
+nothing half-written, and a refused or failed run leaves the project as it
+found it. When the CLI crate is the workspace root, the workspace's manifest
+and the CLI crate's are one file, so they are read as one document, edited
+together and written once.
+
+**Where a crate stands alone,** `create <name>` writes a crate of its own in
+the current directory, which depends on `rituals` from wherever `--path`, `--git`
+or crates.io says, and ends with the `import` command to run in a project.
+It takes a bare name there. A path is refused: with no `.rituals/` to place it
+in, the crate goes in the current directory.
+
+**A path inside a project.** A bare name goes in `.rituals/<name>` from
+anywhere in the project. A name containing `/` is a path, read from the
+current directory the way a shell reads it, with `.` and `..` folded away
+lexically. It has to lead strictly below `.rituals/`, so
+`create .rituals/private/lint` from the root and `create private/lint` from
+inside `.rituals/` mean the same place, and `create src/lint` is refused. Its
+last component is the task's name, its key and its crate's name, and is
+validated as a name like any other. The member entry and the report lines
+spell it from the workspace root. A path that leads to a workspace member's
+directory, or below it, is refused before anything is written: a ritual's own
+directory is its crate, not a grouping directory, and a crate inside it would
+leave that member unable to be removed on its own. Directories that are not
+members group freely.
+
+**Audience.** `create` writes `publish = false` into the new crate's
+`[package]` unless given `--public`, inside a project and outside one. See
+*Audience is `publish`, not a folder* below for why that is the key.
 
 **Why `.rituals/`.** Every ritual lives in `.rituals/`, whoever it is for,
 with no exception: not a project's private ones only, and not ritual's own
@@ -409,7 +467,8 @@ second encoding in the directory tree, such as a `private/` folder every tool
 must know to treat differently, would be a second source of the same fact,
 free to disagree with the manifest. Reading `publish` keeps one source, and it
 is Cargo's own, so every tool that already understands a package understands
-it.
+it. `create` makes a ritual private unless given `--public`, so forgetting to
+say who it is for cannot publish anything.
 
 *Subdirectories carry no meaning.* Beneath `.rituals/`, a project arranges
 rituals as it likes, at any depth, and ritual gives no name there a special
@@ -422,7 +481,7 @@ the arrangement is membership: a `.rituals/*` glob also matches a grouping
 directory that has no manifest, and Cargo then refuses the workspace. That is
 Cargo's rule about globs, so ritual documents it and does not paper over it,
 and the person lists the directory under `exclude` or lists members
-explicitly, as `add` does. `migrate` carries such an `exclude` entry from
+explicitly, as `create` does. `migrate` carries such an `exclude` entry from
 `tasks/` with the directory it names. `remove` deletes only the ritual's own directory
 and leaves a grouping directory it does not own.
 
@@ -447,7 +506,7 @@ An explicit entry leaves `remove` nothing to special-case. A person's own
 glob is still theirs, and `remove` still refuses to delete it.
 
 A project laid out by 0.1, its tasks in `tasks/`, keeps working. A task is a
-workspace member and a path dependency, so nothing but `add` ever needed it
+workspace member and a path dependency, so nothing but the scaffolder ever needed it
 to be in a particular directory: a task in `tasks/` builds, runs,
 regenerates and is removed exactly as one in `.rituals/` is.
 
@@ -794,9 +853,10 @@ so with git as the way back every failure after a move would need a recovery
 command, and git cannot give back the ignored files a directory holds, such
 as a stray `target/`. A rename carries them both ways, so they end up where
 they started on every path. If a rename cannot be undone, the message names
-both paths and the `mv` that puts the directory back, with absolute paths so
-it works from any directory. It names no command when both places hold
-something again, because that `mv` would move one inside the other.
+both paths and the `mv` that puts the directory back, spelled from the
+project root like every path the report names, and says to run it from
+there. It names no command when both places hold something again, because
+that `mv` would move one inside the other.
 
 **What is repointed.** A task can depend on another, and any member can depend
 on a task, so the command line crate's manifest is not the only one that names
@@ -881,7 +941,7 @@ it found and what to do instead. A run that fails partway through writing
 puts back what it wrote, and says whether it managed to.
 
 What ritual prints is the documentation people read most, so a next step or
-a remedy is written as a command a person can copy. `new`, `add`, `create`,
+a remedy is written as a command a person can copy. `new`, `create`,
 `import` and `migrate` each end with a `next:` line (`migrate` only when it
 changed something). A remedy that names one of
 ritual's own commands spells it for the running command line: `cargo ritual

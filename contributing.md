@@ -37,7 +37,7 @@ its package alone, as crates.io would receive it, and the test suite runs
 on the oldest toolchain its `rust-version` declares.
 
 The tests in `crates/rituals-cli/tests/` scaffold and build real projects
-with `new`, `create` and `add`, bring tasks into them with `import`, take
+with `new` and `create`, bring tasks into them with `import`, take
 tasks out of them with `remove`, and bring a 0.1 project's tasks into
 `.rituals/` with `migrate`.
 Each project builds on its own, so the suite compiles far more than the
@@ -146,7 +146,7 @@ ritual new demo --path /path/to/ritual
 
 ## Task crates in this repository
 
-`add` and `create` write a task crate's manifest with no `[lints]` table. A
+`create` writes a task crate's manifest with no `[lints]` table. A
 project's lint table is unknown to the scaffold, and inheriting it could fail
 a scaffolded handler before its author has written a line. For example,
 under `clippy::pedantic` a handler that always returns `Ok(())` trips

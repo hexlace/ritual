@@ -47,11 +47,14 @@ pub fn task() -> Task {
 ```
 
 The first argument to `Task::new` is the one-line description `--help`
-shows, not the task's name. A task never names itself: the command it
+shows, whatever the arguments struct's doc comment says, and not the task's
+name. A task never names itself: the command it
 answers to is the dependency key of whichever project imports it.
 
-`report` writes one line to stdout. Arguments are ordinary clap, re-exported
-as `rituals::clap`, so a task crate needs no parser dependency of its own.
+`report` writes one line to stdout, where a caller reads results; `warn` writes
+one to stderr, for something the person should heed that is not the result.
+Arguments are ordinary clap, re-exported as `rituals::clap`, so a task crate
+needs no parser dependency of its own.
 
 ## Refusing
 
@@ -92,14 +95,14 @@ A task runs inside a project's command line. The `ritual` binary, from
 cargo install --locked rituals-cli
 ritual new demo
 cd demo
-cargo ritual add hello
+cargo ritual create hello
 cargo ritual hello world
 ```
 
-`add` writes the manifest and the `task()` above into `.rituals/hello`, imports
-it, and regenerates the command line. To write a task crate outside any
-project, for several projects to share, run `ritual create hello` and
-[import it](https://github.com/hexlace/ritual#import-a-task-from-somewhere-else).
+`create` writes the manifest and the `task()` above into `.rituals/hello`,
+imports it, and regenerates the command line. Run outside any project, `ritual
+create hello` writes a task crate of its own instead, for several projects to
+share; [import it](https://github.com/hexlace/ritual#import-a-task-from-somewhere-else).
 
 ## More than one command
 

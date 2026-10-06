@@ -159,7 +159,7 @@ mod tests {
 
     use rituals::{Failure, Name};
     use rituals_compose::generated_file::TaskKey;
-    use rituals_compose::rollback;
+    use rituals_compose::rollback::{self, Wording};
 
     use super::{
         Import, LockfileChange, imported_but_not_regenerated, next_step, reported_lines, retry,
@@ -233,7 +233,10 @@ mod tests {
     }
 
     fn run_in_attempt(import: &Import) -> Result<(), Failure> {
-        rollback::attempt(&retry("greeter"), |changes| import.run(changes))
+        rollback::attempt(
+            Wording::project(&import.workspace_root, &retry("greeter")),
+            |changes| import.run(changes),
+        )
     }
 
     #[test]
@@ -277,11 +280,10 @@ mod tests {
         Ok(())
     }
 
-    /// The common shape of the tests below: the run is refused or fails, the
-    /// failure says the project was put back, and every file is exactly what
-    /// it was. Returns the failure's message, for the caller to say what it
-    /// was refused for.
-    fn refused_and_put_back(
+    /// The run is refused or fails, and every file is exactly what it was.
+    /// Returns the failure's message, as the run reports it, for the caller
+    /// to say what it was refused for and whether the project was put back.
+    fn refused_with_every_file_as_it_was(
         project: &ScratchProject,
         import: &Import,
     ) -> Result<String, Box<dyn std::error::Error>> {
@@ -291,7 +293,18 @@ mod tests {
 
         assert_eq!(project.snapshot()?, before, "every file must be as it was");
         let failure = outcome.err().ok_or("expected the run to be refused")?;
-        let message = failure.to_string();
+        Ok(failure.to_string())
+    }
+
+    /// The common shape of the tests below: the run is refused or fails
+    /// after changing something, the failure says the project was put back,
+    /// and every file is exactly what it was. Returns the failure's message,
+    /// for the caller to say what it was refused for.
+    fn refused_and_put_back(
+        project: &ScratchProject,
+        import: &Import,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let message = refused_with_every_file_as_it_was(project, import)?;
         assert!(
             message.ends_with("; ritual put the project back as it found it"),
             "expected the rollback's report; got: {message}"
@@ -338,11 +351,16 @@ mod tests {
         let project = ScratchProject::new("run-cargo-add-fails")?;
         let import = import_in(&project, "ghost", &["ghost", "--path", "../ghost"])?;
 
-        let message = refused_and_put_back(&project, &import)?;
+        let message = refused_with_every_file_as_it_was(&project, &import)?;
 
         assert!(
             message.starts_with("cargo add failed: "),
             "expected cargo's own failure; got: {message}"
+        );
+        assert!(
+            !message.contains("put the project back"),
+            "cargo add changed nothing before it failed, so nothing was put back; got: \
+             {message}"
         );
         Ok(())
     }

@@ -25,7 +25,7 @@ use std::path::Path;
 use precondition::{Repository, WorkTree};
 use rituals::{CommandLine, Failure, Outcome, Task, clap, report};
 use rituals_compose::metadata;
-use rituals_compose::rollback::{self, Changes};
+use rituals_compose::rollback::{self, Changes, Wording};
 use rituals_compose::{top_level, workspace};
 use step::{Migrating, Step};
 
@@ -70,8 +70,8 @@ pub fn task() -> Task {
 fn run(command_line: &CommandLine) -> Outcome {
     let current_dir = std::env::current_dir()
         .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
-    // Where there is no project at all there is nothing to put back, so this
-    // is refused before the run that would say it put the project back.
+    // Where there is no project at all no command can run, so this is asked
+    // before the run begins, and the refusal names the command to run instead.
     metadata::ensure_inside_a_project(&current_dir, "migrate", "")?;
     let root = workspace::root(&current_dir)?;
     // Asked before the first `cargo metadata`, which can rewrite `Cargo.lock`
@@ -81,18 +81,21 @@ fn run(command_line: &CommandLine) -> Outcome {
     let work_tree = WorkTree::take(&root);
     let migrate_command = top_level::management_command(command_line, "migrate");
 
-    let done = rollback::attempt("running `migrate` again", |changes| {
-        run_every_step_that_applies(
-            changes,
-            command_line.identity().package_name(),
-            &current_dir,
-            &Invocation {
-                root: &root,
-                work_tree: &work_tree,
-                migrate_command: &migrate_command,
-            },
-        )
-    })?;
+    let done = rollback::attempt(
+        Wording::project(&root, "running `migrate` again"),
+        |changes| {
+            run_every_step_that_applies(
+                changes,
+                command_line.identity().package_name(),
+                &current_dir,
+                &Invocation {
+                    root: &root,
+                    work_tree: &work_tree,
+                    migrate_command: &migrate_command,
+                },
+            )
+        },
+    )?;
 
     match done {
         None => report(report::NOTHING_TO_MIGRATE),

@@ -14,6 +14,7 @@
 
 pub(crate) mod manifest_walk;
 mod manifests_cargo_reads;
+mod owner;
 mod schema;
 mod workspace_member;
 
@@ -26,6 +27,7 @@ use crate::generated_file::Entry;
 use crate::rollback::Changes;
 use crate::workspace::{self, Located, locate_project};
 
+pub use owner::{Owner, whose_workspace};
 pub use schema::Metadata;
 pub(crate) use schema::{DepKind, Dependency, Node, NodeDependency, Package};
 pub use workspace_member::WorkspaceMember;
@@ -61,7 +63,7 @@ const SUPPORTED_FORMAT_VERSION: u64 = 1;
 /// Invokes the cargo that launched this process, through [`cargo::command`],
 /// so a nested call never uses a different cargo than the one in charge. No flags beyond
 /// `--format-version 1`: `--offline` would break a project whose
-/// dependencies are not yet fetched, and `--locked` would break `add`,
+/// dependencies are not yet fetched, and `--locked` would break `create`,
 /// which must update the lockfile.
 ///
 /// # Errors
@@ -128,12 +130,15 @@ pub fn fetch(current_dir: &Path) -> Result<Metadata, Failure> {
 /// ```no_run
 /// use std::path::Path;
 ///
-/// use rituals_compose::{metadata, rollback};
+/// use rituals_compose::metadata;
+/// use rituals_compose::rollback::{self, Wording};
 ///
 /// // Shells out to a real `cargo metadata` and needs a workspace on disk
 /// // to run against, so this example is `no_run`.
-/// let members = rollback::attempt("running `remove lint` again", |changes| {
-///     let document = metadata::fetch_recording(changes, Path::new("."))?;
+/// let root = Path::new("/path/to/the/workspace");
+/// let wording = Wording::project(root, "running `remove lint` again");
+/// let members = rollback::attempt(wording, |changes| {
+///     let document = metadata::fetch_recording(changes, root)?;
 ///     // ... a refusal from here on leaves the lockfile as it was found.
 ///     Ok(document.member_directories().len())
 /// })?;
@@ -152,10 +157,10 @@ pub fn fetch_recording(changes: &mut Changes, directory: &Path) -> Result<Metada
 /// [`fetch_in_its_own_project`], which names the command to run inside the
 /// right one, where Cargo's own words say what is missing and nothing about
 /// what to do. It is asked with `cargo locate-project`, which writes
-/// nothing, so a task asks it before its run begins: with no project there
-/// is nothing a run could put back, and a refusal from inside one would say
-/// it put the project back. A manifest Cargo finds but cannot place in a
-/// workspace keeps Cargo's own words, which say what is wrong with it.
+/// nothing, so a task asks it before its run begins, when no command has
+/// run and nothing has been recorded. A manifest Cargo finds but cannot
+/// place in a workspace keeps Cargo's own words, which say what is wrong with
+/// it.
 ///
 /// `command` and `arguments` are what the person typed after the binary's
 /// name, as for [`Metadata::ensure_runs_in_its_own_project`].
@@ -209,14 +214,17 @@ pub fn ensure_inside_a_project(current_dir: &Path, command: &str, arguments: &st
 /// ```no_run
 /// use std::path::Path;
 ///
-/// use rituals_compose::{metadata, rollback};
+/// use rituals_compose::metadata;
+/// use rituals_compose::rollback::{self, Wording};
 ///
 /// // Shells out to a real `cargo metadata` and needs a workspace on disk
 /// // to run against, so this example is `no_run`.
-/// let workspace_root = rollback::attempt("running `import greeter` again", |changes| {
+/// let root = Path::new("/path/to/the/workspace");
+/// let wording = Wording::project(root, "running `import greeter` again");
+/// let workspace_root = rollback::attempt(wording, |changes| {
 ///     let document = metadata::fetch_in_its_own_project(
 ///         changes,
-///         Path::new("."),
+///         root,
 ///         "demo-ritual",
 ///         "import",
 ///         "greeter",
@@ -566,7 +574,7 @@ impl Metadata {
 
     /// Reports whether any workspace member in this document is already
     /// named `name` — a task's crate is named after the command, so this is
-    /// what tells `add` a name is already taken by an unrelated package.
+    /// what tells `create` a name is already taken by an unrelated package.
     ///
     /// # Examples
     ///
@@ -594,7 +602,7 @@ impl Metadata {
     /// `package_name`.
     ///
     /// A command line is identified with its project by package name, and
-    /// nothing more. That catches the global binary's `add` run inside a
+    /// nothing more. That catches the global binary's `create` run inside a
     /// project, and a project's own command line run inside another project
     /// whose CLI crate has a different package name.
     ///
@@ -623,7 +631,7 @@ impl Metadata {
     /// startup.
     ///
     /// `command` and `arguments` are what the person typed after the
-    /// binary's name, such as `add` and `lint`; the refusal hands them back
+    /// binary's name, such as `create` and `lint`; the refusal hands them back
     /// as the command to run in their own project. `arguments` is empty for
     /// a command that takes none.
     ///
@@ -642,7 +650,7 @@ impl Metadata {
     /// // Reads a document `fetch` already produced from a real
     /// // `cargo metadata` call, so this example stays `no_run`.
     /// let document = metadata::fetch(Path::new("."))?;
-    /// document.ensure_runs_in_its_own_project("demo-ritual", "add", "lint")?;
+    /// document.ensure_runs_in_its_own_project("demo-ritual", "create", "lint")?;
     /// # Ok::<(), rituals::Failure>(())
     /// ```
     pub fn ensure_runs_in_its_own_project(
@@ -670,8 +678,24 @@ impl Metadata {
 ///
 /// The running binary cannot see what the project the person stands in
 /// calls its own command line, so the remedy names the default, `ritual`,
-/// and the shape a `--cli` project uses.
-fn outside_its_project_refusal(command: &str, arguments: &str) -> Failure {
+/// and the shape a `--cli` project uses. `command` and `arguments` are what
+/// the person typed after the binary's name, as for
+/// [`Metadata::ensure_runs_in_its_own_project`], which refuses with it.
+///
+/// # Examples
+///
+/// ```
+/// use rituals_compose::metadata;
+///
+/// assert_eq!(
+///     metadata::outside_its_project_refusal("import", "greeter").to_string(),
+///     "`import` works inside the project this command line belongs to; in your project, \
+///      run `cargo ritual import greeter` (or `cargo <name> ritual import greeter` if it was \
+///      made with `--cli <name>`)"
+/// );
+/// ```
+#[must_use]
+pub fn outside_its_project_refusal(command: &str, arguments: &str) -> Failure {
     let typed = if arguments.is_empty() {
         command.to_string()
     } else {
@@ -694,15 +718,15 @@ mod tests {
         Metadata, WorkspaceMember, ensure_inside_a_project, fetch_in_its_own_project,
         outside_its_project_refusal, parse,
     };
-    use crate::rollback::attempt;
+    use crate::rollback::{Wording, attempt};
     use crate::test_support::{ScratchDir, TestOutcome};
 
     #[test]
     fn the_outside_project_refusal_hands_back_the_command_to_run() {
         assert_eq!(
-            outside_its_project_refusal("add", "lint").to_string(),
-            "`add` works inside the project this command line belongs to; in your project, run \
-             `cargo ritual add lint` (or `cargo <name> ritual add lint` if it was made with \
+            outside_its_project_refusal("create", "lint").to_string(),
+            "`create` works inside the project this command line belongs to; in your project, run \
+             `cargo ritual create lint` (or `cargo <name> ritual create lint` if it was made with \
              `--cli <name>`)"
         );
         assert_eq!(
@@ -726,23 +750,27 @@ mod tests {
         Ok(scratch)
     }
 
-    /// What the rollback appends to every failure of a run, which a task
-    /// that fetches inside [`attempt`] sees on each refusal below.
+    /// What the rollback appends to a failure of a run that put something
+    /// back, such as the lockfile `cargo metadata` wrote before it refused.
     const PUT_BACK: &str = "; ritual put the project back as it found it";
 
     /// [`fetch_in_its_own_project`] as a task calls it: inside a run that
-    /// records what `cargo metadata` writes. The failure is returned without
-    /// the rollback's report, which is asserted to be there.
-    fn fetch_in_a_run(directory: &Path, package: &str) -> Result<Metadata, String> {
-        let outcome = attempt("running `import greeter` again", |changes| {
-            fetch_in_its_own_project(changes, directory, package, "import", "greeter")
-        });
-        outcome.map_err(|failure| {
-            let message = failure.to_string();
-            message
-                .strip_suffix(PUT_BACK)
-                .unwrap_or_else(|| unreachable!("the rollback reports every failure: {message}"))
-                .to_string()
+    /// records what `cargo metadata` writes. The failure is returned as the
+    /// run reports it: with the rollback's words when it put something back,
+    /// and bare when it had nothing to put back.
+    fn fetch_in_a_run(directory: &Path, package: &str) -> Result<Metadata, Failure> {
+        attempt(
+            Wording::project(directory, "running `import greeter` again"),
+            |changes| fetch_in_its_own_project(changes, directory, package, "import", "greeter"),
+        )
+    }
+
+    /// `message` without the rollback's report, which is asserted to be
+    /// there: for a refusal that came after `cargo metadata` wrote a lockfile
+    /// the rollback removed.
+    fn without_the_put_back_report(message: &str) -> &str {
+        message.strip_suffix(PUT_BACK).unwrap_or_else(|| {
+            unreachable!("the rollback removed the lockfile and says so: {message}")
         })
     }
 
@@ -779,19 +807,39 @@ mod tests {
         Ok(())
     }
 
+    /// `cargo locate-project` is the authority on whether a manifest is
+    /// found at or above a directory: a package the test writes is inside, a
+    /// directory below the package is inside too, and a directory it leaves
+    /// empty is outside.
+    #[test]
+    fn a_scratch_package_is_inside_a_project_and_an_empty_directory_is_not() -> TestOutcome {
+        let package = scratch_package("inside-a-package")?;
+        let empty = ScratchDir::new("inside-nothing")?;
+
+        ensure_inside_a_project(package.path(), "import", "greeter")?;
+        ensure_inside_a_project(&package.path().join("src"), "import", "greeter")?;
+        assert_eq!(
+            ensure_inside_a_project(empty.path(), "import", "greeter")
+                .err()
+                .map(|failure| failure.to_string()),
+            Some(outside_its_project_refusal("import", "greeter").to_string())
+        );
+        Ok(())
+    }
+
     #[test]
     fn inside_another_projects_workspace_the_refusal_is_the_same() -> TestOutcome {
         let scratch = scratch_package("fetch-another-workspace")?;
 
         let outcome = fetch_in_a_run(scratch.path(), "demo-ritual");
 
+        let message = outcome
+            .err()
+            .ok_or("expected a workspace without the package to be refused")?
+            .to_string();
         assert_eq!(
-            outcome.err().as_deref(),
-            Some(
-                outside_its_project_refusal("import", "greeter")
-                    .to_string()
-                    .as_str()
-            ),
+            without_the_put_back_report(&message),
+            outside_its_project_refusal("import", "greeter").to_string(),
             "expected a workspace without the package to be refused"
         );
         assert!(
@@ -833,10 +881,16 @@ mod tests {
 
         let message = outcome
             .err()
-            .ok_or("expected cargo to refuse this directory")?;
+            .ok_or("expected cargo to refuse this directory")?
+            .to_string();
         assert!(
             message.starts_with("cargo locate-project failed: "),
             "expected cargo's own refusal; got: {message}"
+        );
+        assert!(
+            !message.ends_with(PUT_BACK),
+            "cargo refused before writing anything, so there was nothing to put back; got: \
+             {message}"
         );
         assert!(
             !scratch.path().join("Cargo.lock").exists(),
@@ -850,10 +904,13 @@ mod tests {
     /// of package `demo`, inside a run that then ends as `ending`, and returns
     /// what the run reported.
     fn fetch_then(directory: &Path, ending: Result<(), Failure>) -> Result<(), Failure> {
-        attempt("running `import greeter` again", |changes| {
-            fetch_in_its_own_project(changes, directory, "demo", "import", "greeter")?;
-            ending
-        })
+        attempt(
+            Wording::project(directory, "running `import greeter` again"),
+            |changes| {
+                fetch_in_its_own_project(changes, directory, "demo", "import", "greeter")?;
+                ending
+            },
+        )
     }
 
     /// `cargo metadata` creates the lockfile a project lacks, so a run that

@@ -1,8 +1,8 @@
 //! `ritual new demo --path <checkout> --cli mytool` gives the project a
 //! binary named `mytool` and an alias `cargo mytool`. The bundle's mount
 //! key, `ritual`, is not the bin's name, so ritual's management bundle stays
-//! nested: `cargo mytool ritual add my-task` reaches `add`, `cargo mytool
-//! my-task` runs the added task directly, and `mytool add`, with no `ritual`
+//! nested: `cargo mytool ritual create my-task` reaches `create`, `cargo mytool
+//! my-task` runs the created task directly, and `mytool create`, with no `ritual`
 //! in between, is not a command.
 
 mod support;
@@ -24,19 +24,19 @@ fn assert_the_bin_and_alias_are_named_after_the_cli(project: &Project) -> TestOu
     Ok(())
 }
 
-/// `cargo mytool ritual add my-task` reaches `add` through the nested
+/// `cargo mytool ritual create my-task` reaches `create` through the nested
 /// bundle and scaffolds `my-task`; `cargo mytool my-task` then runs it.
-fn add_through_the_nested_bundle_then_run_directly(project: &Project) -> TestOutcome {
+fn create_through_the_nested_bundle_then_run_directly(project: &Project) -> TestOutcome {
     project
-        .alias(&["ritual", "add", "my-task"])?
-        .expect_success("`cargo mytool ritual add my-task`, through the nested bundle");
+        .alias(&["ritual", "create", "my-task"])?
+        .expect_success("`cargo mytool ritual create my-task`, through the nested bundle");
     assert!(
         project.root().join(".rituals/my-task/Cargo.toml").is_file(),
-        "expected `ritual add my-task` to scaffold .rituals/my-task/Cargo.toml"
+        "expected `ritual create my-task` to scaffold .rituals/my-task/Cargo.toml"
     );
 
     let run_result = project.alias(&["my-task"])?;
-    run_result.expect_success("`cargo mytool my-task`, the newly added task run directly");
+    run_result.expect_success("`cargo mytool my-task`, the newly created task run directly");
     assert!(
         run_result.stdout.contains("my-task has nothing to do yet"),
         "expected the freshly scaffolded task's default body to report itself; stdout \
@@ -46,9 +46,9 @@ fn add_through_the_nested_bundle_then_run_directly(project: &Project) -> TestOut
     Ok(())
 }
 
-/// `add` is not a top-level command: `--help` lists ritual's bundle key and
-/// the added task, and `mytool add` is refused by clap as unrecognised.
-fn assert_add_is_not_reachable_without_ritual_first(project: &Project) -> TestOutcome {
+/// `create` is not a top-level command: `--help` lists ritual's bundle key and
+/// the created task, and `mytool create` is refused by clap as unrecognised.
+fn assert_create_is_not_reachable_without_ritual_first(project: &Project) -> TestOutcome {
     let help = project.run_cli(&["--help"])?;
     help.expect_success("`mytool --help`");
     assert_eq!(
@@ -59,8 +59,8 @@ fn assert_add_is_not_reachable_without_ritual_first(project: &Project) -> TestOu
     );
 
     help::assert_refuses_unrecognized_subcommand(
-        &project.run_cli(&["add", "another-task"])?,
-        "add",
+        &project.run_cli(&["create", "another-task"])?,
+        "create",
     );
     Ok(())
 }
@@ -73,8 +73,8 @@ fn a_named_cli_gets_the_ritual_bundle_nested_under_its_own_key() -> TestOutcome 
             Project::scaffold(checkout, working_dir.path(), "demo", &["--cli", BIN_NAME])?;
 
         assert_the_bin_and_alias_are_named_after_the_cli(&project)?;
-        add_through_the_nested_bundle_then_run_directly(&project)?;
-        assert_add_is_not_reachable_without_ritual_first(&project)?;
+        create_through_the_nested_bundle_then_run_directly(&project)?;
+        assert_create_is_not_reachable_without_ritual_first(&project)?;
 
         Ok(())
     })

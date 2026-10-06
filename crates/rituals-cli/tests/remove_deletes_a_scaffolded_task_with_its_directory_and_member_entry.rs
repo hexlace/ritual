@@ -1,4 +1,4 @@
-//! `cargo ritual remove <key>` takes a task `add` scaffolded out of the
+//! `cargo ritual remove <key>` takes a task `create` scaffolded out of the
 //! project completely — its `tasks` entry, its dependency line, its
 //! directory and its `[workspace] members` entry — and leaves a command line
 //! that builds, in the one order Cargo allows.
@@ -17,7 +17,7 @@
 mod support;
 
 use support::removal::{
-    assert_help_lists, exists, members_of, project_with_a_committed_added_task,
+    assert_help_lists, exists, members_of, project_with_a_committed_created_task,
 };
 use support::{Project, TempDir, TestOutcome, generated, help, in_checkout, manifest, write_text};
 
@@ -25,7 +25,7 @@ use support::{Project, TempDir, TestOutcome, generated, help, in_checkout, manif
 fn removing_a_scaffolded_task_by_key_deletes_it_and_leaves_a_project_that_builds() -> TestOutcome {
     in_checkout(|checkout| {
         let working_dir = TempDir::new("remove-scaffolded-by-key")?;
-        let project = project_with_a_committed_added_task(checkout, &working_dir, "greet")?;
+        let project = project_with_a_committed_created_task(checkout, &working_dir, "greet")?;
 
         // Something the person is working on elsewhere in the project: only
         // the task's own files decide whether `remove` may delete the task.
@@ -36,8 +36,8 @@ fn removing_a_scaffolded_task_by_key_deletes_it_and_leaves_a_project_that_builds
             members_before
                 .iter()
                 .any(|member| member == ".rituals/greet"),
-            "fixture precondition: `add greet` should have made .rituals/greet a member; members \
-             were {members_before:?}"
+            "fixture precondition: `create greet` should have made .rituals/greet a member; \
+             members were {members_before:?}"
         );
         assert!(
             exists(&project.root().join(".rituals/greet/Cargo.toml")),

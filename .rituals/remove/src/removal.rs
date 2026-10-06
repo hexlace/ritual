@@ -17,57 +17,9 @@ use std::path::{Path, PathBuf};
 
 use rituals::{CommandLine, Failure, Name, Outcome, report};
 use rituals_compose::generated_file::{self, Regenerated};
-use rituals_compose::manifest::Manifest;
+use rituals_compose::manifest::Manifests;
 use rituals_compose::metadata;
-use rituals_compose::rollback::{self, Changes};
-
-/// The manifests `remove` edits: the composed CLI's, and the workspace's.
-///
-/// They are one file when the composed CLI is the workspace root. Two
-/// documents read from one file would each be written back whole, and the
-/// second write would discard the first's edits, so then there is one
-/// document and the workspace's edits go to it.
-pub(crate) struct Manifests {
-    cli: Manifest,
-    workspace: Option<Manifest>,
-}
-
-impl Manifests {
-    /// Reads the composed CLI's manifest, and the workspace's too when it is
-    /// a different file.
-    pub(crate) fn read(cli_path: &Path, workspace_path: &Path) -> Result<Self, Failure> {
-        let cli = Manifest::read(cli_path)?;
-        let workspace = if cli_path == workspace_path {
-            None
-        } else {
-            Some(Manifest::read(workspace_path)?)
-        };
-        Ok(Self { cli, workspace })
-    }
-
-    /// The manifest that holds `[workspace]`.
-    pub(crate) const fn workspace(&self) -> &Manifest {
-        match &self.workspace {
-            Some(workspace) => workspace,
-            None => &self.cli,
-        }
-    }
-
-    /// The manifest that holds `[workspace]`, to edit.
-    fn workspace_mut(&mut self) -> &mut Manifest {
-        self.workspace.as_mut().unwrap_or(&mut self.cli)
-    }
-
-    /// The composed CLI's manifest.
-    pub(crate) const fn cli(&self) -> &Manifest {
-        &self.cli
-    }
-
-    /// The composed CLI's manifest, to edit.
-    pub(crate) const fn cli_mut(&mut self) -> &mut Manifest {
-        &mut self.cli
-    }
-}
+use rituals_compose::rollback::{self, Changes, Wording};
 
 /// A workspace member whose directory `remove` deletes.
 pub(crate) struct Member {
@@ -174,7 +126,7 @@ impl Removal {
         }
 
         self.manifests.cli().write(changes)?;
-        match (&self.manifests.workspace, edited) {
+        match (self.manifests.separate_workspace(), edited) {
             (Some(workspace), true) => {
                 workspace.write(changes)?;
                 Ok(true)
@@ -198,7 +150,7 @@ impl Removal {
             .iter()
             .any(|task| task.key() == self.key);
         // A key that is not a valid name could not have been imported by
-        // `add` or by a person following the design, and its dependency is
+        // `create` or by a person following the design, and its dependency is
         // not checked here; the generated file already no longer mounts it.
         let still_a_dependency = match Name::new(&self.key) {
             Ok(name) => document
@@ -232,14 +184,17 @@ impl Removal {
 ///
 /// `prepare` runs inside the same [`rollback::attempt`] as the writes, so
 /// whatever it records, such as the lockfile its `cargo metadata` may
-/// write, is put back when it refuses. `argument` is what the person typed
-/// as the task's name, for the retry a failure names.
+/// write, is put back when it refuses. `root` is the project's root, which a
+/// failure names what it could not put back from, and `argument` is what the
+/// person typed as the task's name, for the retry a failure names.
 pub(crate) fn finish(
     command_line: &CommandLine,
+    root: &Path,
     argument: &str,
     prepare: impl FnOnce(&mut Changes) -> Result<Removal, Failure>,
 ) -> Outcome {
-    let (removal, written) = rollback::attempt(&retry(argument), |changes| {
+    let retry = retry(argument);
+    let (removal, written) = rollback::attempt(Wording::project(root, &retry), |changes| {
         let mut removal = prepare(changes)?;
         let written = removal.write(changes, command_line)?;
         Ok((removal, written))
@@ -333,11 +288,11 @@ mod tests {
     use std::path::PathBuf;
 
     use rituals::{Failure, Outcome};
-    use rituals_compose::rollback::{self, Changes};
+    use rituals_compose::manifest::{ManifestPaths, Manifests};
+    use rituals_compose::rollback::{self, Changes, Wording};
 
     use super::{
-        Manifests, Member, Removal, deletion_failure, ensure_it_is_gone, relative_to, report_lines,
-        retry,
+        Member, Removal, deletion_failure, ensure_it_is_gone, relative_to, report_lines, retry,
     };
     use crate::test_support::{ScratchDir, TestOutcome};
 
@@ -407,7 +362,10 @@ mod tests {
         fn removal(&self) -> Result<Removal, Box<dyn Error>> {
             Ok(Removal {
                 key: "lint".to_string(),
-                manifests: Manifests::read(&self.cli_manifest_path, &self.workspace_manifest_path)?,
+                manifests: Manifests::read(&ManifestPaths {
+                    cli: self.cli_manifest_path.clone(),
+                    workspace: self.workspace_manifest_path.clone(),
+                })?,
                 workspace_root: self.workspace_root.clone(),
                 dependency_key: Some("lint".to_string()),
                 drops_inherited_entry: true,
@@ -448,7 +406,8 @@ mod tests {
         removal: &mut Removal,
         steps: impl FnOnce(&mut Removal, &mut Changes) -> Outcome,
     ) -> Failure {
-        let outcome = rollback::attempt(&retry("lint"), |changes| {
+        let root = removal.workspace_root.clone();
+        let outcome = rollback::attempt(Wording::project(&root, &retry("lint")), |changes| {
             steps(removal, changes)?;
             Err::<(), _>(Failure::new("simulated failure"))
         });
@@ -531,7 +490,8 @@ mod tests {
         let project = ScratchProject::new("take-out")?;
         let mut removal = project.removal()?;
 
-        let workspace_written = rollback::attempt("retry", |changes| {
+        let root = removal.workspace_root.clone();
+        let workspace_written = rollback::attempt(Wording::project(&root, "retry"), |changes| {
             removal.unlist(changes)?;
             removal.take_out_dependency(changes)
         })?;
@@ -559,7 +519,8 @@ mod tests {
         removal.drops_inherited_entry = false;
         removal.member = None;
 
-        rollback::attempt("retry", |changes| {
+        let root = removal.workspace_root.clone();
+        rollback::attempt(Wording::project(&root, "retry"), |changes| {
             removal.unlist(changes)?;
             removal.take_out_dependency(changes)
         })?;
@@ -586,7 +547,8 @@ mod tests {
         removal.member = None;
         let workspace_before = std::fs::read_to_string(&project.workspace_manifest_path)?;
 
-        let workspace_written = rollback::attempt("retry", |changes| {
+        let root = removal.workspace_root.clone();
+        let workspace_written = rollback::attempt(Wording::project(&root, "retry"), |changes| {
             removal.unlist(changes)?;
             removal.take_out_dependency(changes)
         })?;
@@ -624,7 +586,8 @@ mod tests {
     }
 
     fn fail_after_taking_out_a_missing_dependency(removal: &mut Removal) -> String {
-        let outcome = rollback::attempt(&retry("lint"), |changes| {
+        let root = removal.workspace_root.clone();
+        let outcome = rollback::attempt(Wording::project(&root, &retry("lint")), |changes| {
             removal.unlist(changes)?;
             removal.take_out_dependency(changes)
         });
@@ -642,7 +605,8 @@ mod tests {
         let project = ScratchProject::single_manifest("single-manifest")?;
         let mut removal = project.removal()?;
 
-        let workspace_written = rollback::attempt("retry", |changes| {
+        let root = removal.workspace_root.clone();
+        let workspace_written = rollback::attempt(Wording::project(&root, "retry"), |changes| {
             removal.unlist(changes)?;
             removal.take_out_dependency(changes)
         })?;

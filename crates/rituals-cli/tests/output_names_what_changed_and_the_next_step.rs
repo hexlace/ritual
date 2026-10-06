@@ -1,7 +1,7 @@
 //! What ritual prints is the part of its documentation people read most, so
-//! it is read here exactly as the program writes it: `new`, `add` and
+//! it is read here exactly as the program writes it: `new` and
 //! `create` each end by naming the next step as a command a person can
-//! copy, `add` and `regenerate` name the tasks a generated file mounts
+//! copy, `create` and `regenerate` name the tasks a generated file mounts
 //! rather than counting them, and a refusal names its remedy in the same
 //! copyable form.
 //!
@@ -43,10 +43,10 @@ fn a_default_project_reports_each_step_and_names_the_next_one() -> TestOutcome {
         let project = Project::open(&project_root)?;
         let binary = project.build()?;
 
-        let added = support::run_binary(&binary, project.root(), &["add", "hello"])?;
-        added.expect_success("`ritual add hello`");
+        let created = support::run_binary(&binary, project.root(), &["create", "hello"])?;
+        created.expect_success("`ritual create hello`");
         assert_eq!(
-            lines(&added.stdout),
+            lines(&created.stdout),
             [
                 "created .rituals/hello/Cargo.toml",
                 "created .rituals/hello/src/lib.rs",
@@ -64,16 +64,16 @@ fn a_default_project_reports_each_step_and_names_the_next_one() -> TestOutcome {
             ["ritual/src/main.rs is already up to date (tasks: ritual, hello)"]
         );
 
-        let repeated = support::run_binary(&binary, project.root(), &["add", "hello"])?;
-        repeated.expect_failure("a second `ritual add hello`");
+        let repeated = support::run_binary(&binary, project.root(), &["create", "hello"])?;
+        repeated.expect_failure("a second `ritual create hello`");
         assert_eq!(
             repeated.sole_line_prefixed_with("ritual"),
             "`hello` is already a task of `demo-ritual`; if its command is missing from the \
              command line, run `cargo ritual regenerate`"
         );
 
-        let reserved = support::run_binary(&binary, project.root(), &["add", "ritual"])?;
-        reserved.expect_failure("`ritual add ritual`");
+        let reserved = support::run_binary(&binary, project.root(), &["create", "ritual"])?;
+        reserved.expect_failure("`ritual create ritual`");
         assert_eq!(
             reserved.sole_line_prefixed_with("ritual"),
             "`ritual` is reserved for this command line's own commands; give this task another \
@@ -110,15 +110,15 @@ fn a_named_command_line_spells_its_hints_with_its_own_name() -> TestOutcome {
         let project = Project::scaffold(checkout, working_dir.path(), "demo", &["--cli", "acme"])?;
         let binary = project.build()?;
 
-        let added = support::run_binary(&binary, project.root(), &["ritual", "add", "lint"])?;
-        added.expect_success("`acme ritual add lint`");
+        let created = support::run_binary(&binary, project.root(), &["ritual", "create", "lint"])?;
+        created.expect_success("`acme ritual create lint`");
         assert_eq!(
-            lines(&added.stdout).last().copied(),
+            lines(&created.stdout).last().copied(),
             Some("next: edit .rituals/lint/src/lib.rs, then run cargo acme lint")
         );
 
-        let repeated = support::run_binary(&binary, project.root(), &["ritual", "add", "lint"])?;
-        repeated.expect_failure("a second `acme ritual add lint`");
+        let repeated = support::run_binary(&binary, project.root(), &["ritual", "create", "lint"])?;
+        repeated.expect_failure("a second `acme ritual create lint`");
         assert_eq!(
             repeated.sole_line_prefixed_with("acme"),
             "`lint` is already a task of `demo-ritual`; if its command is missing from the \
@@ -164,13 +164,17 @@ fn a_command_line_run_outside_its_project_hands_back_the_command_to_run() -> Tes
         let working_dir = TempDir::new("output-outside-project")?;
         let project = Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
 
-        let global = run_ritual(project.root(), &["add", "lint"])?;
-        global.expect_failure("the global `ritual add lint` inside a project");
+        // `create` asks whose project this is before it reads anything that
+        // could write, so the refusal has nothing to put back; it adds the
+        // other way out `create` has, a ritual of its own made elsewhere.
+        let global = run_ritual(project.root(), &["create", "lint"])?;
+        global.expect_failure("the global `ritual create lint` inside a project");
         assert_eq!(
             global.sole_line_prefixed_with("ritual"),
-            "`add` works inside the project this command line belongs to; in your project, run \
-             `cargo ritual add lint` (or `cargo <name> ritual add lint` if it was made with \
-             `--cli <name>`)"
+            "`create` works inside the project this command line belongs to; in your project, \
+             run `cargo ritual create lint` (or `cargo <name> ritual create lint` if it was \
+             made with `--cli <name>`); or, for a ritual of its own, run create outside any \
+             Cargo workspace"
         );
 
         // The same holds for a project's own command line run from inside

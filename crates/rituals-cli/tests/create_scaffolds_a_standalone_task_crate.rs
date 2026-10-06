@@ -1,7 +1,8 @@
-//! `create` scaffolds an ordinary Cargo crate that marks itself a task, as
-//! `[package.metadata.ritual] task = true`, and builds entirely on its own —
-//! no enclosing project required — and refuses wherever Cargo would place
-//! that crate inside a workspace.
+//! Outside any project, `create` scaffolds an ordinary Cargo crate that marks
+//! itself a task, as `[package.metadata.ritual] task = true`, and builds
+//! entirely on its own — no enclosing project required. Wherever Cargo would
+//! place that crate inside a declared workspace that is not the command
+//! line's own, it would not build on its own, and `create` refuses.
 
 mod support;
 
@@ -49,10 +50,11 @@ fn create_scaffolds_a_task_crate_that_builds_on_its_own() -> TestOutcome {
 
 /// A directory the workspace root's `exclude` covers, but which has no
 /// `Cargo.toml` of its own, is still inside that workspace to Cargo:
-/// `cargo locate-project` walks past it to the root. `create` there is
-/// refused, naming the root, and writes nothing.
+/// `cargo locate-project` walks past it to the root. No command line owns
+/// that workspace, and a crate made there would not build on its own, so
+/// `create` is refused naming the workspace root, and nothing is written.
 #[test]
-fn create_in_an_excluded_directory_with_no_manifest_is_refused() -> TestOutcome {
+fn create_in_an_excluded_directory_with_no_manifest_is_refused_and_writes_nothing() -> TestOutcome {
     let workspace = TempDir::new("create-excluded-empty")?;
     support::write_text(
         &workspace.path().join("Cargo.toml"),
@@ -65,17 +67,18 @@ fn create_in_an_excluded_directory_with_no_manifest_is_refused() -> TestOutcome 
     let refused = run_ritual(&scratch, &["create", "ex"])?;
     refused.expect_failure("`ritual create ex` in an excluded directory with no manifest");
     let message = refused.sole_line_prefixed_with("ritual");
-    assert!(
-        message.starts_with("refusing `create ex`"),
-        "expected the refusal to name the command; message was:\n{message}"
-    );
-    assert!(
-        message.contains(&format!("rooted at {}", path_to_str(workspace.path())?)),
-        "expected the refusal to name the workspace root; message was:\n{message}"
+    assert_eq!(
+        message,
+        format!(
+            "refusing `create ex`: {} is inside the Cargo workspace rooted at {}, and a crate \
+             made there would not build on its own; run create outside any Cargo workspace",
+            scratch.canonicalize()?.display(),
+            workspace.path().canonicalize()?.display()
+        )
     );
 
     assert_trees_identical(
-        "a refused `create ex` must leave the workspace as it was",
+        "a refused `create ex` must leave the workspace as it was, with no lockfile written",
         &before,
         &snapshot_tree(workspace.path())?,
     );

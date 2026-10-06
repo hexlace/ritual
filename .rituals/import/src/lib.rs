@@ -14,7 +14,7 @@ use arguments::ImportArguments;
 use import::Import;
 use rituals::{CommandLine, Failure, Outcome, Task};
 use rituals_compose::generated_file::TaskKey;
-use rituals_compose::rollback::{self, Changes};
+use rituals_compose::rollback::{self, Changes, Wording};
 use rituals_compose::{metadata, top_level, workspace};
 
 /// This task, for a command line to mount under whatever name imports it.
@@ -39,16 +39,21 @@ fn run(command_line: &CommandLine, arguments: &ImportArguments) -> Outcome {
         .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
     let import_command = top_level::management_command(command_line, "import");
     // The key and the words that run this again come from what was typed and
-    // run no subprocess, so a refusal of the key leaves nothing to put back
-    // and is not in the attempt. That includes a key that would hide `std`
+    // run no subprocess, so they are decided before the attempt begins, when
+    // nothing has been recorded. That includes a key that would hide `std`
     // or `core`, which the task check after `cargo add` refuses too, but only
-    // once Cargo has run. Nor is the refusal for running where there is no
-    // project at all in the attempt, since there is nothing to put back.
+    // once Cargo has run. So is the refusal for running where there is no
+    // project at all, which is asked before any command runs.
     let key = TaskKey::new(arguments.key(&import_command, &current_dir)?)?;
     let again = arguments.to_run_again(&current_dir);
     metadata::ensure_inside_a_project(&current_dir, "import", &again)?;
+    // A failure names what it could not put back from the project root, as
+    // the `created` and `updated` lines do. `cargo locate-project` writes
+    // nothing, and the run's first step asks it the same question.
+    let root = workspace::root(&current_dir)?;
+    let retry = import::retry(&again);
 
-    let import = rollback::attempt(&import::retry(&again), |changes| {
+    let import = rollback::attempt(Wording::project(&root, &retry), |changes| {
         let import = prepare(command_line, arguments, &current_dir, key, &again, changes)?;
         import.run(changes)?;
         Ok(import)
@@ -132,7 +137,8 @@ mod tests {
 
     use rituals::Failure;
     use rituals_compose::generated_file::TaskKey;
-    use rituals_compose::{metadata, rollback};
+    use rituals_compose::rollback::{self, Wording};
+    use rituals_compose::{metadata, workspace};
 
     use super::{Import, prepare};
     use crate::test_support::{
@@ -154,9 +160,11 @@ mod tests {
         let key = TaskKey::new(arguments.key("cargo ritual import", current_dir)?)?;
         let again = arguments.to_run_again(current_dir);
         metadata::ensure_inside_a_project(current_dir, "import", &again)?;
-        rollback::attempt("running `import` again", |changes| {
-            prepare(command_line, &arguments, current_dir, key, &again, changes)
-        })
+        let root = workspace::root(current_dir)?;
+        rollback::attempt(
+            Wording::project(&root, "running `import` again"),
+            |changes| prepare(command_line, &arguments, current_dir, key, &again, changes),
+        )
     }
 
     /// The command line of a default project, `ritual`, as the running

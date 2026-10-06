@@ -2,8 +2,8 @@
 //!
 //! ## What this crate provides
 //!
-//! - For writing a task: [`Task`], [`Outcome`], [`Failure`], [`report()`], and
-//!   [`clap`].
+//! - For writing a task: [`Task`], [`Outcome`], [`Failure`], [`report()`], [`warn()`],
+//!   and [`clap`].
 //! - For a task that needs the command line it runs in:
 //!   [`Task::receiving_command_line`], [`CommandLine`] and [`Identity`].
 //! - For generated code and scaffolding tools rather than tasks: [`run`],
@@ -26,7 +26,7 @@ pub use dispatch::run;
 pub use identity::Identity;
 pub use name::{InvalidName, Name};
 pub use outcome::{Failure, Outcome};
-pub use report::report;
+pub use report::{report, warn};
 pub use task::Task;
 
 /// The version of this crate, as the build that compiled it saw it.
