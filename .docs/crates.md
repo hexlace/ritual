@@ -23,8 +23,8 @@ other crates are in `crates/`, and `xtask` is in `xtask/`.
 
 What a task needs, and only that: the `Task` type and its three constructors
 (`new`, `receiving_command_line`, `group`), `Outcome` and `Failure`, `Name`,
-`report` and `warn`, `Identity` and `identity!()`, `CommandLine`, and `run`, the dispatch
-a command line's generated file calls.
+`report` and `warn`, `Identity` and `identity!()`, `CommandLine`, and `run`,
+the dispatch a command line's generated file calls.
 
 A bundle is a task, so building a tree of tasks and dispatching over it is a
 task's need, not a command line's, and it lives here. What is left at a

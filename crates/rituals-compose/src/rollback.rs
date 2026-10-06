@@ -126,7 +126,7 @@ pub use wording::Wording;
 /// });
 ///
 /// assert!(outcome.is_err());
-/// assert!(!directory.join("tasks").exists());
+/// assert!(!directory.join(".rituals").exists());
 /// # std::fs::remove_dir_all(&directory)?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```

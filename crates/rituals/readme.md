@@ -47,11 +47,14 @@ pub fn task() -> Task {
 ```
 
 The first argument to `Task::new` is the one-line description `--help`
-shows, not the task's name. A task never names itself: the command it
+shows, whatever the arguments struct's doc comment says, and not the task's
+name. A task never names itself: the command it
 answers to is the dependency key of whichever project imports it.
 
-`report` writes one line to stdout. Arguments are ordinary clap, re-exported
-as `rituals::clap`, so a task crate needs no parser dependency of its own.
+`report` writes one line to stdout, where a caller reads results; `warn` writes
+one to stderr, for something the person should heed that is not the result.
+Arguments are ordinary clap, re-exported as `rituals::clap`, so a task crate
+needs no parser dependency of its own.
 
 ## Refusing
 

@@ -1,6 +1,7 @@
 # rituals-core-create
 
-The `create` task: scaffold a task crate. Where it runs decides what it makes.
+The `create` task: scaffold a task crate: into this project, or on its own
+outside any project. Where it runs decides which.
 
 Inside a project, `cargo ritual create lint` scaffolds `.rituals/lint`, adds it
 to the workspace and to the command line crate's manifest, and regenerates. It
