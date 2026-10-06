@@ -20,8 +20,8 @@ use std::path::Path;
 use prepare::{Request, Requested};
 use rituals::{CommandLine, Failure, Name, Outcome, report};
 use rituals_compose::generated_file::TaskKey;
-use rituals_compose::metadata;
 use rituals_compose::rollback::{self, Wording};
+use rituals_compose::{metadata, workspace};
 
 use crate::arguments::{NameOrPath, ScaffoldArguments};
 
@@ -79,8 +79,14 @@ pub(crate) fn scaffold(
         NameOrPath::Path(path) => Requested::Path(path),
     };
     let run_again = arguments.to_run_again();
+    // A failure names what it could not put back from the project root, as
+    // the `created` lines do. `cargo locate-project` writes nothing, and the
+    // run's first step asks it the same question, so a project it cannot
+    // find is refused in the same words either way.
+    let root = workspace::root(current_dir)?;
+    let retry = retry(&run_again);
 
-    let (lines, next_step) = rollback::attempt(Wording::project(&retry(&run_again)), |changes| {
+    let (lines, next_step) = rollback::attempt(Wording::project(&root, &retry), |changes| {
         let mut scaffolding = prepare::prepare(
             changes,
             Request {

@@ -184,14 +184,17 @@ impl Removal {
 ///
 /// `prepare` runs inside the same [`rollback::attempt`] as the writes, so
 /// whatever it records, such as the lockfile its `cargo metadata` may
-/// write, is put back when it refuses. `argument` is what the person typed
-/// as the task's name, for the retry a failure names.
+/// write, is put back when it refuses. `root` is the project's root, which a
+/// failure names what it could not put back from, and `argument` is what the
+/// person typed as the task's name, for the retry a failure names.
 pub(crate) fn finish(
     command_line: &CommandLine,
+    root: &Path,
     argument: &str,
     prepare: impl FnOnce(&mut Changes) -> Result<Removal, Failure>,
 ) -> Outcome {
-    let (removal, written) = rollback::attempt(Wording::project(&retry(argument)), |changes| {
+    let retry = retry(argument);
+    let (removal, written) = rollback::attempt(Wording::project(root, &retry), |changes| {
         let mut removal = prepare(changes)?;
         let written = removal.write(changes, command_line)?;
         Ok((removal, written))
@@ -403,7 +406,8 @@ mod tests {
         removal: &mut Removal,
         steps: impl FnOnce(&mut Removal, &mut Changes) -> Outcome,
     ) -> Failure {
-        let outcome = rollback::attempt(Wording::project(&retry("lint")), |changes| {
+        let root = removal.workspace_root.clone();
+        let outcome = rollback::attempt(Wording::project(&root, &retry("lint")), |changes| {
             steps(removal, changes)?;
             Err::<(), _>(Failure::new("simulated failure"))
         });
@@ -486,7 +490,8 @@ mod tests {
         let project = ScratchProject::new("take-out")?;
         let mut removal = project.removal()?;
 
-        let workspace_written = rollback::attempt(Wording::project("retry"), |changes| {
+        let root = removal.workspace_root.clone();
+        let workspace_written = rollback::attempt(Wording::project(&root, "retry"), |changes| {
             removal.unlist(changes)?;
             removal.take_out_dependency(changes)
         })?;
@@ -514,7 +519,8 @@ mod tests {
         removal.drops_inherited_entry = false;
         removal.member = None;
 
-        rollback::attempt(Wording::project("retry"), |changes| {
+        let root = removal.workspace_root.clone();
+        rollback::attempt(Wording::project(&root, "retry"), |changes| {
             removal.unlist(changes)?;
             removal.take_out_dependency(changes)
         })?;
@@ -541,7 +547,8 @@ mod tests {
         removal.member = None;
         let workspace_before = std::fs::read_to_string(&project.workspace_manifest_path)?;
 
-        let workspace_written = rollback::attempt(Wording::project("retry"), |changes| {
+        let root = removal.workspace_root.clone();
+        let workspace_written = rollback::attempt(Wording::project(&root, "retry"), |changes| {
             removal.unlist(changes)?;
             removal.take_out_dependency(changes)
         })?;
@@ -579,7 +586,8 @@ mod tests {
     }
 
     fn fail_after_taking_out_a_missing_dependency(removal: &mut Removal) -> String {
-        let outcome = rollback::attempt(Wording::project(&retry("lint")), |changes| {
+        let root = removal.workspace_root.clone();
+        let outcome = rollback::attempt(Wording::project(&root, &retry("lint")), |changes| {
             removal.unlist(changes)?;
             removal.take_out_dependency(changes)
         });
@@ -597,7 +605,8 @@ mod tests {
         let project = ScratchProject::single_manifest("single-manifest")?;
         let mut removal = project.removal()?;
 
-        let workspace_written = rollback::attempt(Wording::project("retry"), |changes| {
+        let root = removal.workspace_root.clone();
+        let workspace_written = rollback::attempt(Wording::project(&root, "retry"), |changes| {
             removal.unlist(changes)?;
             removal.take_out_dependency(changes)
         })?;

@@ -233,9 +233,10 @@ mod tests {
     }
 
     fn run_in_attempt(import: &Import) -> Result<(), Failure> {
-        rollback::attempt(Wording::project(&retry("greeter")), |changes| {
-            import.run(changes)
-        })
+        rollback::attempt(
+            Wording::project(&import.workspace_root, &retry("greeter")),
+            |changes| import.run(changes),
+        )
     }
 
     #[test]

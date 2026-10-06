@@ -13,7 +13,7 @@ use rituals_compose::git::{self, CannotGiveBack, Flag, Unanswered, Unwatched};
 use rituals_compose::manifest::{ManifestPaths, Manifests};
 use rituals_compose::metadata::{self, Metadata, TaskImport};
 use rituals_compose::sentence::join_with_and;
-use rituals_compose::{cargo_config, top_level};
+use rituals_compose::{cargo_config, top_level, workspace};
 
 /// The package every composed command line's own commands come from: the
 /// bundle of `add`, `regenerate` and the rest, which nothing could put back
@@ -54,7 +54,11 @@ fn run(command_line: &CommandLine, arguments: &RemoveArguments) -> Outcome {
     // Where there is no project at all no command can run, so this is asked
     // before the run begins, and the refusal names the command to run instead.
     metadata::ensure_inside_a_project(&current_dir, "remove", &arguments.name)?;
-    removal::finish(command_line, &arguments.name, |changes| {
+    // `cargo locate-project` writes nothing, and the run's first step asks it
+    // the same question, so a project it cannot find is refused in the same
+    // words either way.
+    let root = workspace::root(&current_dir)?;
+    removal::finish(command_line, &root, &arguments.name, |changes| {
         // `cargo metadata` creates or rewrites a missing or stale lockfile,
         // which this records first, so a refusal puts it back.
         let document = metadata::fetch_in_its_own_project(

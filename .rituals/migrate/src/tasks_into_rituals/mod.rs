@@ -277,9 +277,10 @@ mod tests {
         let Some(candidates) = find(&before, root) else {
             return Err("fixture precondition: the project must have tasks to move".into());
         };
-        let outcome = rollback::attempt(Wording::project("running `migrate` again"), |changes| {
-            apply(&candidates, &migrating, &before, changes)
-        });
+        let outcome = rollback::attempt(
+            Wording::project(root, "running `migrate` again"),
+            |changes| apply(&candidates, &migrating, &before, changes),
+        );
         Ok(outcome
             .map(|applied| applied.lines)
             .map_err(|failure| failure.to_string()))

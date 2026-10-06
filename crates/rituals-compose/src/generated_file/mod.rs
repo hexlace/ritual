@@ -784,7 +784,7 @@ mod tests {
 
         let mut seen_inside_the_run = String::new();
         let failure = rollback::attempt(
-            Wording::project("running `remove hello` again"),
+            Wording::project(&root, "running `remove hello` again"),
             |changes| {
                 regenerate_recording(changes, &command_line, &root)?;
                 seen_inside_the_run = fs::read_to_string(&generated)
@@ -820,7 +820,7 @@ mod tests {
         let command_line = the_demo_command_line();
 
         let regenerated = rollback::attempt(
-            Wording::project("running `remove hello` again"),
+            Wording::project(&root, "running `remove hello` again"),
             |changes| regenerate_recording(changes, &command_line, &root),
         )?;
 
@@ -842,7 +842,7 @@ mod tests {
         let generated = root.join("src/main.rs");
         let command_line = the_demo_command_line();
         rollback::attempt(
-            Wording::project("running `remove hello` again"),
+            Wording::project(&root, "running `remove hello` again"),
             |changes| regenerate_recording(changes, &command_line, &root),
         )?;
 
@@ -855,7 +855,7 @@ mod tests {
 
         let regenerated = if permission_is_enforced {
             Some(rollback::attempt(
-                Wording::project("running `remove hello` again"),
+                Wording::project(&root, "running `remove hello` again"),
                 |changes| regenerate_recording(changes, &command_line, &root),
             ))
         } else {
@@ -895,7 +895,7 @@ mod tests {
         let command_line = the_demo_command_line();
         let regenerate_once = || {
             rollback::attempt(
-                Wording::project("running `remove hello` again"),
+                Wording::project(&root, "running `remove hello` again"),
                 |changes| regenerate_recording(changes, &command_line, &root),
             )
         };
@@ -923,7 +923,7 @@ mod tests {
         let member_directory: &Path = &root.join("hello");
 
         let failure = rollback::attempt(
-            Wording::project("running `remove hello` again"),
+            Wording::project(&root, "running `remove hello` again"),
             |changes| {
                 regenerate_recording(changes, &command_line, member_directory)?;
                 Err::<(), _>(Failure::new("a later step failed"))

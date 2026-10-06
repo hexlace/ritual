@@ -160,9 +160,14 @@ mod tests {
     /// Writes `manifest` the way a task does, inside a run, so the file on
     /// disk is what a person would see afterwards.
     fn write_through_a_run(manifest: &Manifest) -> TestOutcome {
-        rollback::attempt(Wording::project("running `create lint` again"), |changes| {
-            manifest.write(changes)
-        })?;
+        let root = manifest
+            .path()
+            .parent()
+            .ok_or("a manifest is a file in a directory")?;
+        rollback::attempt(
+            Wording::project(root, "running `create lint` again"),
+            |changes| manifest.write(changes),
+        )?;
         Ok(())
     }
 

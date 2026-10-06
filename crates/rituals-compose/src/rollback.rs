@@ -32,7 +32,8 @@
 //! A failure the undo put nothing back for, because nothing had been recorded
 //! or every change was already as found, is returned exactly as the run raised
 //! it: a refusal that came before ritual changed anything says what is in the
-//! way, and does not claim a recovery.
+//! way, and does not claim a recovery. One whose undo put nothing back and
+//! could not put something back says only what it could not.
 //!
 //! The promise covers a run that returns a failure. A run that panics is not
 //! undone.
@@ -53,7 +54,8 @@
 //! let created = directory.join("notes.txt");
 //! std::fs::write(&lockfile, "version = 4\n")?;
 //!
-//! let outcome = rollback::attempt(Wording::project("running `import lint` again"), |changes| {
+//! let wording = Wording::project(&directory, "running `import lint` again");
+//! let outcome = rollback::attempt(wording, |changes| {
 //!     changes.write(&lockfile, "version = 4\n# changed\n")?;
 //!     changes.write(&created, "a file that was not there before\n")?;
 //!     Err::<(), _>(Failure::new("the task check failed"))
@@ -94,11 +96,19 @@ pub use wording::Wording;
 ///   [`Wording::project`], or `"<failure>; ritual removed <directory> so a
 ///   retry starts clean"` for [`Wording::fresh_directory`];
 /// - when something could not be put back, every path that was not, followed
-///   by `"— check it before <retry>"`. `retry` is the caller's own, because
-///   only the caller knows what a person types to try again;
-/// - when the undo put nothing back, because nothing had been recorded or
-///   every change was already as found, the failure exactly as `run` raised
-///   it, with nothing added.
+///   by `"— check it before <retry>"`: after `"ritual put the project back
+///   except for"` when other changes were put back, and after `"ritual could
+///   not put back"` when none were, so a report never claims a recovery that
+///   did not happen. A [`Wording::fresh_directory`] says `"ritual could not
+///   remove"` either way. A directory created only to hold something that
+///   could not be removed is not named as well. `retry` is the caller's own,
+///   because only the caller knows what a person types to try again;
+/// - when the undo put nothing back and nothing failed, because nothing had
+///   been recorded or every change was already as found, the failure exactly
+///   as `run` raised it, with nothing added.
+///
+/// Every path is named as [`Wording`] says: from the project root, or from
+/// the directory a fresh one was made in.
 ///
 /// A full stop ending the failure is dropped only when a clause continues
 /// its sentence.
@@ -117,7 +127,8 @@ pub use wording::Wording;
 /// # std::fs::create_dir_all(&directory)?;
 /// let task_directory = directory.join(".rituals/lint");
 ///
-/// let outcome = rollback::attempt(Wording::project("running `create lint` again"), |changes| {
+/// let wording = Wording::project(&directory, "running `create lint` again");
+/// let outcome = rollback::attempt(wording, |changes| {
 ///     changes.reserve_directory(&task_directory)?;
 ///     std::fs::create_dir_all(task_directory.join("src")).map_err(|error| {
 ///         Failure::new("creating the task's directory failed").caused_by(error)
@@ -256,7 +267,8 @@ impl Changes {
     /// let original = "fn main() { rituals::run(); }\n";
     /// std::fs::write(&generated, original)?;
     ///
-    /// let outcome = rollback::attempt(Wording::project("running `remove lint` again"), |changes| {
+    /// let wording = Wording::project(&directory, "running `remove lint` again");
+    /// let outcome = rollback::attempt(wording, |changes| {
     ///     changes.write(&generated, "fn main() {}\n")?;
     ///     Err::<(), _>(Failure::new("removing the dependency failed"))
     /// });
@@ -301,7 +313,8 @@ impl Changes {
     /// # std::fs::create_dir_all(&directory)?;
     /// let lockfile = directory.join("Cargo.lock");
     ///
-    /// let outcome = rollback::attempt(Wording::project("running `import lint` again"), |changes| {
+    /// let wording = Wording::project(&directory, "running `import lint` again");
+    /// let outcome = rollback::attempt(wording, |changes| {
     ///     changes.run_changing(&[lockfile.as_path()], || {
     ///         // Stands in for running `cargo add`.
     ///         std::fs::write(&lockfile, "version = 4\n")
@@ -360,7 +373,8 @@ impl Changes {
     /// std::fs::create_dir_all(&existing)?;
     ///
     /// // A directory that already exists is not the run's to remove.
-    /// let outcome = rollback::attempt(Wording::project("running `create lint` again"), |changes| {
+    /// let wording = Wording::project(&directory, "running `create lint` again");
+    /// let outcome = rollback::attempt(wording, |changes| {
     ///     changes.reserve_directory(&existing)
     /// });
     ///
@@ -434,7 +448,8 @@ impl Changes {
     /// # std::fs::create_dir_all(from.join("target"))?;
     /// std::fs::write(from.join("target/lint.d"), "built\n")?;
     ///
-    /// let outcome = rollback::attempt(Wording::project("running `migrate` again"), |changes| {
+    /// let wording = Wording::project(&directory, "running `migrate` again");
+    /// let outcome = rollback::attempt(wording, |changes| {
     ///     changes.rename(&from, &to)?;
     ///     Err::<(), _>(Failure::new("the project no longer builds"))
     /// });
@@ -540,7 +555,8 @@ impl Changes {
     /// # std::fs::create_dir_all(&from)?;
     /// std::fs::write(from.join("Cargo.toml"), "[package]\n")?;
     ///
-    /// let outcome = rollback::attempt(Wording::project("running `migrate` again"), |changes| {
+    /// let wording = Wording::project(&directory, "running `migrate` again");
+    /// let outcome = rollback::attempt(wording, |changes| {
     ///     changes.rename(&from, &to)?;
     ///     changes
     ///         .remove_empty_directory(&directory.join("tasks"))
@@ -647,7 +663,8 @@ impl Changes {
     /// # std::fs::create_dir_all(&directory)?;
     /// let lockfile = directory.join("Cargo.lock");
     ///
-    /// let verb = rollback::attempt(Wording::project("running `import lint` again"), |changes| {
+    /// let wording = Wording::project(&directory, "running `import lint` again");
+    /// let verb = rollback::attempt(wording, |changes| {
     ///     changes.write(&lockfile, "version = 4\n")?;
     ///     Ok(if changes.recorded_as_absent(&lockfile) { "created" } else { "updated" })
     /// })?;
@@ -677,18 +694,29 @@ impl Changes {
     fn undo(self, failure: Failure, wording: Wording<'_>) -> Failure {
         self.assert_names_the_reserved_directory(wording);
 
+        // Where each thing that could not be put back is, and how the report
+        // names it.
+        let mut left: Vec<&Path> = Vec::new();
         let mut not_restored: Vec<String> = Vec::new();
         let mut any_put_back = false;
         for step in self.steps.iter().rev() {
             match step.undo() {
                 Ok(Undone::PutBack) => any_put_back = true,
                 Ok(Undone::AsFound) => {}
-                Err(_) => not_restored.push(step.describe()),
+                // A parent is undone only once it is empty, so one that still
+                // holds something already named cannot be removed for that
+                // reason alone, and checking what it holds is checking it.
+                Err(_) if step.holds_any_of(&left) => {}
+                Err(_) => {
+                    left.push(step.location());
+                    not_restored.push(step.describe(wording));
+                }
             }
         }
 
         match (not_restored.is_empty(), any_put_back) {
-            (false, _) => continued(&failure, &wording.partly_restored(&not_restored)),
+            (false, true) => continued(&failure, &wording.partly_restored(&not_restored)),
+            (false, false) => continued(&failure, &wording.nothing_restored(&not_restored)),
             (true, true) => continued(&failure, &wording.restored()),
             (true, false) => failure,
         }
@@ -711,7 +739,7 @@ impl Changes {
             .find(|step| !matches!(step, Step::Parent { .. }));
         if let Some(first) = first {
             assert!(
-                matches!(first, Step::Directory { path } if path.ends_with(directory)),
+                matches!(first, Step::Directory { path } if *path == directory),
                 "a run worded as making {} must reserve that directory before recording \
                  anything else; it recorded {first:?} first",
                 directory.display()
@@ -741,15 +769,33 @@ enum Undone {
 impl Step {
     /// What could not be put back, for the report that says so: the path,
     /// and for a move that could not be undone, where it belongs and what
-    /// puts it there.
-    fn describe(&self) -> String {
+    /// puts it there, each spelled as `wording` spells a path.
+    fn describe(&self, wording: Wording<'_>) -> String {
         match self {
             Self::File { path, .. }
             | Self::Directory { path }
             | Self::Parent { path }
-            | Self::Removed { path, .. } => path.display().to_string(),
-            Self::Rename { from, to } => describe_a_move_not_undone(from, to),
+            | Self::Removed { path, .. } => wording.spell(path),
+            Self::Rename { from, to } => describe_a_move_not_undone(from, to, wording),
         }
+    }
+
+    /// Where what this step guards is now: its path, or for a move, where
+    /// the moved path went.
+    fn location(&self) -> &Path {
+        match self {
+            Self::File { path, .. }
+            | Self::Directory { path }
+            | Self::Parent { path }
+            | Self::Removed { path, .. } => path,
+            Self::Rename { to, .. } => to,
+        }
+    }
+
+    /// Whether this is a parent that holds one of `left`, which the undo
+    /// could not remove from it.
+    fn holds_any_of(&self, left: &[&Path]) -> bool {
+        matches!(self, Self::Parent { path } if left.iter().any(|inside| inside.starts_with(path)))
     }
 
     /// Puts this step's path back as it was, doing nothing when it already
@@ -846,18 +892,19 @@ fn move_back(from: &Path, to: &Path) -> Result<Undone, Failure> {
 /// paths and says what to do about it, for the state it was left in.
 ///
 /// The command is offered only when it is safe: `to` holds the directory and
-/// `from` is empty, where `mv` puts it back from any directory. A `from`
-/// that exists again would take it in as a child.
-fn describe_a_move_not_undone(from: &Path, to: &Path) -> String {
-    let (from_text, to_text) = (from.display(), to.display());
+/// `from` is empty, where `mv` puts it back. A `from` that exists again would
+/// take it in as a child. The command's paths are spelled as the report's
+/// are, so it says where to run it from.
+fn describe_a_move_not_undone(from: &Path, to: &Path, wording: Wording<'_>) -> String {
+    let (from_text, to_text) = (wording.spell(from), wording.spell(to));
     match (is_present(from), is_present(to)) {
         (Ok(false), Ok(true)) => {
-            let command = crate::shell::join([
-                "mv".to_string(),
-                to.display().to_string(),
-                from.display().to_string(),
-            ]);
-            format!("{to_text}, which belongs at {from_text} (`{command}` puts it back)")
+            let command =
+                crate::shell::join(["mv".to_string(), to_text.clone(), from_text.clone()]);
+            format!(
+                "{to_text}, which belongs at {from_text} (`{command}`, run {}, puts it back)",
+                wording.where_commands_run()
+            )
         }
         (Ok(true), Ok(true)) => format!(
             "{to_text}, which belongs at {from_text}, where something else now is, so ritual \
@@ -948,8 +995,11 @@ mod tests {
     /// on a whole message can name it.
     const RETRY: &str = "running `demo` again";
 
-    /// The wording for a run that changes a project, with [`RETRY`].
-    const WORDING: Wording<'static> = Wording::project(RETRY);
+    /// The wording for a run that changes the project at `root`, with
+    /// [`RETRY`], so a report names a path from `root`.
+    fn wording(root: &Path) -> Wording<'_> {
+        Wording::project(root, RETRY)
+    }
 
     fn assert_send<T: Send>() {}
     fn assert_sync<T: Sync>() {}
@@ -958,8 +1008,8 @@ mod tests {
     /// failure `attempt` reports. Asserts the failure is the simulated one,
     /// so a setup step that failed inside `steps` is never mistaken for the
     /// run's own failure.
-    fn fail_after(steps: impl FnOnce(&mut Changes) -> Result<(), Failure>) -> Failure {
-        let outcome = attempt(WORDING, |changes| {
+    fn fail_after(root: &Path, steps: impl FnOnce(&mut Changes) -> Result<(), Failure>) -> Failure {
+        let outcome = attempt(wording(root), |changes| {
             steps(changes)?;
             Err::<(), _>(Failure::new("simulated failure"))
         });
@@ -997,7 +1047,9 @@ mod tests {
     #[test]
     #[should_panic(expected = "pass the outer run's &mut Changes down instead")]
     fn an_attempt_inside_an_attempt_is_refused() {
-        let _ = attempt(WORDING, |_outer| attempt(WORDING, |_inner| Ok(())));
+        let _ = attempt(wording(Path::new("/work")), |_outer| {
+            attempt(wording(Path::new("/work")), |_inner| Ok(()))
+        });
     }
 
     #[test]
@@ -1005,9 +1057,13 @@ mod tests {
         let scratch = ScratchDir::new("rollback-sequence")?;
         let path = scratch.path().join("Cargo.toml");
 
-        attempt(WORDING, |changes| changes.write(&path, "first\n"))?;
-        let _ = fail_after(|changes| changes.write(&path, "second\n"));
-        attempt(WORDING, |changes| changes.write(&path, "third\n"))?;
+        attempt(wording(scratch.path()), |changes| {
+            changes.write(&path, "first\n")
+        })?;
+        let _ = fail_after(scratch.path(), |changes| changes.write(&path, "second\n"));
+        attempt(wording(scratch.path()), |changes| {
+            changes.write(&path, "third\n")
+        })?;
 
         assert_eq!(std::fs::read_to_string(&path)?, "third\n");
         Ok(())
@@ -1019,11 +1075,13 @@ mod tests {
         // run unwinds without returning: the mark has to be cleared on the
         // way out regardless.
         let unwound = std::panic::catch_unwind(|| {
-            let _ = attempt(WORDING, |_outer| attempt(WORDING, |_inner| Ok(())));
+            let _ = attempt(wording(Path::new("/work")), |_outer| {
+                attempt(wording(Path::new("/work")), |_inner| Ok(()))
+            });
         });
         assert!(unwound.is_err(), "the nested attempt must have panicked");
 
-        let outcome = attempt(WORDING, |_changes| Ok(()));
+        let outcome = attempt(wording(Path::new("/work")), |_changes| Ok(()));
         assert!(
             outcome.is_ok(),
             "expected the later run to succeed: {outcome:?}"
@@ -1044,7 +1102,9 @@ mod tests {
         let original: &[u8] = b"version = 4\r\n\xff\xfe\x00no trailing newline";
         std::fs::write(&path, original)?;
 
-        let reported = fail_after(|changes| changes.write(&path, "version = 4\n"));
+        let reported = fail_after(scratch.path(), |changes| {
+            changes.write(&path, "version = 4\n")
+        });
 
         assert_eq!(
             reported.to_string(),
@@ -1059,7 +1119,9 @@ mod tests {
         let scratch = ScratchDir::new("rollback-created-file")?;
         let path = scratch.path().join("Cargo.lock");
 
-        let reported = fail_after(|changes| changes.write(&path, "version = 4\n"));
+        let reported = fail_after(scratch.path(), |changes| {
+            changes.write(&path, "version = 4\n")
+        });
 
         assert!(
             reported
@@ -1076,7 +1138,7 @@ mod tests {
         let path = scratch.path().join("main.rs");
         std::fs::write(&path, "original\n")?;
 
-        let _ = fail_after(|changes| {
+        let _ = fail_after(scratch.path(), |changes| {
             changes.write(&path, "first\n")?;
             changes.write(&path, "second\n")
         });
@@ -1094,7 +1156,7 @@ mod tests {
         std::fs::write(&path, "original\n")?;
         let mut enforced = true;
 
-        let reported = fail_after(|changes| {
+        let reported = fail_after(scratch.path(), |changes| {
             changes.write(&path, "first\n")?;
             changes.write(&path, "second\n")?;
             // Read-only, so writing the original back fails.
@@ -1117,11 +1179,8 @@ mod tests {
 
         assert_eq!(
             reported.to_string(),
-            format!(
-                "simulated failure; ritual put the project back except for {} — check it \
-                 before running `demo` again",
-                path.display()
-            )
+            "simulated failure; ritual could not put back main.rs — check it before running \
+             `demo` again"
         );
         Ok(())
     }
@@ -1136,7 +1195,7 @@ mod tests {
             "[dependencies]\n# a comment cargo remove would drop\n",
         )?;
 
-        let _ = fail_after(|changes| {
+        let _ = fail_after(scratch.path(), |changes| {
             changes.run_changing(&[manifest.as_path(), lockfile.as_path()], || {
                 std::fs::write(&manifest, "[dependencies]\nlint = \"0.1\"\n")
                     .and_then(|()| std::fs::write(&lockfile, "version = 4\n"))
@@ -1164,7 +1223,7 @@ mod tests {
         std::fs::create_dir(&unreadable)?;
         let mut ran = false;
 
-        let outcome = attempt(WORDING, |changes| {
+        let outcome = attempt(wording(scratch.path()), |changes| {
             changes.run_changing(&[unreadable.as_path()], || {
                 ran = true;
                 Ok(())
@@ -1191,7 +1250,9 @@ mod tests {
         let link = scratch.path().join("Cargo.lock");
         std::os::unix::fs::symlink(&target, &link)?;
 
-        let outcome = attempt(WORDING, |changes| changes.write(&link, "version = 4\n"));
+        let outcome = attempt(wording(scratch.path()), |changes| {
+            changes.write(&link, "version = 4\n")
+        });
 
         let Err(reported) = outcome else {
             unreachable!("writing through a link to nothing must be refused");
@@ -1222,7 +1283,9 @@ mod tests {
         std::fs::write(&target, "version = 3\n")?;
         std::os::unix::fs::symlink(&target, &link)?;
 
-        let reported = fail_after(|changes| changes.write(&link, "version = 4\n"));
+        let reported = fail_after(scratch.path(), |changes| {
+            changes.write(&link, "version = 4\n")
+        });
 
         assert_eq!(
             reported.to_string(),
@@ -1239,7 +1302,7 @@ mod tests {
         let tasks = scratch.path().join("tasks");
         let task = tasks.join("lint");
 
-        let reported = fail_after(|changes| {
+        let reported = fail_after(scratch.path(), |changes| {
             changes.reserve_directory(&task)?;
             std::fs::create_dir_all(task.join("src"))
                 .and_then(|()| std::fs::write(task.join("src/lib.rs"), "// lint\n"))
@@ -1261,7 +1324,9 @@ mod tests {
         let tasks = scratch.path().join("tasks");
         let task = tasks.join("lint");
 
-        attempt(WORDING, |changes| changes.reserve_directory(&task))?;
+        attempt(wording(scratch.path()), |changes| {
+            changes.reserve_directory(&task)
+        })?;
 
         assert!(task.is_dir(), "the reserved directory must exist");
         assert_eq!(std::fs::read_dir(&task)?.count(), 0, "and be empty");
@@ -1275,7 +1340,7 @@ mod tests {
         let lint = tasks.join("lint");
         let format = tasks.join("format");
 
-        let reported = fail_after(|changes| {
+        let reported = fail_after(scratch.path(), |changes| {
             changes.reserve_directory(&lint)?;
             changes.reserve_directory(&format)?;
             // As `create` fills its directory: creating what is already there
@@ -1301,7 +1366,7 @@ mod tests {
         let outer = scratch.path().join("a");
         let inner = outer.join("b");
 
-        let reported = fail_after(|changes| {
+        let reported = fail_after(scratch.path(), |changes| {
             changes.reserve_directory(&outer)?;
             changes.reserve_directory(&inner)?;
             std::fs::create_dir_all(&inner)
@@ -1326,7 +1391,7 @@ mod tests {
         std::fs::write(tasks.join(".keep"), "predates the run\n")?;
         let task = tasks.join("lint");
 
-        let _ = fail_after(|changes| {
+        let _ = fail_after(scratch.path(), |changes| {
             changes.reserve_directory(&task)?;
             std::fs::create_dir_all(&task)
                 .and_then(|()| std::fs::write(task.join("Cargo.toml"), "[package]\n"))
@@ -1344,7 +1409,9 @@ mod tests {
         let task = scratch.path().join("tasks/lint");
         std::fs::create_dir_all(&task)?;
 
-        let outcome = attempt(WORDING, |changes| changes.reserve_directory(&task));
+        let outcome = attempt(wording(scratch.path()), |changes| {
+            changes.reserve_directory(&task)
+        });
 
         let Err(reported) = outcome else {
             unreachable!("reserving a directory that exists must be refused");
@@ -1369,7 +1436,7 @@ mod tests {
         let scratch = ScratchDir::new("rollback-full-stop")?;
         let path = scratch.path().join("Cargo.lock");
 
-        let outcome = attempt(WORDING, |changes| {
+        let outcome = attempt(wording(scratch.path()), |changes| {
             changes.write(&path, "version = 4\n")?;
             Err::<(), _>(Failure::new("`add` would be a top-level command twice."))
         });
@@ -1384,7 +1451,7 @@ mod tests {
     }
 
     /// The same join when something could not be put back, where the report
-    /// continues with `except for` instead.
+    /// continues with what could not be instead.
     #[test]
     fn a_failure_ending_in_a_full_stop_is_continued_without_one_when_a_restore_fails() -> TestOutcome
     {
@@ -1396,7 +1463,7 @@ mod tests {
         let created = locked.join("Cargo.lock");
         let mut enforced = true;
 
-        let outcome = attempt(WORDING, |changes| {
+        let outcome = attempt(wording(scratch.path()), |changes| {
             changes.write(&created, "version = 4\n")?;
             std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555))
                 .map_err(|error| Failure::new("setup").caused_by(error))?;
@@ -1418,7 +1485,7 @@ mod tests {
         }
         let reported = outcome.err().ok_or("expected the run to fail")?.to_string();
         assert!(
-            reported.starts_with("refused; ritual put the project back except for "),
+            reported.starts_with("refused; ritual could not put back "),
             "expected the full stop trimmed before the continuation; got: {reported}"
         );
         Ok(())
@@ -1465,7 +1532,7 @@ mod tests {
         let path = scratch.path().join("Cargo.toml");
         let task = scratch.path().join("tasks/lint");
 
-        let outcome = attempt(WORDING, |changes| {
+        let outcome = attempt(wording(scratch.path()), |changes| {
             changes.write(&path, "[workspace]\n")?;
             changes.reserve_directory(&task)?;
             std::fs::create_dir_all(&task).map_err(|error| Failure::new("setup").caused_by(error))
@@ -1487,7 +1554,7 @@ mod tests {
         let created = locked.join("Cargo.lock");
         let mut enforced = true;
 
-        let reported = fail_after(|changes| {
+        let reported = fail_after(scratch.path(), |changes| {
             changes.write(&created, "version = 4\n")?;
             // Without write permission on its directory, the file cannot be
             // removed, so the undo has to report it.
@@ -1512,11 +1579,8 @@ mod tests {
 
         assert_eq!(
             reported.to_string(),
-            format!(
-                "simulated failure; ritual put the project back except for {} — check it \
-                 before running `demo` again",
-                created.display()
-            )
+            "simulated failure; ritual could not put back locked/Cargo.lock — check it before \
+             running `demo` again"
         );
         assert!(
             created.exists(),
@@ -1525,8 +1589,13 @@ mod tests {
         Ok(())
     }
 
+    /// A reserved directory the undo cannot remove is the only thing named,
+    /// from the project root: the parent that stays because it holds it is
+    /// not named again, and with nothing put back the report does not say
+    /// the project was.
     #[test]
-    fn every_restore_that_fails_is_named_most_recent_first() -> TestOutcome {
+    fn a_reserved_directory_that_cannot_be_removed_is_named_alone_and_nothing_claims_a_recovery()
+    -> TestOutcome {
         use std::os::unix::fs::PermissionsExt;
 
         let scratch = ScratchDir::new("rollback-restores-fail")?;
@@ -1534,7 +1603,7 @@ mod tests {
         let task = tasks.join("lint");
         let mut enforced = true;
 
-        let reported = fail_after(|changes| {
+        let reported = fail_after(scratch.path(), |changes| {
             changes.reserve_directory(&task)?;
             std::fs::create_dir_all(task.join("src"))
                 .and_then(|()| {
@@ -1550,9 +1619,9 @@ mod tests {
         // it, and has nothing to restore permissions on.
         if !enforced {
             crate::test_support::report_skip(
-                "every_restore_that_fails_is_named_most_recent_first could not demonstrate a \
-                 failed removal because this process does not honour directory write \
-                 permissions",
+                "a_reserved_directory_that_cannot_be_removed_is_named_alone_and_nothing_claims_a_\
+                 recovery could not demonstrate a failed removal because this process does not \
+                 honour directory write permissions",
             );
             return Ok(());
         }
@@ -1562,18 +1631,63 @@ mod tests {
         std::fs::set_permissions(&task, std::fs::Permissions::from_mode(0o755))?;
 
         // `tasks/lint` cannot lose `src`, so it stays, and `tasks/` is not
-        // empty, so it stays too: both are named, and neither is deleted
-        // out from under the other.
+        // empty, so it stays too, and is not deleted out from under it. Only
+        // `tasks/lint` is named, from the project root: `tasks/` stays only
+        // because it holds it. Nothing was put back, so nothing says the
+        // project was.
         assert_eq!(
             reported.to_string(),
-            format!(
-                "simulated failure; ritual put the project back except for {} and {} — check \
-                 them before running `demo` again",
-                task.display(),
-                tasks.display()
-            )
+            "simulated failure; ritual could not put back tasks/lint — check it before running \
+             `demo` again"
         );
         assert!(task.join("src").is_dir());
+        assert!(tasks.is_dir());
+        Ok(())
+    }
+
+    /// When some changes were put back and one could not be, the report says
+    /// the project was put back except for that one, named from the project
+    /// root.
+    #[test]
+    fn a_run_that_put_some_back_names_what_it_could_not_after_except_for() -> TestOutcome {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = ScratchDir::new("rollback-some-put-back")?;
+        let manifest = scratch.path().join("Cargo.toml");
+        std::fs::write(&manifest, "[workspace]\n")?;
+        let locked = scratch.path().join("locked");
+        std::fs::create_dir(&locked)?;
+        let created = locked.join("Cargo.lock");
+        let mut enforced = true;
+
+        let reported = fail_after(scratch.path(), |changes| {
+            changes.write(&manifest, "[workspace]\nmembers = []\n")?;
+            changes.write(&created, "version = 4\n")?;
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555))
+                .map_err(|error| Failure::new("setup").caused_by(error))?;
+            enforced = write_permission_is_enforced(&locked);
+            Ok(())
+        });
+
+        // Before any assertion can return early, so the scratch directory
+        // can still be removed on drop.
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755))?;
+
+        if !enforced {
+            crate::test_support::report_skip(
+                "a_run_that_put_some_back_names_what_it_could_not_after_except_for could not \
+                 demonstrate a failed removal because this process does not honour directory \
+                 write permissions",
+            );
+            return Ok(());
+        }
+
+        assert_eq!(
+            reported.to_string(),
+            "simulated failure; ritual put the project back except for locked/Cargo.lock — check \
+             it before running `demo` again"
+        );
+        assert_eq!(std::fs::read_to_string(&manifest)?, "[workspace]\n");
         Ok(())
     }
 
@@ -1673,7 +1787,7 @@ mod tests {
         std::fs::write(from.join("target/debug/lint.d"), "built\n")?;
         std::fs::write(from.join("Cargo.toml"), "[package]\n")?;
 
-        let reported = fail_after(|changes| {
+        let reported = fail_after(scratch.path(), |changes| {
             changes.rename(&from, &to)?;
             assert!(
                 to.join("target/debug/lint.d").is_file(),
@@ -1710,7 +1824,7 @@ mod tests {
         std::fs::create_dir(&existing)?;
         let to = existing.join("new/deeper/lint");
 
-        let _ = fail_after(|changes| {
+        let _ = fail_after(scratch.path(), |changes| {
             changes.rename(&from, &to)?;
             assert!(to.is_dir(), "the move must have happened before the undo");
             Ok(())
@@ -1740,7 +1854,9 @@ mod tests {
         std::os::unix::fs::symlink(scratch.path().join("nothing"), &occupied_by_link)?;
 
         for to in [occupied_by_directory, occupied_by_file, occupied_by_link] {
-            let outcome = attempt(WORDING, |changes| changes.rename(&from, &to));
+            let outcome = attempt(wording(scratch.path()), |changes| {
+                changes.rename(&from, &to)
+            });
 
             let Err(reported) = outcome else {
                 unreachable!("a rename onto {} must be refused", to.display());
@@ -1769,7 +1885,9 @@ mod tests {
         let from = scratch.path().join("tasks/lint");
         let to = scratch.path().join(".rituals/lint");
 
-        let outcome = attempt(WORDING, |changes| changes.rename(&from, &to));
+        let outcome = attempt(wording(scratch.path()), |changes| {
+            changes.rename(&from, &to)
+        });
 
         let Err(reported) = outcome else {
             unreachable!("a rename of a missing path must be refused");
@@ -1800,7 +1918,7 @@ mod tests {
         let manifest = from.join("Cargo.toml");
         std::fs::write(&manifest, "[dependencies]\n# a comment\n")?;
 
-        let _ = fail_after(|changes| {
+        let _ = fail_after(scratch.path(), |changes| {
             changes.write(&manifest, "[dependencies]\n")?;
             changes.rename(&from, &to)?;
             assert!(
@@ -1827,7 +1945,9 @@ mod tests {
         std::fs::create_dir_all(&from)?;
         std::fs::write(from.join("Cargo.toml"), "[package]\n")?;
 
-        attempt(WORDING, |changes| changes.rename(&from, &to))?;
+        attempt(wording(scratch.path()), |changes| {
+            changes.rename(&from, &to)
+        })?;
 
         assert_eq!(
             std::fs::read_to_string(to.join("Cargo.toml"))?,
@@ -1838,9 +1958,9 @@ mod tests {
     }
 
     /// When the directory cannot be moved back because the directory it
-    /// belongs in is read-only, the report names both paths and a command
-    /// that works from any directory, and the directory stays where the run
-    /// put it.
+    /// belongs in is read-only, the report names both paths from the project
+    /// root and a command that puts it back from there, and the directory
+    /// stays where the run put it.
     #[test]
     fn a_rename_that_cannot_be_undone_names_both_paths_and_the_command_that_puts_it_back()
     -> TestOutcome {
@@ -1857,7 +1977,7 @@ mod tests {
         std::fs::create_dir(&to_parent)?;
         let mut enforced = true;
 
-        let reported = fail_after(|changes| {
+        let reported = fail_after(scratch.path(), |changes| {
             changes.rename(&from, &to)?;
             // Without write permission on `tasks`, nothing can be moved
             // back into it.
@@ -1882,13 +2002,9 @@ mod tests {
 
         assert_eq!(
             reported.to_string(),
-            format!(
-                "simulated failure; ritual put the project back except for {to}, which belongs \
-                 at {from} (`mv {to} {from}` puts it back) — check it before running `demo` \
-                 again",
-                to = to.display(),
-                from = from.display()
-            )
+            "simulated failure; ritual could not put back .rituals/lint, which belongs at \
+             tasks/lint (`mv .rituals/lint tasks/lint`, run from the project root, puts it back) \
+             — check it before running `demo` again"
         );
         assert!(to.is_dir(), "the directory stays where the run put it");
         Ok(())
@@ -1904,18 +2020,16 @@ mod tests {
         std::fs::create_dir_all(&from)?;
         std::fs::write(from.join("Cargo.toml"), "[package]\n")?;
 
-        let reported = fail_after(|changes| {
+        let reported = fail_after(scratch.path(), |changes| {
             changes.rename(&from, &to)?;
             std::fs::create_dir(&from).map_err(|error| Failure::new("setup").caused_by(error))
         });
 
         let reported = reported.to_string();
         assert!(
-            reported.contains(&format!(
-                "{}, which belongs at {}, where something else now is",
-                to.display(),
-                from.display()
-            )),
+            reported.contains(
+                ".rituals/lint, which belongs at tasks/lint, where something else now is"
+            ),
             "expected both paths named: {reported}"
         );
         assert!(
@@ -1945,19 +2059,17 @@ mod tests {
         let to = scratch.path().join(".rituals/lint");
         std::fs::create_dir_all(&from)?;
 
-        let reported = fail_after(|changes| {
+        let reported = fail_after(scratch.path(), |changes| {
             changes.rename(&from, &to)?;
             std::fs::remove_dir(&to).map_err(|error| Failure::new("setup").caused_by(error))
         });
 
         let reported = reported.to_string();
         assert!(
-            reported.contains(&format!(
-                "{}, which belongs at {}; ritual could not tell where it is now, so it moved \
-                 nothing back",
-                to.display(),
-                from.display()
-            )),
+            reported.contains(
+                ".rituals/lint, which belongs at tasks/lint; ritual could not tell where it is \
+                 now, so it moved nothing back"
+            ),
             "expected both paths named: {reported}"
         );
         assert!(
@@ -1970,7 +2082,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "a rename moves from an absolute path")]
     fn a_rename_between_relative_paths_is_a_bug() {
-        let _ = attempt(WORDING, |changes| {
+        let _ = attempt(wording(Path::new("/work")), |changes| {
             changes.rename(Path::new("tasks/lint"), Path::new(".rituals/lint"))
         });
     }
@@ -1978,7 +2090,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "a rename moves to an absolute path")]
     fn a_rename_to_a_relative_path_is_a_bug() {
-        let _ = attempt(WORDING, |changes| {
+        let _ = attempt(wording(Path::new("/work")), |changes| {
             changes.rename(Path::new("/project/tasks/lint"), Path::new(".rituals/lint"))
         });
     }
@@ -1986,7 +2098,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "cannot be moved into itself")]
     fn a_rename_into_the_directory_being_moved_is_a_bug() {
-        let _ = attempt(WORDING, |changes| {
+        let _ = attempt(wording(Path::new("/work")), |changes| {
             changes.rename(
                 Path::new("/project/tasks"),
                 Path::new("/project/tasks/lint"),
@@ -2010,7 +2122,7 @@ mod tests {
         std::fs::write(from.join("Cargo.toml"), "[package]\n")?;
         std::fs::set_permissions(&group, std::fs::Permissions::from_mode(0o750))?;
 
-        let reported = fail_after(|changes| {
+        let reported = fail_after(scratch.path(), |changes| {
             changes.rename(&from, &to)?;
             for emptied in [&group, &tasks] {
                 changes.remove_empty_directory(emptied).map_err(|error| {
@@ -2047,7 +2159,7 @@ mod tests {
         std::fs::create_dir_all(&tasks)?;
         std::fs::write(tasks.join("notes.md"), "kept\n")?;
 
-        let kind = attempt(WORDING, |changes| {
+        let kind = attempt(wording(scratch.path()), |changes| {
             let kind = changes
                 .remove_empty_directory(&tasks)
                 .err()
@@ -2069,7 +2181,7 @@ mod tests {
         let tasks = scratch.path().join("tasks");
         std::fs::create_dir_all(&tasks)?;
 
-        let reported = fail_after(|changes| {
+        let reported = fail_after(scratch.path(), |changes| {
             changes
                 .remove_empty_directory(&tasks)
                 .map_err(|error| Failure::new("removing tasks/ failed").caused_by(error))?;
@@ -2094,7 +2206,7 @@ mod tests {
     /// continues its sentence.
     #[test]
     fn a_failure_with_nothing_recorded_is_returned_exactly_as_it_was_raised() {
-        let outcome = attempt(WORDING, |_changes| {
+        let outcome = attempt(wording(Path::new("/work")), |_changes| {
             Err::<(), _>(Failure::new("`add` would be a top-level command twice."))
         });
 
@@ -2117,7 +2229,7 @@ mod tests {
         let lockfile = scratch.path().join("Cargo.lock");
         std::fs::write(&lockfile, "version = 4\n")?;
 
-        let outcome = attempt(WORDING, |changes| {
+        let outcome = attempt(wording(scratch.path()), |changes| {
             changes.run_changing(&[lockfile.as_path()], || Ok(()))?;
             Err::<(), _>(Failure::new("the work tree has changes."))
         });
@@ -2135,7 +2247,7 @@ mod tests {
         let scratch = ScratchDir::new("rollback-recorded-absent-unchanged")?;
         let lockfile = scratch.path().join("Cargo.lock");
 
-        let outcome = attempt(WORDING, |changes| {
+        let outcome = attempt(wording(scratch.path()), |changes| {
             changes.run_changing(&[lockfile.as_path()], || Ok(()))?;
             Err::<(), _>(Failure::new("refused"))
         });
@@ -2151,7 +2263,11 @@ mod tests {
     fn a_fresh_directory_that_is_removed_is_named_as_it_was_typed() -> TestOutcome {
         let scratch = ScratchDir::new("rollback-fresh-removed")?;
         let made = scratch.path().join("demo");
-        let wording = Wording::fresh_directory(Path::new("demo"), "running `new demo` again");
+        let wording = Wording::fresh_directory(
+            scratch.path(),
+            Path::new("demo"),
+            "running `new demo` again",
+        );
 
         let outcome = attempt(wording, |changes| {
             changes.reserve_directory(&made)?;
@@ -2169,16 +2285,19 @@ mod tests {
         Ok(())
     }
 
-    /// A directory the undo cannot remove is named by its absolute path, the
-    /// way every list of what could not be put back names a path, and the
-    /// retry is the caller's.
+    /// A directory the undo cannot remove is named as it was typed, the way
+    /// the run's success line names it, and the retry is the caller's.
     #[test]
     fn a_fresh_directory_that_cannot_be_removed_is_named_with_the_callers_retry() -> TestOutcome {
         use std::os::unix::fs::PermissionsExt;
 
         let scratch = ScratchDir::new("rollback-fresh-not-removed")?;
         let made = scratch.path().join("demo");
-        let wording = Wording::fresh_directory(Path::new("demo"), "running `new demo` again");
+        let wording = Wording::fresh_directory(
+            scratch.path(),
+            Path::new("demo"),
+            "running `new demo` again",
+        );
         let mut enforced = true;
 
         let outcome = attempt(wording, |changes| {
@@ -2210,11 +2329,8 @@ mod tests {
         let reported = outcome.err().ok_or("expected the run to fail")?;
         assert_eq!(
             reported.to_string(),
-            format!(
-                "writing demo/Cargo.toml failed; ritual could not remove {} — check it before \
-                 running `new demo` again",
-                made.display()
-            )
+            "writing demo/Cargo.toml failed; ritual could not remove demo — check it before \
+             running `new demo` again"
         );
         Ok(())
     }
@@ -2224,8 +2340,13 @@ mod tests {
     #[test]
     fn a_fresh_directory_under_parents_the_run_made_is_still_the_one_named() -> TestOutcome {
         let scratch = ScratchDir::new("rollback-fresh-parents")?;
-        let made = scratch.path().join("new/parents/lint");
-        let wording = Wording::fresh_directory(Path::new("lint"), "running `create lint` again");
+        let current_dir = scratch.path().join("new/parents");
+        let made = current_dir.join("lint");
+        let wording = Wording::fresh_directory(
+            &current_dir,
+            Path::new("lint"),
+            "running `create lint` again",
+        );
 
         let outcome = attempt(wording, |changes| {
             changes.reserve_directory(&made)?;
@@ -2244,11 +2365,14 @@ mod tests {
     /// A wording that names one directory while the run reserves another
     /// would report the wrong one as removed, so the undo refuses to.
     #[test]
-    #[should_panic(expected = "a run worded as making a must reserve that directory")]
+    #[should_panic(
+        expected = "must reserve that directory before recording anything else; it recorded Directory"
+    )]
     fn a_wording_naming_a_directory_the_run_did_not_reserve_is_a_bug() {
         let scratch = ScratchDir::new("rollback-fresh-mismatch")
             .expect("a scratch directory can be made under the temp root");
-        let wording = Wording::fresh_directory(Path::new("a"), "running `new a` again");
+        let wording =
+            Wording::fresh_directory(scratch.path(), Path::new("a"), "running `new a` again");
 
         let _ = attempt(wording, |changes| {
             changes.reserve_directory(&scratch.path().join("b"))?;
@@ -2263,7 +2387,8 @@ mod tests {
     fn a_fresh_directory_run_that_records_a_file_first_is_a_bug() {
         let scratch = ScratchDir::new("rollback-fresh-file-first")
             .expect("a scratch directory can be made under the temp root");
-        let wording = Wording::fresh_directory(Path::new("a"), "running `new a` again");
+        let wording =
+            Wording::fresh_directory(scratch.path(), Path::new("a"), "running `new a` again");
 
         let _ = attempt(wording, |changes| {
             changes.write(&scratch.path().join("Cargo.lock"), "version = 4\n")?;

@@ -261,7 +261,7 @@ pub fn surroundings(current_dir: &Path) -> Result<Surroundings, Failure> {
 ///
 /// // Shells out to a real `cargo metadata` and needs a workspace on disk
 /// // to run against, so this example is `no_run`.
-/// let wording = Wording::project("running `import greeter` again");
+/// let wording = Wording::project(directory, "running `import greeter` again");
 /// let workspace_root = rollback::attempt(wording, |changes| {
 ///     let document = metadata::fetch_in_its_own_project(
 ///         changes,
@@ -785,7 +785,7 @@ mod tests {
     /// and bare when it had nothing to put back.
     fn fetch_in_a_run(directory: &Path, package: &str) -> Result<Metadata, Failure> {
         attempt(
-            Wording::project("running `import greeter` again"),
+            Wording::project(directory, "running `import greeter` again"),
             |changes| fetch_in_its_own_project(changes, directory, package, "import", "greeter"),
         )
     }
@@ -929,7 +929,7 @@ mod tests {
     /// what the run reported.
     fn fetch_then(directory: &Path, ending: Result<(), Failure>) -> Result<(), Failure> {
         attempt(
-            Wording::project("running `import greeter` again"),
+            Wording::project(directory, "running `import greeter` again"),
             |changes| {
                 fetch_in_its_own_project(changes, directory, "demo", "import", "greeter")?;
                 ending

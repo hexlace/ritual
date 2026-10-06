@@ -81,18 +81,21 @@ fn run(command_line: &CommandLine) -> Outcome {
     let work_tree = WorkTree::take(&root);
     let migrate_command = top_level::management_command(command_line, "migrate");
 
-    let done = rollback::attempt(Wording::project("running `migrate` again"), |changes| {
-        run_every_step_that_applies(
-            changes,
-            command_line.identity().package_name(),
-            &current_dir,
-            &Invocation {
-                root: &root,
-                work_tree: &work_tree,
-                migrate_command: &migrate_command,
-            },
-        )
-    })?;
+    let done = rollback::attempt(
+        Wording::project(&root, "running `migrate` again"),
+        |changes| {
+            run_every_step_that_applies(
+                changes,
+                command_line.identity().package_name(),
+                &current_dir,
+                &Invocation {
+                    root: &root,
+                    work_tree: &work_tree,
+                    migrate_command: &migrate_command,
+                },
+            )
+        },
+    )?;
 
     match done {
         None => report(report::NOTHING_TO_MIGRATE),

@@ -50,7 +50,7 @@ pub(crate) fn scaffold(
     // a person looks for next to where they ran `create`.
     let retry = format!("running `create {name}` again");
     rollback::attempt(
-        Wording::fresh_directory(Path::new(name.as_str()), &retry),
+        Wording::fresh_directory(current_dir, Path::new(name.as_str()), &retry),
         |changes| {
             changes.reserve_directory(&target_dir)?;
             write_crate(&target_dir, &name, &source, arguments.audience())
@@ -206,8 +206,11 @@ mod tests {
     ) -> Result<(), Failure> {
         let name = demo_name();
         let retry = "running `create demo` again";
+        let current_dir = target_dir
+            .parent()
+            .ok_or_else(|| Failure::new("a scratch directory is inside another"))?;
         rollback::attempt(
-            Wording::fresh_directory(Path::new("demo"), retry),
+            Wording::fresh_directory(current_dir, Path::new("demo"), retry),
             |changes| {
                 changes.reserve_directory(target_dir)?;
                 std::fs::create_dir(target_dir.join("Cargo.toml")).map_err(|error| {
@@ -289,11 +292,11 @@ mod tests {
             .ok_or("expected the poisoned manifest path to fail the write")?;
         let message = failure.to_string();
         assert!(
-            message.contains(&format!(
-                "ritual could not remove {} — check it before running `create demo` again",
-                target_dir.display()
-            )),
-            "expected the message to name the root that could not be removed: {message}"
+            message.ends_with(
+                "; ritual could not remove demo — check it before running `create demo` again"
+            ),
+            "expected the message to name the root that could not be removed, as typed: \
+             {message}"
         );
         assert!(
             target_dir.exists(),

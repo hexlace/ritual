@@ -241,11 +241,14 @@ mod tests {
         scaffolding: &mut Scaffolding,
         steps: impl FnOnce(&mut Scaffolding, &mut Changes) -> Result<(), Failure>,
     ) -> Failure {
-        let outcome =
-            rollback::attempt(Wording::project("running `create lint` again"), |changes| {
+        let root = scaffolding.workspace_root.clone();
+        let outcome = rollback::attempt(
+            Wording::project(&root, "running `create lint` again"),
+            |changes| {
                 steps(scaffolding, changes)?;
                 Err::<(), _>(Failure::new("simulated failure"))
-            });
+            },
+        );
         let Err(reported) = outcome else {
             unreachable!("a run that always ends in Err cannot succeed");
         };
@@ -294,11 +297,12 @@ mod tests {
     fn two_manifests_are_written_and_reported_workspace_first() -> TestOutcome {
         let project = ScratchProject::new("two-manifests")?;
         let mut scaffolding = project.scaffolding("lint", Audience::Private)?;
+        let root = scaffolding.workspace_root.clone();
 
-        let lines =
-            rollback::attempt(Wording::project("running `create lint` again"), |changes| {
-                scaffolding.write_manifests(changes)
-            })?;
+        let lines = rollback::attempt(
+            Wording::project(&root, "running `create lint` again"),
+            |changes| scaffolding.write_manifests(changes),
+        )?;
 
         assert_eq!(lines, ["updated Cargo.toml", "updated ritual/Cargo.toml"]);
         let workspace = std::fs::read_to_string(&project.paths.workspace)?;
@@ -321,11 +325,12 @@ mod tests {
     fn one_manifest_is_written_and_reported_once_with_both_edits() -> TestOutcome {
         let project = ScratchProject::single_manifest("one-manifest")?;
         let mut scaffolding = project.scaffolding("lint", Audience::Private)?;
+        let root = scaffolding.workspace_root.clone();
 
-        let lines =
-            rollback::attempt(Wording::project("running `create lint` again"), |changes| {
-                scaffolding.write_manifests(changes)
-            })?;
+        let lines = rollback::attempt(
+            Wording::project(&root, "running `create lint` again"),
+            |changes| scaffolding.write_manifests(changes),
+        )?;
 
         assert_eq!(lines, ["updated Cargo.toml"]);
         let root = std::fs::read_to_string(&project.paths.workspace)?;
@@ -517,11 +522,13 @@ mod tests {
             std::fs::Permissions::from_mode(0o755),
         )?;
 
-        assert!(
-            reported
-                .to_string()
-                .contains(&scaffolding.place.directory().display().to_string()),
-            "expected the message to name the directory that could not be removed: {reported}"
+        // Named from the project root, as the `created` lines are, and alone:
+        // `.rituals/` stays only because it holds it. Nothing was put back,
+        // so the report does not say the project was.
+        assert_eq!(
+            reported.to_string(),
+            "simulated failure; ritual could not put back .rituals/lint — check it before \
+             running `create lint` again"
         );
         assert!(
             scaffolding.place.directory().exists(),
