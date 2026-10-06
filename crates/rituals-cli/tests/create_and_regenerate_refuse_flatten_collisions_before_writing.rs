@@ -1,4 +1,4 @@
-//! `add` and `regenerate` both refuse, before writing anything, when the
+//! `create` and `regenerate` both refuse, before writing anything, when the
 //! name in play would give the composed CLI two top-level commands with the
 //! same name once a bin-name-mounted bundle is flattened. Each refusal names
 //! both the name and the bundle it collides with.
@@ -6,10 +6,10 @@
 //! One chained story over one project scaffolded with `--cli chores`, whose
 //! bin name, `chores`, is free for a hand-written bundle to be mounted
 //! under; ritual's own bundle sits at its ordinary key, `ritual`, and is
-//! reached as `chores ritual add`/`chores ritual regenerate`. The bundle at
+//! reached as `chores ritual create`/`chores ritual regenerate`. The bundle at
 //! `chores` has one child, `wake`, and is set up once and reused for both
-//! refusals: `add wake` first (refused, so nothing to clean up), then a
-//! plain `wake` import added by hand, the way a caller bypassing `add`
+//! refusals: `create wake` first (refused, so nothing to clean up), then a
+//! plain `wake` import added by hand, the way a caller bypassing `create`
 //! could, for `regenerate`.
 
 mod support;
@@ -49,18 +49,19 @@ fn assert_names_wake_and_the_bundle_key(message: &str) {
     );
 }
 
-/// `add wake` collides with the bundle's flattened `wake` child, and is
+/// `create wake` collides with the bundle's flattened `wake` child, and is
 /// refused before anything is written.
-fn assert_add_refuses_the_flatten_collision(project: &Project) -> TestOutcome {
+fn assert_create_refuses_the_flatten_collision(project: &Project) -> TestOutcome {
     let before = snapshot_tree(project.root())?;
 
-    let add_result = project.run_cli(&["ritual", "add", "wake"])?;
-    add_result.expect_failure("`ritual add wake`, colliding with `housework`'s flattened child");
-    assert_names_wake_and_the_bundle_key(add_result.sole_line_prefixed_with(BIN_NAME));
+    let create_result = project.run_cli(&["ritual", "create", "wake"])?;
+    create_result
+        .expect_failure("`ritual create wake`, colliding with `housework`'s flattened child");
+    assert_names_wake_and_the_bundle_key(create_result.sole_line_prefixed_with(BIN_NAME));
 
     let after = snapshot_tree(project.root())?;
     support::assert_trees_identical(
-        "a refused `add wake` must leave every file and directory as it was — no .rituals/wake, \
+        "a refused `create wake` must leave every file and directory as it was — no .rituals/wake, \
          not even empty, and no manifest edit",
         &before,
         &after,
@@ -95,14 +96,14 @@ fn assert_regenerate_refuses_the_hand_added_collision(project: &Project) -> Test
 }
 
 #[test]
-fn add_and_regenerate_both_refuse_a_flatten_collision_before_writing() -> TestOutcome {
+fn create_and_regenerate_both_refuse_a_flatten_collision_before_writing() -> TestOutcome {
     in_checkout(|checkout| {
         let working_dir = TempDir::new("pre-write-flatten-collision")?;
         let project =
             Project::scaffold(checkout, working_dir.path(), "demo", &["--cli", BIN_NAME])?;
 
         mount_a_bundle_with_a_wake_child_at_the_bin_name(&project)?;
-        assert_add_refuses_the_flatten_collision(&project)?;
+        assert_create_refuses_the_flatten_collision(&project)?;
         assert_regenerate_refuses_the_hand_added_collision(&project)?;
 
         Ok(())

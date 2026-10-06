@@ -1,4 +1,4 @@
-//! `add` and `regenerate` are ordinary imported tasks, not framework
+//! `create` and `regenerate` are ordinary imported tasks, not framework
 //! built-ins. A scaffolded project imports ritual's management bundle —
 //! `rituals-core`, whose children are `add`, `regenerate`, `new`, `create`,
 //! `import`, `remove` and `migrate` — the way it imports any task: a Cargo dependency,
@@ -76,13 +76,13 @@ fn assert_help_lists_the_bundles_children_in_order(project: &Project) -> TestOut
     Ok(())
 }
 
-/// Phase 3 — a task added later is scaffolded depending on `rituals` alone,
+/// Phase 3 — a task created later is scaffolded depending on `rituals` alone,
 /// inherited from the workspace, and is listed after the bundle's children: `new` wrote the bundle into
-/// `tasks` first, `add` appends after it, and flattening keeps that order.
+/// `tasks` first, `create` appends after it, and flattening keeps that order.
 fn assert_a_later_task_follows_the_bundle(project: &Project) -> TestOutcome {
     project
-        .alias(&["add", "greet"])?
-        .expect_success("`cargo ritual add greet`");
+        .alias(&["create", "greet"])?
+        .expect_success("`cargo ritual create greet`");
 
     let task_manifest = manifest::read(&project.root().join(".rituals/greet/Cargo.toml"))?;
     assert_eq!(
@@ -100,7 +100,7 @@ fn assert_a_later_task_follows_the_bundle(project: &Project) -> TestOutcome {
     );
 
     let help = project.alias(&["--help"])?;
-    help.expect_success("`cargo ritual --help` after `add greet`");
+    help.expect_success("`cargo ritual --help` after `create greet`");
     assert_eq!(
         help::command_names(&help.stdout),
         [
@@ -132,8 +132,8 @@ fn assert_a_later_task_follows_the_bundle(project: &Project) -> TestOutcome {
 fn verify_naming_a_task_add_is_refused(project: &Project) -> TestOutcome {
     let before = snapshot_tree(project.root())?;
 
-    let result = project.run_cli(&["add", "add"])?;
-    result.expect_failure("`add add`, colliding with the mounted `add`");
+    let result = project.run_cli(&["create", "add"])?;
+    result.expect_failure("`create add`, colliding with the mounted `add`");
     assert!(
         result.sole_line_prefixed_with("ritual").contains("`add`"),
         "expected the refusal to name `add`; stderr was:\n{}",
@@ -142,7 +142,7 @@ fn verify_naming_a_task_add_is_refused(project: &Project) -> TestOutcome {
 
     let after = snapshot_tree(project.root())?;
     assert_trees_identical(
-        "a refused `add add` must write nothing before refusing",
+        "a refused `create add` must write nothing before refusing",
         &before,
         &after,
     );
@@ -224,9 +224,9 @@ fn remove_the_bundle_dependency_and_verify_the_command_line(project: &Project) -
 }
 
 #[test]
-fn add_and_regenerate_behave_as_ordinary_imported_tasks() -> TestOutcome {
+fn create_and_regenerate_behave_as_ordinary_imported_tasks() -> TestOutcome {
     in_checkout(|checkout| {
-        let working_dir = TempDir::new("add-regenerate-ordinary-tasks")?;
+        let working_dir = TempDir::new("create-regenerate-ordinary-tasks")?;
         let project = Project::scaffold(checkout, working_dir.path(), "ordinary-tasks", &[])?;
 
         assert_the_bundle_comes_from_the_checkouts_crates_directory(&project, checkout)?;

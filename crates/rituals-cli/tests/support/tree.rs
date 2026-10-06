@@ -84,8 +84,8 @@ pub(crate) type Snapshot = BTreeMap<PathBuf, Entry>;
 /// bytes.
 ///
 /// Directories are recorded, empty ones included, because a directory is
-/// something ritual can leave behind: `add` treats an existing
-/// `tasks/<name>` as a leftover from an earlier run, so a refused run that
+/// something ritual can leave behind: `create` treats an existing
+/// `.rituals/<name>` as a leftover from an earlier run, so a refused run that
 /// created one has changed what the next run does, whether or not it wrote
 /// a file into it.
 ///

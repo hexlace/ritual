@@ -11,9 +11,9 @@
 //!
 //! One story over a project scaffolded with `--cli housework`, whose bin
 //! name is free for a hand-written crate to be mounted under; ritual's own
-//! bundle sits at its ordinary key, `ritual`, throughout. `add` refuses to
+//! bundle sits at its ordinary key, `ritual`, throughout. `create` refuses to
 //! scaffold a task under the bin's own name (see
-//! `add_refuses_a_task_named_after_the_bin.rs`), so the plain task is
+//! `create_refuses_a_task_named_after_the_bin.rs`), so the plain task is
 //! written and mounted by hand.
 
 mod support;

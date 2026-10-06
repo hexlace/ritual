@@ -17,57 +17,9 @@ use std::path::{Path, PathBuf};
 
 use rituals::{CommandLine, Failure, Name, Outcome, report};
 use rituals_compose::generated_file::{self, Regenerated};
-use rituals_compose::manifest::Manifest;
+use rituals_compose::manifest::Manifests;
 use rituals_compose::metadata;
 use rituals_compose::rollback::{self, Changes, Wording};
-
-/// The manifests `remove` edits: the composed CLI's, and the workspace's.
-///
-/// They are one file when the composed CLI is the workspace root. Two
-/// documents read from one file would each be written back whole, and the
-/// second write would discard the first's edits, so then there is one
-/// document and the workspace's edits go to it.
-pub(crate) struct Manifests {
-    cli: Manifest,
-    workspace: Option<Manifest>,
-}
-
-impl Manifests {
-    /// Reads the composed CLI's manifest, and the workspace's too when it is
-    /// a different file.
-    pub(crate) fn read(cli_path: &Path, workspace_path: &Path) -> Result<Self, Failure> {
-        let cli = Manifest::read(cli_path)?;
-        let workspace = if cli_path == workspace_path {
-            None
-        } else {
-            Some(Manifest::read(workspace_path)?)
-        };
-        Ok(Self { cli, workspace })
-    }
-
-    /// The manifest that holds `[workspace]`.
-    pub(crate) const fn workspace(&self) -> &Manifest {
-        match &self.workspace {
-            Some(workspace) => workspace,
-            None => &self.cli,
-        }
-    }
-
-    /// The manifest that holds `[workspace]`, to edit.
-    fn workspace_mut(&mut self) -> &mut Manifest {
-        self.workspace.as_mut().unwrap_or(&mut self.cli)
-    }
-
-    /// The composed CLI's manifest.
-    pub(crate) const fn cli(&self) -> &Manifest {
-        &self.cli
-    }
-
-    /// The composed CLI's manifest, to edit.
-    pub(crate) const fn cli_mut(&mut self) -> &mut Manifest {
-        &mut self.cli
-    }
-}
 
 /// A workspace member whose directory `remove` deletes.
 pub(crate) struct Member {
@@ -174,7 +126,7 @@ impl Removal {
         }
 
         self.manifests.cli().write(changes)?;
-        match (&self.manifests.workspace, edited) {
+        match (self.manifests.separate_workspace(), edited) {
             (Some(workspace), true) => {
                 workspace.write(changes)?;
                 Ok(true)
@@ -333,11 +285,11 @@ mod tests {
     use std::path::PathBuf;
 
     use rituals::{Failure, Outcome};
+    use rituals_compose::manifest::{ManifestPaths, Manifests};
     use rituals_compose::rollback::{self, Changes, Wording};
 
     use super::{
-        Manifests, Member, Removal, deletion_failure, ensure_it_is_gone, relative_to, report_lines,
-        retry,
+        Member, Removal, deletion_failure, ensure_it_is_gone, relative_to, report_lines, retry,
     };
     use crate::test_support::{ScratchDir, TestOutcome};
 
@@ -407,7 +359,10 @@ mod tests {
         fn removal(&self) -> Result<Removal, Box<dyn Error>> {
             Ok(Removal {
                 key: "lint".to_string(),
-                manifests: Manifests::read(&self.cli_manifest_path, &self.workspace_manifest_path)?,
+                manifests: Manifests::read(&ManifestPaths {
+                    cli: self.cli_manifest_path.clone(),
+                    workspace: self.workspace_manifest_path.clone(),
+                })?,
                 workspace_root: self.workspace_root.clone(),
                 dependency_key: Some("lint".to_string()),
                 drops_inherited_entry: true,

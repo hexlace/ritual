@@ -1,8 +1,8 @@
 //! A scratch directory helper for this crate's own tests.
 //!
 //! `rituals-compose` already has one, but a different crate is a genuine
-//! boundary that module cannot cross — `.rituals/new` and `.rituals/create` each
-//! keep their own copy for the same reason, and this is this crate's.
+//! boundary that module cannot cross — `.rituals/new` keeps its own copy for
+//! the same reason, and this is this crate's.
 //
 // `redundant_pub_crate` (clippy nursery) wants `pub` here because this
 // module is private, but `pub(crate)` is the visibility that is actually
@@ -35,12 +35,14 @@ static SCRATCH_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub(crate) struct ScratchDir(PathBuf);
 
 impl ScratchDir {
-    /// Creates a fresh, empty directory named `ritual-add-<tag>-<pid>-<counter>`
+    /// Creates a fresh, empty directory named `ritual-create-<tag>-<pid>-<counter>`
     /// under the system temp root.
     pub(crate) fn new(tag: &str) -> Result<Self, Box<dyn Error>> {
         let unique = SCRATCH_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path =
-            std::env::temp_dir().join(format!("ritual-add-{tag}-{}-{unique}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "ritual-create-{tag}-{}-{unique}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&path)?;
         Ok(Self(path))
     }

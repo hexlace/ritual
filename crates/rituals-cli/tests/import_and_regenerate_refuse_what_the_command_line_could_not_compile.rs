@@ -1,7 +1,7 @@
 //! `import` and `regenerate` refuse a task the generated command line could
 //! not compile with: a task built on a different `rituals` from the one the
 //! project uses, and a key that would hide a crate the generated file names
-//! (`std` or `core`), which `add` refuses too. The `rituals` a task is built
+//! (`std` or `core`), which `create` refuses too. The `rituals` a task is built
 //! on is any in what its crate is built with, so a facade over a crate on
 //! another `rituals` is refused, naming that crate, and so is a crate with no
 //! `rituals` anywhere, which has no task to hand over. Once such a task were
@@ -13,7 +13,7 @@
 //! anything runs, and a task once `cargo add` has said what it is built on,
 //! with what `cargo add` wrote put back. `regenerate` refuses the same task
 //! written in by hand, through the same rule, and leaves the generated file
-//! as it was. `add` refuses such a key before it scaffolds anything.
+//! as it was. `create` refuses such a key before it scaffolds anything.
 
 mod support;
 
@@ -240,20 +240,21 @@ fn regenerate_refuses_a_hand_written_task_under_std_or_core() -> TestOutcome {
 }
 
 #[test]
-fn add_refuses_the_names_std_and_core() -> TestOutcome {
+fn create_refuses_the_names_std_and_core() -> TestOutcome {
     in_checkout(|checkout| {
-        let working_dir = TempDir::new("add-std-core")?;
+        let working_dir = TempDir::new("create-std-core")?;
         let project = Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
         let binary = project.build()?;
 
         for name in ["std", "core"] {
-            let message = refused_leaving_the_project_as_it_was(&project, &binary, &["add", name])?;
+            let message =
+                refused_leaving_the_project_as_it_was(&project, &binary, &["create", name])?;
 
             assert_eq!(message, hides_a_crate(name));
             let task_crate_dir = project.root().join(".rituals").join(name);
             assert!(
                 !task_crate_dir.exists(),
-                "a refused `add {name}` must not scaffold {}",
+                "a refused `create {name}` must not scaffold {}",
                 task_crate_dir.display()
             );
         }

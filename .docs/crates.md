@@ -117,10 +117,14 @@ Beyond `rituals`, its dependencies are here because of what the job is:
 
 Ordinary task crates, one per management task. Each depends on
 `rituals` like any task, and on `rituals-compose` for the work. Each is
-marked `task = true` and exposes `task()`. None depends on another. `add`,
-`import` and `remove` finish by regenerating through the same rendering
-`regenerate` uses, `remove` inside its rollback. That rendering lives in
-`rituals-compose`, so each can reach it without depending on another.
+marked `task = true` and exposes `task()`. None depends on another, with one
+exception: `add` is `create`'s in-project path under its old name, so it
+depends on `rituals-core-create` and not on `rituals-compose`, and there is one
+copy of the scaffolding. `create`, `import` and `remove` finish by regenerating
+through the same rendering `regenerate` uses, `create` and `remove` inside
+their rollbacks. That
+rendering lives in `rituals-compose`, so each can reach it without depending on
+another.
 `migrate` regenerates nothing: it moves directories and repoints manifests,
 through the rollback, git and relocation code in `rituals-compose`, and
 keeps its steps in its own crate.

@@ -7,9 +7,10 @@ mod test_support;
 
 use std::path::{Path, PathBuf};
 
-use removal::{Manifests, Member, Removal};
+use removal::{Member, Removal};
 use rituals::{CommandLine, Failure, Outcome, Task, clap};
 use rituals_compose::git::{self, CannotGiveBack, Flag, Unanswered, Unwatched};
+use rituals_compose::manifest::{ManifestPaths, Manifests};
 use rituals_compose::metadata::{self, Metadata, TaskImport};
 use rituals_compose::sentence::join_with_and;
 use rituals_compose::{cargo_config, top_level};
@@ -107,7 +108,7 @@ fn prepare(
 
     let project = document.locate_project(package)?;
     let workspace_root = project.workspace_root().to_path_buf();
-    let manifests = Manifests::read(project.manifest_path(), &workspace_root.join("Cargo.toml"))?;
+    let manifests = Manifests::read(&ManifestPaths::of(&project))?;
 
     // Dropped only when nothing else depends on the crate: another package's
     // own dependency on it would otherwise stop inheriting.

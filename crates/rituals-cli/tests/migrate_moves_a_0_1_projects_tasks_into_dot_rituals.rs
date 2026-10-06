@@ -250,11 +250,14 @@ fn a_second_migrate_before_committing_says_nothing_to_migrate_and_changes_nothin
 fn a_project_already_in_the_new_layout_has_nothing_to_migrate() -> TestOutcome {
     in_checkout(|checkout| {
         let working_dir = TempDir::new("migrate-new-layout")?;
-        let project =
-            support::removal::project_with_a_committed_added_task(checkout, &working_dir, "greet")?;
+        let project = support::removal::project_with_a_committed_created_task(
+            checkout,
+            &working_dir,
+            "greet",
+        )?;
         assert!(
             exists(&project.root().join(".rituals/greet/Cargo.toml")),
-            "fixture precondition: `add greet` should have scaffolded .rituals/greet"
+            "fixture precondition: `create greet` should have scaffolded .rituals/greet"
         );
         let before = snapshot_tree(project.root())?;
 

@@ -37,17 +37,17 @@
 //!
 //! # Examples
 //!
-//! Rendering the two files a new task crate starts as, the way `add` and
-//! `create` do before writing them:
+//! Rendering the two files a new task crate starts as, the way `create` does
+//! before writing them:
 //!
 //! ```
 //! use rituals::Name;
 //! use rituals_compose::source::Source;
-//! use rituals_compose::task_crate;
+//! use rituals_compose::task_crate::{self, Audience};
 //!
 //! let name = Name::new("lint")?;
 //! let source = Source::Git("https://example.com/ritual".to_string());
-//! let manifest = task_crate::manifest(&name, &source);
+//! let manifest = task_crate::manifest(&name, &source, Audience::Public);
 //! let lib = task_crate::lib(&name);
 //!
 //! assert!(manifest.contains("name = \"lint\""));

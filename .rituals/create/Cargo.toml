@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories = ["command-line-interface", "development-tools"]
-description = "Ritual — scaffold a task crate on its own, for a project to import later."
+description = "Ritual — scaffold a task crate: into this project, or on its own outside any project."
 readme = "readme.md"
 
 [dependencies]

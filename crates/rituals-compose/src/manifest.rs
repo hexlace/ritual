@@ -12,6 +12,7 @@ use crate::rollback::Changes;
 
 mod dependency_places;
 mod entry_removal;
+mod manifests;
 mod member_globs;
 mod package_name;
 mod path_change;
@@ -20,6 +21,7 @@ mod removal;
 mod repointing;
 
 pub use dependency_places::ManifestRole;
+pub use manifests::{ManifestPaths, Manifests};
 pub use path_change::PathChange;
 
 /// A manifest a task is about to edit.
@@ -1173,9 +1175,13 @@ mod tests {
         let scratch = ScratchDir::new("declares-a-task-crate-true")?;
         let path = scratch.path().join("Cargo.toml");
         let name = Name::new("lint")?;
-        // Rendered by the same function `add`/`create` write, so this test
+        // Rendered by the same function `create` writes, so this test
         // cannot drift from what a real scaffolded manifest looks like.
-        let manifest_text = crate::task_crate::manifest(&name, &crate::source::Source::Inherited);
+        let manifest_text = crate::task_crate::manifest(
+            &name,
+            &crate::source::Source::Inherited,
+            crate::task_crate::Audience::Private,
+        );
         std::fs::write(&path, manifest_text)?;
 
         assert!(declares_a_task_crate(&path));

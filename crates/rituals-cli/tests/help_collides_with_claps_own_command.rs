@@ -4,7 +4,7 @@
 //! not with anything ritual keeps for itself — the same rule every other
 //! collision follows: a collision is only ever with what is actually there.
 //!
-//! Three checkpoints: `add help` is refused before anything is written;
+//! Three checkpoints: `create help` is refused before anything is written;
 //! `regenerate` refuses a `help` import added to the manifests by hand; and
 //! a `help` task written into the generated file by hand, past both of
 //! them, makes the built CLI refuse to start.
@@ -40,19 +40,19 @@ fn assert_refuses_help(result: &support::RunOutput, bin_name: &str, what: &str) 
 }
 
 #[test]
-fn add_help_is_refused_before_writing_anything() -> TestOutcome {
+fn create_help_is_refused_before_writing_anything() -> TestOutcome {
     in_checkout(|checkout| {
-        let working_dir = TempDir::new("add-help-pre-write")?;
-        let project = scaffold(checkout, &working_dir, "help-collision-add")?;
+        let working_dir = TempDir::new("create-help-pre-write")?;
+        let project = scaffold(checkout, &working_dir, "help-collision-create")?;
 
         let before = snapshot_tree(project.root())?;
         assert_refuses_help(
-            &project.run_cli(&["ritual", "add", "help"])?,
-            "help-collision-add",
-            "`ritual add help`",
+            &project.run_cli(&["ritual", "create", "help"])?,
+            "help-collision-create",
+            "`ritual create help`",
         );
         assert_trees_identical(
-            "a refused `add help` must write nothing",
+            "a refused `create help` must write nothing",
             &before,
             &snapshot_tree(project.root())?,
         );
@@ -60,7 +60,7 @@ fn add_help_is_refused_before_writing_anything() -> TestOutcome {
     })
 }
 
-/// Mounts a `help` leaf on both manifests by hand — `add` would refuse — and
+/// Mounts a `help` leaf on both manifests by hand — `create` would refuse — and
 /// shows `regenerate` refusing it before rewriting the generated file; then
 /// writes it into the generated file by hand as well and shows the built
 /// CLI refusing to start.

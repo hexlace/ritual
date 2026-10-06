@@ -2,8 +2,8 @@
 //! own key is the bin name too. That is a legitimate shape: flattening
 //! promotes the child to the top level once, and does not flatten it again
 //! because its key matches the bundle's. The built CLI lists the child and
-//! dispatches to it, and `regenerate` and `add` agree with that startup
-//! rule: `regenerate` accepts the project unchanged, and `add` of an
+//! dispatches to it, and `regenerate` and `create` agree with that startup
+//! rule: `regenerate` accepts the project unchanged, and `create` of an
 //! unrelated task lands the crate, both manifest edits and the generated
 //! file's new line.
 
@@ -81,13 +81,13 @@ fn assert_regenerate_accepts_the_project_unchanged(project: &Project) -> TestOut
     Ok(())
 }
 
-/// `add extra` changes exactly the new crate's directories and two files in the
+/// `create extra` changes exactly the new crate's directories and two files in the
 /// existing `.rituals/`, both manifests and the generated file — which mounts `extra` afterwards.
-fn assert_add_lands_every_part_of_a_new_task(project: &Project) -> TestOutcome {
+fn assert_create_lands_every_part_of_a_new_task(project: &Project) -> TestOutcome {
     let before = snapshot_tree(project.root())?;
     project
-        .run_cli(&["ritual", "add", "extra"])?
-        .expect_success("`ritual add extra` on this project");
+        .run_cli(&["ritual", "create", "extra"])?
+        .expect_success("`ritual create extra` on this project");
     let after = snapshot_tree(project.root())?;
 
     let composed_cli = project
@@ -120,7 +120,7 @@ fn assert_add_lands_every_part_of_a_new_task(project: &Project) -> TestOutcome {
 }
 
 #[test]
-fn a_bundle_child_named_after_the_bin_is_promoted_and_regenerate_and_add_agree() -> TestOutcome {
+fn a_bundle_child_named_after_the_bin_is_promoted_and_regenerate_and_create_agree() -> TestOutcome {
     in_checkout(|checkout| {
         let working_dir = TempDir::new("bin-named-child")?;
         let project =
@@ -129,7 +129,7 @@ fn a_bundle_child_named_after_the_bin_is_promoted_and_regenerate_and_add_agree()
         mount_a_bundle_whose_child_shares_the_bin_name(&project)?;
         assert_the_child_is_promoted_and_runs(&project)?;
         assert_regenerate_accepts_the_project_unchanged(&project)?;
-        assert_add_lands_every_part_of_a_new_task(&project)?;
+        assert_create_lands_every_part_of_a_new_task(&project)?;
 
         Ok(())
     })

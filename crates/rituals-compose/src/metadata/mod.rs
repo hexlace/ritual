@@ -180,9 +180,55 @@ pub fn fetch_recording(changes: &mut Changes, directory: &Path) -> Result<Metada
 /// # Ok::<(), rituals::Failure>(())
 /// ```
 pub fn ensure_inside_a_project(current_dir: &Path, command: &str, arguments: &str) -> Outcome {
+    match surroundings(current_dir)? {
+        Surroundings::OutsideAnyProject => Err(outside_its_project_refusal(command, arguments)),
+        Surroundings::InsideAProject => Ok(()),
+    }
+}
+
+/// Whether Cargo finds a project around a directory.
+///
+/// What [`surroundings`] answers, for a task whose behaviour depends on where
+/// it runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Surroundings {
+    /// Cargo finds a manifest at or above the directory.
+    InsideAProject,
+    /// Cargo finds no manifest at or above the directory.
+    OutsideAnyProject,
+}
+
+/// Asks whether Cargo finds a manifest at or above `current_dir`.
+///
+/// Asked with `cargo locate-project`, which writes nothing, so a task asks
+/// it before its run begins, when no command has run and nothing has been
+/// recorded. [`ensure_inside_a_project`] is this question for a task that
+/// only works inside a project; a task that does something else outside one
+/// asks it directly.
+///
+/// # Errors
+///
+/// Returns a [`Failure`] saying so when `cargo` cannot be run at all.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+///
+/// use rituals_compose::metadata::{self, Surroundings};
+///
+/// // Runs `cargo locate-project` against the directory on disk, so this
+/// // example is `no_run`.
+/// match metadata::surroundings(Path::new("."))? {
+///     Surroundings::InsideAProject => println!("scaffold into the project"),
+///     Surroundings::OutsideAnyProject => println!("scaffold on its own"),
+/// }
+/// # Ok::<(), rituals::Failure>(())
+/// ```
+pub fn surroundings(current_dir: &Path) -> Result<Surroundings, Failure> {
     match locate_project(current_dir, false)? {
-        Located::NotFound(_no_manifest) => Err(outside_its_project_refusal(command, arguments)),
-        Located::Found(_manifest) => Ok(()),
+        Located::NotFound(_no_manifest) => Ok(Surroundings::OutsideAnyProject),
+        Located::Found(_manifest) => Ok(Surroundings::InsideAProject),
     }
 }
 
@@ -694,8 +740,8 @@ mod tests {
     use rituals::{Failure, Name};
 
     use super::{
-        Metadata, WorkspaceMember, ensure_inside_a_project, fetch_in_its_own_project,
-        outside_its_project_refusal, parse,
+        Metadata, Surroundings, WorkspaceMember, ensure_inside_a_project, fetch_in_its_own_project,
+        outside_its_project_refusal, parse, surroundings,
     };
     use crate::rollback::{Wording, attempt};
     use crate::test_support::{ScratchDir, TestOutcome};
@@ -783,6 +829,25 @@ mod tests {
             !scratch.path().join("Cargo.lock").exists(),
             "asking whether there is a project writes no lockfile"
         );
+        Ok(())
+    }
+
+    /// `cargo locate-project` is the authority on whether a manifest is
+    /// found at or above a directory: a package the test writes is inside, a
+    /// directory it leaves empty is outside, and a directory below the
+    /// package is inside too.
+    #[test]
+    fn surroundings_reports_a_scratch_package_as_inside_and_an_empty_directory_as_outside()
+    -> TestOutcome {
+        let package = scratch_package("surroundings-inside")?;
+        let empty = ScratchDir::new("surroundings-outside")?;
+
+        assert_eq!(surroundings(package.path())?, Surroundings::InsideAProject);
+        assert_eq!(
+            surroundings(&package.path().join("src"))?,
+            Surroundings::InsideAProject
+        );
+        assert_eq!(surroundings(empty.path())?, Surroundings::OutsideAnyProject);
         Ok(())
     }
 

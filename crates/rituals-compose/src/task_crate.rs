@@ -1,8 +1,9 @@
 //! The two files a freshly scaffolded task crate is made of.
 //!
 //! `new` never renders a task crate and `create` never renders a generated
-//! file, so this module holds only what `create` and `add` both reach for:
-//! the manifest and the `src/lib.rs` a task crate starts with.
+//! file, so this module holds only what `create` reaches for, inside a
+//! project and outside one: the manifest and the `src/lib.rs` a task crate
+//! starts with.
 
 use std::fmt::Write as _;
 
@@ -10,33 +11,68 @@ use rituals::Name;
 
 use crate::source::{Source, escape_toml_string};
 
+/// Who a scaffolded task crate is for.
+///
+/// There is no default: every scaffolder states its audience, so a crate
+/// is never made publishable, or kept off the registry, by omission.
+///
+/// # Examples
+///
+/// A private ritual cannot be published, and a public one can:
+///
+/// ```
+/// use rituals::Name;
+/// use rituals_compose::source::Source;
+/// use rituals_compose::task_crate::{self, Audience};
+///
+/// let name = Name::new("greet")?;
+/// let private = task_crate::manifest(&name, &Source::Inherited, Audience::Private);
+/// let public = task_crate::manifest(&name, &Source::Inherited, Audience::Public);
+///
+/// assert!(private.contains("publish = false"));
+/// assert!(!public.contains("publish"));
+/// # Ok::<(), rituals::InvalidName>(())
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Audience {
+    /// The project's own: the manifest says `publish = false`.
+    Private,
+    /// Meant to be published: the manifest has no `publish` key.
+    Public,
+}
+
 /// Renders a task crate's `Cargo.toml`.
 ///
 /// The table order is fixed: `[package]`, `[dependencies]`,
 /// `[package.metadata.ritual]`, with `task = true` the only key under the
 /// last — the shape a fresh project's manifest keeps to, so a diff of one is
-/// always boring.
+/// always boring. A [`Audience::Private`] crate ends its `[package]` with
+/// `publish = false`; a [`Audience::Public`] one has no `publish` key.
 ///
 /// # Examples
 ///
 /// ```
 /// use rituals::Name;
 /// use rituals_compose::source::Source;
-/// use rituals_compose::task_crate;
+/// use rituals_compose::task_crate::{self, Audience};
 ///
 /// let name = Name::new("greet")?;
-/// let manifest = task_crate::manifest(&name, &Source::Inherited);
+/// let manifest = task_crate::manifest(&name, &Source::Inherited, Audience::Private);
 /// assert!(manifest.contains("rituals.workspace = true"));
 /// # Ok::<(), rituals::InvalidName>(())
 /// ```
 #[must_use]
-pub fn manifest(name: &Name, source: &Source) -> String {
+pub fn manifest(name: &Name, source: &Source, audience: Audience) -> String {
     let mut output = String::new();
 
     output.push_str("[package]\n");
     let _ = writeln!(output, "name = \"{name}\"");
     output.push_str("version = \"0.1.0\"\n");
     output.push_str("edition = \"2024\"\n");
+    match audience {
+        Audience::Private => output.push_str("publish = false\n"),
+        Audience::Public => {}
+    }
     output.push('\n');
     output.push_str("[dependencies]\n");
     output.push_str(&render_rituals_dependency(source));
@@ -114,13 +150,13 @@ mod tests {
 
     use rituals::Name;
 
-    use super::{lib, manifest, render_rituals_dependency};
+    use super::{Audience, lib, manifest, render_rituals_dependency};
     use crate::source::Source;
 
     #[test]
     fn no_renderer_output_ever_contains_an_asterisk() {
         let name = Name::new("greet").expect("greet is a valid name");
-        let manifest = manifest(&name, &Source::Inherited);
+        let manifest = manifest(&name, &Source::Inherited, Audience::Private);
         assert!(!manifest.contains('*'));
 
         let lib = lib(&name);
@@ -128,9 +164,29 @@ mod tests {
     }
 
     #[test]
-    fn manifest_for_an_inherited_source() {
+    fn manifest_for_an_inherited_source_is_exact_for_a_private_ritual() {
         let name = Name::new("greet").expect("greet is a valid name");
-        let rendered = manifest(&name, &Source::Inherited);
+        let rendered = manifest(&name, &Source::Inherited, Audience::Private);
+        assert_eq!(
+            rendered,
+            "[package]\n\
+             name = \"greet\"\n\
+             version = \"0.1.0\"\n\
+             edition = \"2024\"\n\
+             publish = false\n\
+             \n\
+             [dependencies]\n\
+             rituals.workspace = true\n\
+             \n\
+             [package.metadata.ritual]\n\
+             task = true\n"
+        );
+    }
+
+    #[test]
+    fn manifest_for_an_inherited_source_is_exact_for_a_public_ritual() {
+        let name = Name::new("greet").expect("greet is a valid name");
+        let rendered = manifest(&name, &Source::Inherited, Audience::Public);
         assert_eq!(
             rendered,
             "[package]\n\
@@ -150,7 +206,7 @@ mod tests {
     fn manifest_for_a_path_source_containing_a_quote_and_a_backslash() {
         let name = Name::new("greet").expect("greet is a valid name");
         let path = PathBuf::from("/weird\"path\\with\\backslashes");
-        let rendered = manifest(&name, &Source::Path(path));
+        let rendered = manifest(&name, &Source::Path(path), Audience::Public);
         assert!(
             rendered.contains("rituals = { path = \"/weird\\\"path\\\\with\\\\backslashes\" }\n")
         );
@@ -159,7 +215,11 @@ mod tests {
     #[test]
     fn manifest_for_a_git_source() {
         let name = Name::new("greet").expect("greet is a valid name");
-        let rendered = manifest(&name, &Source::Git("https://example.invalid/x".to_string()));
+        let rendered = manifest(
+            &name,
+            &Source::Git("https://example.invalid/x".to_string()),
+            Audience::Public,
+        );
         assert!(rendered.contains("rituals = { git = \"https://example.invalid/x\" }\n"));
     }
 

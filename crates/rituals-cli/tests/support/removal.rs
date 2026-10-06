@@ -16,7 +16,7 @@ use super::{
 /// stories built on it are about `remove`, which finds a task's directory
 /// from its dependency's `path` and so handles any layout; they keep the
 /// layout they spell out in their paths by taking it from
-/// [`legacy`](super::legacy), not from whatever directory `add` scaffolds
+/// [`legacy`](super::legacy), not from whatever directory `create` scaffolds
 /// into today.
 pub(crate) fn project_with_a_committed_task(
     checkout: &Checkout,
@@ -35,17 +35,17 @@ pub(crate) fn project_with_an_uncommitted_task(
     legacy::project_with_tasks(checkout, working_dir, &[task])
 }
 
-/// A project with one task `add` scaffolded under `.rituals/<task>`, as this
-/// version's `add` does, committed whole to a git repository of its own.
-pub(crate) fn project_with_a_committed_added_task(
+/// A project with one task `create` scaffolded under `.rituals/<task>`, as
+/// this version's `create` does, committed whole to a git repository of its own.
+pub(crate) fn project_with_a_committed_created_task(
     checkout: &Checkout,
     working_dir: &TempDir,
     task: &str,
 ) -> Outcome<Project> {
     let project = Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
     project
-        .alias(&["add", task])?
-        .expect_success(&format!("`cargo ritual add {task}`"));
+        .alias(&["create", task])?
+        .expect_success(&format!("`cargo ritual create {task}`"));
     git::init_and_commit_everything(project.root())?;
     Ok(project)
 }

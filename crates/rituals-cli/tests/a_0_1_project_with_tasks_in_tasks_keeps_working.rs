@@ -115,15 +115,16 @@ fn remove_takes_a_task_out_of_tasks_and_leaves_a_project_that_builds() -> TestOu
 }
 
 #[test]
-fn a_task_added_to_a_project_with_tasks_in_tasks_lives_in_dot_rituals_beside_them() -> TestOutcome {
+fn a_task_created_in_a_project_with_tasks_in_tasks_lives_in_dot_rituals_beside_them() -> TestOutcome
+{
     in_checkout(|checkout| {
-        let working_dir = TempDir::new("0-1-then-add")?;
+        let working_dir = TempDir::new("0-1-then-create")?;
         let project = committed_project_with_tasks(checkout, &working_dir, &["greet"])?;
         let greet_before = snapshot_tree(&project.root().join("tasks/greet"))?;
 
         project
-            .run_cli(&["add", "shout"])?
-            .expect_success("`add shout` on a project whose task is in tasks/");
+            .run_cli(&["create", "shout"])?
+            .expect_success("`create shout` on a project whose task is in tasks/");
 
         assert!(
             exists(&project.root().join(".rituals/shout/Cargo.toml")),
@@ -134,7 +135,7 @@ fn a_task_added_to_a_project_with_tasks_in_tasks_lives_in_dot_rituals_beside_the
             "expected the new task not to be scaffolded into tasks/"
         );
         assert_trees_identical(
-            "the task already in tasks/, after `add` of another",
+            "the task already in tasks/, after `create` of another",
             &greet_before,
             &snapshot_tree(&project.root().join("tasks/greet"))?,
         );

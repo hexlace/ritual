@@ -11,8 +11,8 @@ description = "Ritual — scaffold a task crate in this project, import it, and 
 readme = "readme.md"
 
 [dependencies]
+create.workspace = true
 rituals.workspace = true
-rituals-compose.workspace = true
 
 [package.metadata.ritual]
 task = true

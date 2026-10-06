@@ -14,22 +14,22 @@ use rituals::clap;
 /// ```
 /// use rituals::Name;
 /// use rituals_compose::source::Source;
-/// use rituals_compose::task_crate;
+/// use rituals_compose::task_crate::{self, Audience};
 ///
 /// let name = Name::new("greet")?;
 ///
-/// let registry = task_crate::manifest(&name, &Source::Registry);
+/// let registry = task_crate::manifest(&name, &Source::Registry, Audience::Public);
 /// assert!(registry.contains(&format!("rituals = \"{}\"", rituals::VERSION)));
 ///
 /// let git = Source::Git("https://example.com/ritual".to_string());
-/// let manifest = task_crate::manifest(&name, &git);
+/// let manifest = task_crate::manifest(&name, &git, Audience::Public);
 /// assert!(manifest.contains("git = \"https://example.com/ritual\""));
 /// # Ok::<(), rituals::InvalidName>(())
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
-    /// `rituals.workspace = true` — what `add` writes, for a crate
-    /// scaffolded inside a workspace that already declares the dependency.
+    /// `rituals.workspace = true` — what `create` writes inside a
+    /// project, for a crate scaffolded in a workspace that already declares the dependency.
     Inherited,
     /// `rituals = "X.Y.Z"` from crates.io, where `X.Y.Z` is always
     /// [`rituals::VERSION`] — the release the scaffolding binary itself was
