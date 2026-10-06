@@ -224,8 +224,9 @@ fn a_snapshot_records_an_empty_directory() -> TestOutcome {
 
 /// A link pointed at a second file with the same bytes as the first reads
 /// the same through the link, so only a snapshot that records the link
-/// itself sees that it was retargeted. A link is never followed, so one that
-/// leads nowhere is recorded too.
+/// itself sees that it was retargeted. A link is never followed: one that
+/// leads to a directory is recorded as a link and not walked into, and one
+/// that leads nowhere is recorded too.
 #[test]
 fn a_snapshot_records_a_link_and_sees_it_retargeted() -> TestOutcome {
     let root = TempDir::new("snapshot-retargeted-link")?;
@@ -233,6 +234,9 @@ fn a_snapshot_records_a_link_and_sees_it_retargeted() -> TestOutcome {
     write_text(&root.path().join("second"), "same\n")?;
     std::os::unix::fs::symlink("first", root.path().join("link"))?;
     std::os::unix::fs::symlink("missing", root.path().join("dangling"))?;
+    std::fs::create_dir(root.path().join("directory"))?;
+    write_text(&root.path().join("directory/inside"), "inside\n")?;
+    std::os::unix::fs::symlink("directory", root.path().join("to-a-directory"))?;
     let before = snapshot_tree(root.path())?;
 
     std::fs::remove_file(root.path().join("link"))?;
@@ -246,6 +250,15 @@ fn a_snapshot_records_a_link_and_sees_it_retargeted() -> TestOutcome {
     assert_eq!(
         after.get(std::path::Path::new("dangling")),
         Some(&Entry::Link("missing".into()))
+    );
+    assert_eq!(
+        after.get(std::path::Path::new("to-a-directory")),
+        Some(&Entry::Link("directory".into()))
+    );
+    assert_eq!(
+        after.get(std::path::Path::new("to-a-directory/inside")),
+        None,
+        "a link to a directory must not be walked into"
     );
     Ok(())
 }
