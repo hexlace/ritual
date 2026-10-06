@@ -1,6 +1,7 @@
 //! Walking a directory tree, and comparing what is in it before and after.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -73,12 +74,15 @@ pub(crate) fn files_under(root: &Path) -> Outcome<Vec<PathBuf>> {
 }
 
 /// One entry in a [`Snapshot`]: a directory, a regular file with its exact
-/// bytes, or a symbolic link with the target it holds, as written.
+/// bytes, or a symbolic link with the target it holds, as written: the
+/// bytes, not a `PathBuf`, because paths compare by their components, which
+/// read `first/` and `./first` as `first`, while a link to `first/` no
+/// longer resolves when `first` is a file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Entry {
     Directory,
     File(Vec<u8>),
-    Link(PathBuf),
+    Link(OsString),
 }
 
 /// A tree's directories, regular files and symbolic links, keyed by their
@@ -114,7 +118,8 @@ pub(crate) fn snapshot_tree(root: &Path) -> Outcome<Snapshot> {
                 ),
                 Kind::Link => Entry::Link(
                     fs::read_link(&path)
-                        .context(&format!("reading the link {} failed", path.display()))?,
+                        .context(&format!("reading the link {} failed", path.display()))?
+                        .into_os_string(),
                 ),
             };
             let relative = path

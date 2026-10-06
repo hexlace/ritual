@@ -7,6 +7,7 @@
 //! anyone noticing.
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -104,8 +105,10 @@ pub enum Entry {
     /// A regular file, with its exact bytes.
     File(Vec<u8>),
     /// A symbolic link, with the target it holds, as written and not
-    /// followed.
-    Link(PathBuf),
+    /// followed. The bytes, not a `PathBuf`, because paths compare by their
+    /// components, which read `first/` and `./first` as `first`, while a
+    /// link to `first/` no longer resolves when `first` is a file.
+    Link(OsString),
 }
 
 /// What a tree holds, keyed by each entry's path relative to the tree's
@@ -160,7 +163,7 @@ pub fn snapshot(root: &Path) -> io::Result<Snapshot> {
                 pending.push(path.clone());
                 Entry::Directory
             } else if file_type.is_symlink() {
-                Entry::Link(std::fs::read_link(&path)?)
+                Entry::Link(std::fs::read_link(&path)?.into_os_string())
             } else if file_type.is_file() {
                 Entry::File(std::fs::read(&path)?)
             } else {
@@ -221,6 +224,25 @@ mod tests {
             after.get(Path::new("link")),
             Some(&Entry::Link("second".into()))
         );
+        Ok(())
+    }
+
+    /// A link respelled `first/` resolves no more, because `first` is a
+    /// file, yet a path compared by its components reads it as `first`. Only
+    /// a target compared as written sees the change.
+    #[test]
+    fn a_link_respelled_with_a_trailing_slash_changes_the_snapshot() -> TestOutcome {
+        let scratch = ScratchDir::new("snapshot-respelled-link")?;
+        let root = scratch.path();
+        std::fs::write(root.join("first"), "same\n")?;
+        symlink("first", root.join("link"))?;
+        let before = snapshot(root)?;
+
+        std::fs::remove_file(root.join("link"))?;
+        symlink("first/", root.join("link"))?;
+        let after = snapshot(root)?;
+
+        assert_ne!(before, after, "a link respelled `first/` must be seen");
         Ok(())
     }
 
