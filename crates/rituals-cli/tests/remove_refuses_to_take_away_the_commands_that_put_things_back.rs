@@ -71,7 +71,7 @@ fn the_bundle_under_another_key_is_refused_too() -> TestOutcome {
         // refusal can only be the guard on the package. Mounted under a key
         // other than the bin name, the bundle nests: `remove` is reached as
         // `tools remove`.
-        let bundle_dir = checkout.root().join("crates/rituals-core");
+        let bundle_dir = checkout.root().join(".rituals/ritual");
         rename_the_bundle_key(&project, "tools")?;
         git::commit_everything(project.root())?;
 

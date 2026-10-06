@@ -7,7 +7,7 @@
 //! a composed command line's generated file, for the metadata and manifest
 //! operations those tasks need, for the [`cargo`] a task that runs Cargo uses
 //! and the [`shell`] that renders a command for a person to copy, for the
-//! [`layout`] that says where a project keeps its own tasks, for the [`git`]
+//! [`layout`] that says where a scaffolder puts a ritual, for the [`git`]
 //! checks that say whether git can give back what a task is about to delete
 //! or move, for the [`relocation`] that says where paths go when directories
 //! move, for the [`paths`] that compares and spells them, and for the

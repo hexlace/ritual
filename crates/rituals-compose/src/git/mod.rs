@@ -233,7 +233,11 @@ fn run_git_with_input(
 ///
 /// Run with `LC_ALL=C`, because the one failure told apart from the rest —
 /// "not a git repository" — is told apart by git's own words, and those are
-/// translated otherwise. The input is written from a thread of its own, so a
+/// translated otherwise. Run with `GIT_OPTIONAL_LOCKS=0` as well, because a
+/// command that only reads, such as `git status`, otherwise takes the index
+/// lock to write back an index it refreshed, and every function here promises
+/// to leave the repository as it found it. Set here, where every command
+/// starts, so a command added later keeps the promise without asking for it. The input is written from a thread of its own, so a
 /// command that answers each line as it reads it cannot fill its output pipe
 /// while this process is still writing.
 fn run_git_for_output(
@@ -251,6 +255,7 @@ fn run_git_for_output(
         .arg(directory)
         .args(arguments)
         .env("LC_ALL", "C")
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

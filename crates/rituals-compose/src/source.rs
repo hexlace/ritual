@@ -120,8 +120,22 @@ impl SourceArguments {
 /// what a checkout looks like.
 pub const RITUALS_MANIFEST_IN_CHECKOUT: &str = "crates/rituals/Cargo.toml";
 
-/// Checks that `checkout_root` is a real ritual checkout — that it contains
-/// [`RITUALS_MANIFEST_IN_CHECKOUT`].
+/// Where ritual's own tasks sit inside a ritual checkout, relative to its
+/// root: the directory a project `new` writes from a `--path` source names
+/// as its `ritual` dependency.
+pub const MANAGEMENT_BUNDLE_IN_CHECKOUT: &str = ".rituals/ritual";
+
+/// Checks that `checkout_root` is a ritual checkout a project can be made
+/// from.
+///
+/// It has to hold both directories such a project names: it contains
+/// [`RITUALS_MANIFEST_IN_CHECKOUT`], and a `Cargo.toml` in
+/// [`MANAGEMENT_BUNDLE_IN_CHECKOUT`].
+///
+/// A checkout with the first and not the second is one whose own tasks are
+/// somewhere else, such as one from before they lived in `.rituals/`. A
+/// project made from it would name a directory that is not there, and only
+/// its first build would say so.
 ///
 /// Shared by `new` and `create`, which both validate a `--path` source and
 /// must refuse a bad one with the same message: two independent task crates
@@ -130,8 +144,8 @@ pub const RITUALS_MANIFEST_IN_CHECKOUT: &str = "crates/rituals/Cargo.toml";
 ///
 /// # Errors
 ///
-/// Returns [`InvalidCheckout`] naming `checkout_root` when it does not
-/// contain [`RITUALS_MANIFEST_IN_CHECKOUT`].
+/// Returns [`InvalidCheckout`] naming `checkout_root` and the first of the
+/// two manifests it does not contain.
 ///
 /// # Examples
 ///
@@ -142,6 +156,8 @@ pub const RITUALS_MANIFEST_IN_CHECKOUT: &str = "crates/rituals/Cargo.toml";
 /// #     .join(format!("rituals-compose-doctest-checkout-{}", std::process::id()));
 /// # std::fs::create_dir_all(checkout_root.join("crates/rituals"))?;
 /// # std::fs::write(checkout_root.join("crates/rituals/Cargo.toml"), "[package]\n")?;
+/// # std::fs::create_dir_all(checkout_root.join(".rituals/ritual"))?;
+/// # std::fs::write(checkout_root.join(".rituals/ritual/Cargo.toml"), "[package]\n")?;
 /// assert!(assert_is_a_ritual_checkout(&checkout_root).is_ok());
 ///
 /// let not_a_checkout = std::env::temp_dir();
@@ -150,30 +166,59 @@ pub const RITUALS_MANIFEST_IN_CHECKOUT: &str = "crates/rituals/Cargo.toml";
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn assert_is_a_ritual_checkout(checkout_root: &std::path::Path) -> Result<(), InvalidCheckout> {
-    let ritual_manifest = checkout_root.join(RITUALS_MANIFEST_IN_CHECKOUT);
-    if ritual_manifest.is_file() {
-        Ok(())
+    let missing = if !checkout_root.join(RITUALS_MANIFEST_IN_CHECKOUT).is_file() {
+        Missing::Rituals
+    } else if !checkout_root
+        .join(MANAGEMENT_BUNDLE_IN_CHECKOUT)
+        .join("Cargo.toml")
+        .is_file()
+    {
+        Missing::ManagementBundle
     } else {
-        Err(InvalidCheckout {
-            path: checkout_root.to_path_buf(),
-        })
-    }
+        return Ok(());
+    };
+    Err(InvalidCheckout {
+        path: checkout_root.to_path_buf(),
+        missing,
+    })
 }
 
 /// A `--path` source that does not name a real ritual checkout.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InvalidCheckout {
     path: PathBuf,
+    missing: Missing,
+}
+
+/// Which manifest a checkout lacks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Missing {
+    /// The `rituals` crate's, so it is not a ritual checkout at all, or
+    /// `--path` names a directory inside one.
+    Rituals,
+    /// The one in ritual's own tasks, so its tasks are somewhere a project
+    /// made from it would not find them.
+    ManagementBundle,
 }
 
 impl fmt::Display for InvalidCheckout {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "{} is not a ritual checkout: it does not contain {RITUALS_MANIFEST_IN_CHECKOUT}; \
-             --path takes the checkout root, not crates/ and not the crate directory",
-            self.path.display()
-        )
+        match self.missing {
+            Missing::Rituals => write!(
+                formatter,
+                "{} is not a ritual checkout: it does not contain \
+                 {RITUALS_MANIFEST_IN_CHECKOUT}; --path takes the checkout root, not crates/ and \
+                 not the crate directory",
+                self.path.display()
+            ),
+            Missing::ManagementBundle => write!(
+                formatter,
+                "{} is not a checkout this ritual can use: it does not contain \
+                 {MANAGEMENT_BUNDLE_IN_CHECKOUT}/Cargo.toml, ritual's own tasks, which the \
+                 project would depend on; use a checkout of the version you are running",
+                self.path.display()
+            ),
+        }
     }
 }
 
@@ -233,6 +278,7 @@ mod tests {
     use rituals::clap::{self, Parser};
 
     use super::{Source, SourceArguments, assert_is_a_ritual_checkout};
+    use crate::test_support::{ScratchDir, TestOutcome};
 
     fn assert_send<T: Send>() {}
     fn assert_sync<T: Sync>() {}
@@ -301,6 +347,29 @@ mod tests {
             resolved,
             Source::Git("https://example.invalid/x".to_string())
         );
+    }
+
+    /// A checkout with the `rituals` crate and without ritual's own tasks in
+    /// `.rituals/ritual` is refused, naming the manifest it lacks, and one
+    /// with both is accepted.
+    #[test]
+    fn a_checkout_without_ritual_s_own_tasks_is_refused_naming_their_manifest() -> TestOutcome {
+        let scratch = ScratchDir::new("source-no-bundle")?;
+        let root = scratch.path();
+        std::fs::create_dir_all(root.join("crates/rituals"))?;
+        std::fs::write(root.join("crates/rituals/Cargo.toml"), "[package]\n")?;
+
+        let message = assert_is_a_ritual_checkout(root)
+            .err()
+            .ok_or("a checkout without .rituals/ritual must be refused")?
+            .to_string();
+        assert!(message.contains(".rituals/ritual/Cargo.toml"), "{message}");
+        assert!(message.contains(&root.display().to_string()), "{message}");
+
+        std::fs::create_dir_all(root.join(".rituals/ritual"))?;
+        std::fs::write(root.join(".rituals/ritual/Cargo.toml"), "[package]\n")?;
+        assert_eq!(assert_is_a_ritual_checkout(root), Ok(()));
+        Ok(())
     }
 
     #[test]

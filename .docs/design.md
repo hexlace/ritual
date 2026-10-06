@@ -378,7 +378,11 @@ mount in the generated file, so the three cannot drift apart.
 at the version the running `ritual` was built as. What they write then
 matches the tool that made it. `--path <checkout>` or `--git <url>` takes the
 crates from a ritual checkout or a git repository instead, for work against
-an unreleased revision. Naming both is an argument error.
+an unreleased revision. Naming both is an argument error. A `--path` checkout
+is checked before anything is written: it has to hold every directory the
+project will name, `crates/rituals` and ritual's own tasks in
+`.rituals/ritual`, so a checkout whose tasks are elsewhere is refused by `new`
+rather than by the project's first build.
 
 ## What `add` writes
 
@@ -390,12 +394,49 @@ inherits `rituals.workspace = true`, so its dependency on `rituals` does not
 change when the crate moves. `add` therefore needs `rituals` in the
 workspace's `[workspace.dependencies]`, and refuses without it.
 
-**Why `.rituals/`.** A project's own tasks are tooling, not the project, so
-they sit with `.docs/` and `.github/` rather than among the project's real
-directories, where `tasks/` would sort into the middle of them. Where a task
-goes is decided in one place, `rituals_compose::layout`, which a scaffolder
-asks and does not answer for itself, so the member entry, the dependency path
-and the report all agree.
+**Why `.rituals/`.** Every ritual lives in `.rituals/`, whoever it is for,
+with no exception: not a project's private ones only, and not ritual's own
+repository, where the published `rituals-core-*` crates sit beside any private
+ones. A rule with an exception has to be asked of every ritual, and a
+repository whose product is rituals would have to answer it for each one. With
+none, a person, a tool or a script finds every ritual of every project in the
+same place, and a ritual that changes who it is for does not move.
+
+*Audience is `publish`, not a folder.* Whether a ritual is private to its
+project or shared with others is already a fact about a crate, and Cargo
+already has a key for it: `publish`, which says whether a crate ships. A
+second encoding in the directory tree, such as a `private/` folder every tool
+must know to treat differently, would be a second source of the same fact,
+free to disagree with the manifest. Reading `publish` keeps one source, and it
+is Cargo's own, so every tool that already understands a package understands
+it.
+
+*Subdirectories carry no meaning.* Beneath `.rituals/`, a project arranges
+rituals as it likes, at any depth, and ritual gives no name there a special
+reading. This is not extra work: no command finds a ritual by its directory.
+Each goes through Cargo's workspace membership and the CLI crate's
+dependencies, so a ritual at `.rituals/private/lint` is found the same way as
+one at `.rituals/lint`. A name ritual did read would be a vocabulary every
+project had to learn and could not extend. The one place Cargo's rules touch
+the arrangement is membership: a `.rituals/*` glob also matches a grouping
+directory that has no manifest, and Cargo then refuses the workspace. That is
+Cargo's rule about globs, so ritual documents it and does not paper over it,
+and the person lists the directory under `exclude` or lists members
+explicitly, as `add` does. `migrate` carries such an `exclude` entry from
+`tasks/` with the directory it names. `remove` deletes only the ritual's own directory
+and leaves a grouping directory it does not own.
+
+*`migrate` never writes `publish`.* A 0.1 task has no `publish` key, because
+0.1 wrote none, and the absence says nothing about who the task is for: the
+same missing key is a private tool in one project and a shared crate in
+another. Writing `publish = false` would claim the first for every project,
+a guess about something only the person knows. Leaving the key alone claims
+nothing new: Cargo reads the task exactly as it did before the move, and
+`migrate` changes where a ritual lives, never who it is for.
+
+Where a ritual goes is decided in one place, `rituals_compose::layout`, which
+a scaffolder asks and does not answer for itself, so the member entry, the
+dependency path and the report all agree.
 
 **Why the member is explicit.** The entry written is `".rituals/<name>"`, one
 per task, and `new` writes no `.rituals/*` glob. Cargo reads a glob that
@@ -643,20 +684,14 @@ the destination from `layout`, which says where scaffolding puts a task today.
 
 **The first step: `tasks/` to `.rituals/`.** It applies when a workspace member
 under `tasks/` declares itself a task, by the one rule the task list is
-resolved with, and the project's own command line imports it, in its
-`[package.metadata.ritual] tasks` list. "Member" is what `cargo metadata` says,
-since Cargo's membership is glob expansion, `exclude` and path dependencies
-that become members on their own, and a second reading of that could only
-disagree with Cargo. A project with no member under `tasks/` that declares
-itself a task has nothing to migrate, and its list is not read. When there is
-one, the list is read, and a list that cannot be read is a failure, not
-`nothing to migrate`; a list that imports none of them is nothing to migrate.
-Each task the command line imports moves to
-the same place under `.rituals/`, so `tasks/greet` becomes `.rituals/greet`.
-Anything else in `tasks/` stays where it is, with the directory that holds it:
-a crate that is not a task, a task that only another task depends on, and the
-children of a bundle the command line imports whole. The path from a task that
-moved to one that stayed is repointed.
+resolved with. "Member" is what `cargo metadata` says, since Cargo's
+membership is glob expansion, `exclude` and path dependencies that become
+members on their own, and a second reading of that could only disagree with
+Cargo. Each such task moves to the same place under `.rituals/`, so
+`tasks/greet` becomes `.rituals/greet`, whether or not the project's command
+line imports it: every ritual lives in `.rituals/` whoever it is for, so a
+repository whose product is task crates moves them too. A crate in `tasks/`
+that is not a task stays where it is, with the directory that holds it.
 
 **It only runs where git can give everything back.** A work tree with changes
 that are not committed, files that are untracked, or no repository at all is
@@ -799,12 +834,18 @@ in place, in canonical form, so `tasks/./x` becomes `.rituals/x`. A glob over
 `tasks/` stays a glob: `tasks/*` becomes `.rituals/*` when nothing else it
 matches stays, and when a crate that is not a task does, the glob is kept and
 the new one is added beside it. Only directories count, because Cargo skips a
-matched file. A glob that does not lead with `tasks/` is the person's own and
-is left alone, and the final check judges it. Cargo's member globs match the
-hidden directory like any other, so a glob stays a glob and nothing is listed
-explicitly. `default-members` follows the same rules. An `exclude` entry at or
-under a moved directory follows it, and an `exclude` glob is left as it is,
-because Cargo reads `exclude` as paths.
+matched file, and a directory counts only when something in it, at any depth,
+stays: a directory that grouped tasks and empties when they move would leave a
+glob that matches nothing, which Cargo reads as a literal path. A glob that
+does not lead with `tasks/` is the person's own and is left alone, and the
+final check judges it. Cargo's member globs match the hidden directory like
+any other, so a glob stays a glob and nothing is listed explicitly.
+`default-members` follows the same rules. An `exclude` entry at or under a
+moved directory follows it. One that holds moved directories, such as
+`tasks/group` kept out of `tasks/*`, is carried to the same place under
+`.rituals/`, where `.rituals/*` would otherwise match it, and stays at the old
+place as well only while something else is left there. An `exclude` glob is
+left as it is, because Cargo reads `exclude` as paths.
 
 **What it says.** Every move and every changed value, then what was cleaned up
 and what is left, then every other file in the repository that mentions
@@ -813,12 +854,17 @@ not `migrate` edited them, because whether a path in a workflow means the task
 directory is for the person to judge. The files git ignores are left out, and
 the files it does not track yet are in, since a commit would carry them.
 
-After the changes are kept, outside the rollback, `migrate` deletes the
-directories the moves emptied, `tasks/` included once nothing else is in it,
-and lists the files that mention `tasks/`. An empty directory is cosmetic and
-harmless if left, and a search that fails is only information, so neither
-undoes a migration that worked. A failure in either is a line that leads with
-what failed, and the run still succeeds.
+Inside the rollback, after the moves and before the final check, `migrate`
+deletes the directories the moves emptied, `tasks/` included once nothing else
+is in it. Whether a directory is still there decides what a member glob
+matches, so the check has to read the tree the run leaves, and a run that fails
+afterwards creates each one again before moving anything back into it. A
+directory that could not be deleted is a line that leads with what failed, not
+a failure: if leaving it breaks nothing the migration worked, and if it does,
+the check says so. After the changes are kept, outside the rollback, `migrate`
+lists the files that mention `tasks/`. A search that fails is only
+information, so it never undoes a migration that worked, and the run still
+succeeds.
 
 **What it does not reach.** Cargo's own configuration files are not edited. A
 `paths` override in `.cargo/config.toml` that points into a moved directory

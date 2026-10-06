@@ -269,7 +269,9 @@ fn mounted_entries_ignores_layout_and_near_misses() {
 #[test]
 fn dependency_package_follows_a_workspace_inherited_dependency() {
     let workspace = parse(
-        "[workspace.dependencies]\nritual = { package = \"rituals-core\", path = \"crates/rituals-core\" }\nrituals = { path = \"crates/rituals\" }\n",
+        "[workspace.dependencies]\n\
+         ritual = { package = \"rituals-core\", path = \".rituals/ritual\" }\n\
+         rituals = { path = \"crates/rituals\" }\n",
     );
     let direct = parse(
         "[dependencies]\nritual = { package = \"rituals-core\", path = \"../rituals-core\" }\n",
@@ -296,7 +298,7 @@ fn dependency_package_follows_a_workspace_inherited_dependency() {
 /// captured by running that `add` before `add` moved to `.rituals/`: the root
 /// manifest, the command line crate's manifest, the task's manifest and the
 /// regenerated command line. `@RITUALS@` and `@CORE@` stand for the
-/// checkout's `crates/rituals` and `crates/rituals-core`.
+/// checkout's `crates/rituals` and `.rituals/ritual`.
 const CAPTURED_0_1_WORKSPACE: &str = r#"[workspace]
 members = [
     "ritual",
@@ -350,7 +352,7 @@ fn the_0_1_layout_fixture_reproduces_what_0_1s_add_wrote() -> TestOutcome {
         let working_dir = TempDir::new("0-1-fixture-shape")?;
         let project = support::legacy::project_with_tasks(checkout, &working_dir, &["greet"])?;
         let rituals = support::path_to_str(&checkout.root().join("crates/rituals"))?.to_string();
-        let core = support::path_to_str(&checkout.root().join("crates/rituals-core"))?.to_string();
+        let core = support::path_to_str(&checkout.root().join(".rituals/ritual"))?.to_string();
         let filled = |captured: &str| {
             captured
                 .replace("@RITUALS@", &rituals)

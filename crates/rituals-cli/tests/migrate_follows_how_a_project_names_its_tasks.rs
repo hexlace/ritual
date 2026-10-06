@@ -5,8 +5,9 @@
 //!
 //! The path of every dependency on a moved task changes in every manifest
 //! that has one, not only the command line crate's: a member outside
-//! `tasks/`, a task left behind, and the workspace's own shared dependencies
-//! and default members all lead to where the task is now.
+//! `tasks/`, a crate that is not a task and stays in it, and the workspace's
+//! own shared dependencies and default members all lead to where the task is
+//! now.
 
 mod support;
 

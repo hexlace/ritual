@@ -1,0 +1,26 @@
+[package]
+name = "rituals-core-remove"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories = ["command-line-interface", "development-tools"]
+description = "Ritual — take a task out of this project, in the order that keeps it building."
+readme = "readme.md"
+
+[dependencies]
+rituals.workspace = true
+rituals-compose.workspace = true
+
+# The isolated `git` the tests build their repositories with.
+[dev-dependencies]
+rituals-compose = { workspace = true, features = ["test-util"] }
+
+[package.metadata.ritual]
+task = true
+
+# See the note on this table in .rituals/add/Cargo.toml.
+[lints]
+workspace = true

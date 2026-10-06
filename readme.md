@@ -191,10 +191,23 @@ It scaffolds `.rituals/lint`, adds it to the workspace and to the CLI crate's
 manifest, and regenerates. Edit `.rituals/lint/src/lib.rs`, then run
 `cargo ritual lint`.
 
-A project's own tasks are tooling, not the project, so they live in
-`.rituals/`, next to `.github/`, rather than among the project's real
-directories. A project made by ritual 0.1 keeps its tasks in `tasks/`, and
-they keep working there. [`cargo ritual migrate`](#move-a-01-project-into-rituals)
+**Where rituals live.** Every ritual lives in `.rituals/`, whoever it is for:
+one directory, in every project, with no exceptions. Subdirectories of
+`.rituals/`, at any depth, are yours to arrange (`.rituals/private/lint`), and
+ritual reads no meaning into their names. Who a ritual is for is Cargo's own
+`publish` key in its manifest, the key Cargo already uses to say whether a
+crate ships: `publish = false` keeps it private to the project, and leaving it
+out shares it. `add` writes none, since it cannot know who a ritual is for.
+
+One Cargo rule to know when you group rituals. A `.rituals/*` glob in
+`[workspace] members` also matches a grouping directory that has no manifest
+of its own, and Cargo then refuses to load the workspace. List that directory
+under `exclude`, or list the members explicitly, as `add` writes them. A 0.1
+project that already did this in `tasks/` needs nothing more: `migrate` moves
+the `exclude` entry with the group, so `tasks/group` becomes `.rituals/group`.
+
+A project made by ritual 0.1 keeps its tasks in `tasks/`, and they keep
+working there. [`cargo ritual migrate`](#move-a-01-project-into-rituals)
 moves them.
 
 ### Import a task from somewhere else
@@ -307,10 +320,10 @@ anywhere in the project.
 
 ### Move a 0.1 project into `.rituals/`
 
-Ritual 0.1 put a project's tasks in `tasks/`. From 0.2 they go in `.rituals/`,
-and `cargo ritual migrate` moves a project that has them in `tasks/`. A project
-with its tasks in `tasks/` keeps building and running on 0.2 until you do, so
-there is no hurry.
+Ritual 0.1 put a project's tasks in `tasks/`. From 0.2 they go in `.rituals/`
+([where rituals live](#add-a-task-to-a-project)), and `cargo ritual migrate`
+moves a project that has them in `tasks/`. A project with its tasks in
+`tasks/` keeps building and running on 0.2 until you do, so there is no hurry.
 
 To upgrade:
 
@@ -330,14 +343,16 @@ in step and a project that needs nothing is told `nothing to migrate`. It runs
 from the new version, which is why the bump comes first. This release has one
 migration, from `tasks/` to `.rituals/`.
 
-For each task under `tasks/` that the CLI crate's `[package.metadata.ritual]
-tasks` list imports, it:
+For each workspace member under `tasks/` that is a task, it:
 
 - moves the directory to the same place under `.rituals/`, ignored files
   included, once git would see every file there as it does now (see below);
 - changes the workspace's `members`, `default-members` and `exclude`, keeping a
   glob a glob (`tasks/*` becomes `.rituals/*`) and keeping an explicit list
-  explicit, each entry changed where it stands;
+  explicit, each entry changed where it stands. An `exclude` entry for a
+  directory that groups tasks moves with them, so `tasks/group` becomes
+  `.rituals/group`, and stays in `tasks/` as well only while something else is
+  left in the group;
 - changes the `path` of every dependency on a moved task in every manifest
   Cargo reads, crates outside the workspace included, not only the CLI crate's,
   since tasks can depend on each other and a crate Cargo reaches through an
@@ -346,12 +361,11 @@ tasks` list imports, it:
   the other places Cargo reads a path. A path that still leads where it led,
   such as a task's `../greet` to a task that moved beside it, is left as you
   wrote it;
-- leaves `tasks/` in place when something that is not one of those tasks is
-  still in it, and says what is left.
+- leaves `tasks/` in place when something that is not a task is still in it,
+  and says what is left.
 
-A task in `tasks/` that only another task depends on stays where it is, and the
-paths that reach it are repointed. The children of a bundle stay too, when your
-command line imports the bundle and not them.
+It never writes `publish`: 0.1 wrote none, so who a task is for is not
+something `migrate` can know.
 
 It edits manifests in place, so your comments and formatting stay. It then
 checks that Cargo still reads the project, and prints what it did, then every

@@ -209,12 +209,14 @@ fn registry_dependency() -> String {
 
 /// Runs `git <arguments…>` in `directory`, reading nothing from the machine
 /// (see [`isolate_from_the_machine`]), so a story's repository is the same on
-/// every machine and never waits on a signing prompt.
+/// every machine and never waits on a signing prompt, with automatic
+/// maintenance off, so a commit leaves nothing running behind it.
 fn git(directory: &Path, arguments: &[&str]) -> TestOutcome {
     let output = isolate_from_the_machine(
         Command::new("git")
             .args(["-c", "user.name=ritual-tests"])
             .args(["-c", "user.email=ritual-tests@example.invalid"])
+            .args(["-c", "maintenance.auto=false"])
             .args(arguments)
             .current_dir(directory)
             .stdin(std::process::Stdio::null()),

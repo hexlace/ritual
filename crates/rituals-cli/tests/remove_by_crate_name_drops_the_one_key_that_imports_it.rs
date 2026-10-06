@@ -20,8 +20,8 @@ fn removing_a_task_by_its_crate_name_drops_the_key_that_imports_it() -> TestOutc
         assert!(
             members_before
                 .iter()
-                .any(|member| member == "tasks/chore-task"),
-            "fixture precondition: tasks/chore-task should be a member; members were \
+                .any(|member| member == ".rituals/chore-task"),
+            "fixture precondition: .rituals/chore-task should be a member; members were \
              {members_before:?}"
         );
 
@@ -98,12 +98,12 @@ fn assert_the_chore_key_and_directory_are_gone(project: &Project) -> TestOutcome
     assert!(
         !members_of(project)?
             .iter()
-            .any(|member| member == "tasks/chore-task"),
-        "expected tasks/chore-task to leave `[workspace] members`"
+            .any(|member| member == ".rituals/chore-task"),
+        "expected .rituals/chore-task to leave `[workspace] members`"
     );
     assert!(
-        !exists(&project.root().join("tasks/chore-task")),
-        "expected tasks/chore-task to be deleted"
+        !exists(&project.root().join(".rituals/chore-task")),
+        "expected .rituals/chore-task to be deleted"
     );
     assert!(
         exists(&project.root().join("tasks/greet/Cargo.toml")),

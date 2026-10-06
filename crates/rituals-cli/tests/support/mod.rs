@@ -53,6 +53,7 @@ pub(crate) mod help;
 pub(crate) mod legacy;
 pub(crate) mod manifest;
 pub(crate) mod migration;
+pub(crate) mod nested;
 pub(crate) mod process;
 pub(crate) mod project;
 pub(crate) mod removal;

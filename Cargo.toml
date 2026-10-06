@@ -3,14 +3,14 @@ members = [
     "crates/rituals-cli",
     "crates/rituals",
     "crates/rituals-compose",
-    "crates/rituals-core",
-    "tasks/add",
-    "tasks/create",
-    "tasks/import",
-    "tasks/migrate",
-    "tasks/new",
-    "tasks/regenerate",
-    "tasks/remove",
+    ".rituals/ritual",
+    ".rituals/add",
+    ".rituals/create",
+    ".rituals/import",
+    ".rituals/migrate",
+    ".rituals/new",
+    ".rituals/regenerate",
+    ".rituals/remove",
     "xtask",
 ]
 resolver = "3"
@@ -23,14 +23,14 @@ resolver = "3"
 # version.
 rituals = { path = "crates/rituals", version = "0.1.2" }
 rituals-compose = { path = "crates/rituals-compose", version = "0.1.2" }
-ritual = { package = "rituals-core", path = "crates/rituals-core", version = "0.1.2" }
-add = { package = "rituals-core-add", path = "tasks/add", version = "0.1.2" }
-create = { package = "rituals-core-create", path = "tasks/create", version = "0.1.2" }
-import = { package = "rituals-core-import", path = "tasks/import", version = "0.1.2" }
-migrate = { package = "rituals-core-migrate", path = "tasks/migrate", version = "0.1.2" }
-new = { package = "rituals-core-new", path = "tasks/new", version = "0.1.2" }
-regenerate = { package = "rituals-core-regenerate", path = "tasks/regenerate", version = "0.1.2" }
-remove = { package = "rituals-core-remove", path = "tasks/remove", version = "0.1.2" }
+ritual = { package = "rituals-core", path = ".rituals/ritual", version = "0.1.2" }
+add = { package = "rituals-core-add", path = ".rituals/add", version = "0.1.2" }
+create = { package = "rituals-core-create", path = ".rituals/create", version = "0.1.2" }
+import = { package = "rituals-core-import", path = ".rituals/import", version = "0.1.2" }
+migrate = { package = "rituals-core-migrate", path = ".rituals/migrate", version = "0.1.2" }
+new = { package = "rituals-core-new", path = ".rituals/new", version = "0.1.2" }
+regenerate = { package = "rituals-core-regenerate", path = ".rituals/regenerate", version = "0.1.2" }
+remove = { package = "rituals-core-remove", path = ".rituals/remove", version = "0.1.2" }
 # `add` and `import` append to manifests somebody wrote by hand. A whole-file round trip
 # through a plain TOML parser reformats them and drops their comments; this
 # crate edits in place. It is the same crate Cargo's own `add` uses.

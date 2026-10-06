@@ -126,13 +126,7 @@ pub(super) fn uncommitted(
     pathspecs: &[&str],
     ignored: IgnoredFiles,
 ) -> Result<Vec<PathBuf>, Unanswered> {
-    let mut arguments = vec![
-        "--no-optional-locks",
-        "status",
-        "--porcelain=v1",
-        "-z",
-        "--untracked-files=all",
-    ];
+    let mut arguments = vec!["status", "--porcelain=v1", "-z", "--untracked-files=all"];
     match ignored {
         IgnoredFiles::Count => arguments.push("--ignored=matching"),
         IgnoredFiles::Skip => {}
@@ -179,8 +173,10 @@ pub(super) fn parse_porcelain(output: &[u8]) -> Result<Vec<String>, Unanswered> 
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::MetadataExt as _;
     use std::path::{Path, PathBuf};
     use std::process::Command;
+    use std::time::{Duration, SystemTime};
 
     use super::{ensure_work_tree_is_clean_with, parse_porcelain};
     use crate::git::fixture::{commit_everything, git};
@@ -278,6 +274,44 @@ mod tests {
 
     fn clean(scratch: &Path, directory: &Path) -> Result<PathBuf, NotClean> {
         ensure_work_tree_is_clean_with(contained_in(scratch), directory)
+    }
+
+    /// The index's identity and last write, which git changes whenever it
+    /// writes the index, by renaming a new file over it.
+    fn index_stamp(root: &Path) -> Result<(u64, SystemTime), std::io::Error> {
+        let metadata = std::fs::metadata(root.join(".git/index"))?;
+        Ok((metadata.ino(), metadata.modified()?))
+    }
+
+    /// Asking whether the work tree is clean writes nothing to the
+    /// repository, even when git would otherwise refresh its index. Every
+    /// committed file here is dated after the index, which makes each entry
+    /// "racily clean": git cannot trust the times it recorded, so it hashes
+    /// the files again and, when it may take the index lock, writes the
+    /// refreshed index back. Optional locks off forbids that write.
+    #[test]
+    fn asking_whether_the_work_tree_is_clean_never_rewrites_a_racy_index() -> TestOutcome {
+        let scratch = committed_project("status-racy-index")?;
+        let root = scratch.path();
+        // A fixed time well after any index this test writes, so the race is
+        // set up rather than waited for.
+        let after_the_index = SystemTime::UNIX_EPOCH + Duration::from_secs(4_000_000_000);
+        for file in ["tasks/greet/src/lib.rs", ".gitignore"] {
+            std::fs::File::options()
+                .write(true)
+                .open(root.join(file))?
+                .set_modified(after_the_index)?;
+        }
+        let before = index_stamp(root)?;
+
+        assert_eq!(clean(root, root), Ok(std::fs::canonicalize(root)?));
+
+        assert_eq!(
+            index_stamp(root)?,
+            before,
+            "asking whether the work tree is clean rewrote .git/index"
+        );
+        Ok(())
     }
 
     #[test]

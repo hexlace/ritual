@@ -55,7 +55,7 @@ fn assert_a_plain_task_at_the_bin_name_refuses_to_start(project: &Project) -> Te
 /// bundle is mounted under.
 fn assert_a_colliding_flattened_child_refuses_to_start(project: &Project) -> TestOutcome {
     write_text(
-        &project.root().join("tasks/promoted/src/lib.rs"),
+        &project.root().join(".rituals/promoted/src/lib.rs"),
         &crates::bundle_lib(
             "a second management bundle, for this test",
             &[Child::Inline { key: "ritual" }],

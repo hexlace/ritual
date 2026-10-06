@@ -19,14 +19,14 @@ use support::{
 use support::{generated, manifest};
 
 /// Phase 1 — the project imports ritual's bundle under the key `ritual`,
-/// from this checkout's own `crates/rituals-core`, and lists that key as its
+/// from this checkout's own `.rituals/ritual`, and lists that key as its
 /// one task.
 fn assert_the_bundle_comes_from_the_checkouts_crates_directory(
     project: &Project,
     checkout: &support::Checkout,
 ) -> TestOutcome {
     let cli_manifest = project.cli_manifest()?;
-    let bundle_source = checkout.root().join("crates/rituals-core");
+    let bundle_source = checkout.root().join(".rituals/ritual");
 
     assert_eq!(
         manifest::string_at(&cli_manifest, &["dependencies", "ritual", "package"]),
@@ -37,7 +37,7 @@ fn assert_the_bundle_comes_from_the_checkouts_crates_directory(
     assert_eq!(
         manifest::string_at(&cli_manifest, &["dependencies", "ritual", "path"]),
         Some(path_to_str(&bundle_source)?),
-        "expected ritual's bundle to be sourced from this checkout's own crates/rituals-core; \
+        "expected ritual's bundle to be sourced from this checkout's own .rituals/ritual; \
          manifest was:\n{cli_manifest}"
     );
     assert_eq!(

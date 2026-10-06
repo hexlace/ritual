@@ -304,10 +304,10 @@ pub(crate) fn committed_project_where_shout_depends_on_greet(
 
 /// The text of every manifest `new` and the 0.1 `add` write, with `@RITUALS@`
 /// and `@CORE@` where the checkout's `crates/rituals` and
-/// `crates/rituals-core` go, filled in for `checkout`.
+/// `.rituals/ritual` go, filled in for `checkout`.
 pub(crate) fn fill_in_checkout(template: &str, checkout: &super::Checkout) -> Outcome<String> {
     let rituals = super::path_to_str(&checkout.root().join("crates/rituals"))?.to_string();
-    let core = super::path_to_str(&checkout.root().join("crates/rituals-core"))?.to_string();
+    let core = super::path_to_str(&checkout.root().join(".rituals/ritual"))?.to_string();
     Ok(template
         .replace("@RITUALS@", &rituals)
         .replace("@CORE@", &core))
