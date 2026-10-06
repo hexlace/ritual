@@ -368,6 +368,7 @@ mod tests {
         CommandLine::from_dispatch(
             Identity::from_macro_expansion("test-package", "test-binary", "0.0.0-test"),
             [],
+            ["test-task"],
         )
     }
 
@@ -446,6 +447,7 @@ mod tests {
             let other_command_line = CommandLine::from_dispatch(
                 Identity::from_macro_expansion("other-package", "other-binary", "9.9.9"),
                 ["build"],
+                ["other-task"],
             );
             let first = task.invoke(&a_command_line(), &matches);
             let second = task.invoke(&other_command_line, &matches);
@@ -488,6 +490,7 @@ mod tests {
             let command_line = CommandLine::from_dispatch(
                 Identity::from_macro_expansion("test-package", "test-binary", "0.0.0-test"),
                 ["daily"],
+                ["greet"],
             );
             assert!(task.invoke(&command_line, &matches).is_ok());
         }

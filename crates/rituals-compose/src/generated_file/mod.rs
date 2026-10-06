@@ -316,6 +316,7 @@ pub fn regenerate(command_line: &CommandLine) -> Outcome {
 /// # let command_line = CommandLine::from_dispatch(
 /// #     Identity::from_macro_expansion("demo-ritual", "ritual", "0.1.0"),
 /// #     [],
+/// #     ["regenerate"],
 /// # );
 /// // Needs a real project on disk and runs `cargo metadata` in it, so this
 /// // example is `no_run`.
@@ -769,6 +770,7 @@ mod tests {
         CommandLine::from_dispatch(
             Identity::from_macro_expansion("demo-ritual", "ritual", "0.1.0"),
             [],
+            ["regenerate"],
         )
     }
 

@@ -41,7 +41,7 @@
 /// # assert_eq!(identity.package_name(), "acme-cli");
 /// # assert_eq!(identity.binary_name(), "acme");
 /// # assert_eq!(identity.version(), "0.1.0");
-/// # run(&rituals::CommandLine::from_dispatch(identity, []))?;
+/// # run(&rituals::CommandLine::from_dispatch(identity, [], ["about"]))?;
 /// # Ok::<(), rituals::Failure>(())
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

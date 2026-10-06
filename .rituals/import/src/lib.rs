@@ -182,6 +182,7 @@ mod tests {
                 "remove",
                 "migrate",
             ],
+            ["import"],
         )
     }
 
