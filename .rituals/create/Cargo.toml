@@ -14,6 +14,9 @@ readme = "readme.md"
 rituals.workspace = true
 rituals-compose.workspace = true
 
+[dev-dependencies]
+rituals-compose = { workspace = true, features = ["test-util"] }
+
 [package.metadata.ritual]
 task = true
 

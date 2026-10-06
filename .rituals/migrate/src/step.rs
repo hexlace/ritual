@@ -101,7 +101,7 @@ mod tests {
 
     #[test]
     fn a_task_in_tasks_applies() -> TestOutcome {
-        let scratch = ScratchDir::new("step-applies")?;
+        let scratch = ScratchDir::resolved("step-applies")?;
         workspace(scratch.path(), &["tasks/greet"], &["tasks/greet"], &[])?;
         assert!(applies(scratch.path())?);
         Ok(())
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn a_project_with_a_task_in_each_layout_applies_for_the_old_one() -> TestOutcome {
-        let scratch = ScratchDir::new("step-both")?;
+        let scratch = ScratchDir::resolved("step-both")?;
         workspace(
             scratch.path(),
             &[".rituals/new", "tasks/old"],

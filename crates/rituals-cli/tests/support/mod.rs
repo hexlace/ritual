@@ -175,6 +175,14 @@ static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// repository's own sources. The one kind created elsewhere holds a second
 /// name for a built binary, and sits beside that binary in its target
 /// directory; see [`TempDir::new_in`].
+///
+/// This is not the `ScratchDir` the unit tests share from
+/// `rituals_compose::test_util`. This crate is a composed command line like
+/// any other, so it depends on `rituals` and on nothing from the composition
+/// library, not even for its tests, and
+/// `composed_cli_regenerates_this_repository_byte_identically.rs` checks
+/// that its manifest says so. Every story gets a resolved path, as
+/// `ScratchDir::resolved` gives, for the reason in [`TempDir::new_in`].
 pub(crate) struct TempDir {
     path: PathBuf,
 }

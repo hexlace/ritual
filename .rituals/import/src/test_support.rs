@@ -1,8 +1,6 @@
-//! A scratch directory helper for this crate's own tests.
-//!
-//! `rituals-compose` already has one, but a different crate is a genuine
-//! boundary that module cannot cross — `.rituals/new` and `.rituals/create` each
-//! keep their own copy for the same reason, and this is this crate's.
+//! What this crate's tests share: the outcome a test returns, a scratch
+//! project and `import`'s arguments as a person types them, and the scratch
+//! directory every crate's unit tests take from `rituals_compose::test_util`.
 //
 // `redundant_pub_crate` (clippy nursery) wants `pub` here because this
 // module is private, but `pub(crate)` is the visibility that is actually
@@ -16,51 +14,18 @@
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use rituals::clap::{self, CommandFactory, Parser};
 
 use crate::arguments::ImportArguments;
+
+pub(crate) use rituals_compose::test_util::ScratchDir;
 
 /// What a test in this crate returns — the error path carries only a setup
 /// failure (a filesystem operation, a TOML fixture that would not parse),
 /// never the property under test, which is always carried by an
 /// `assert!`/`assert_eq!` instead.
 pub(crate) type TestOutcome = Result<(), Box<dyn Error>>;
-
-/// A counter for [`ScratchDir::new`], so two scratch directories created in
-/// the same test process never collide.
-///
-/// This is test-fixture uniqueness, not a production seed: nothing here
-/// needs to be unpredictable, only distinct within one test run.
-static SCRATCH_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// A directory under the system temp root that removes itself on drop.
-pub(crate) struct ScratchDir(PathBuf);
-
-impl ScratchDir {
-    /// Creates a fresh, empty directory named `ritual-import-<tag>-<pid>-<counter>`
-    /// under the system temp root.
-    pub(crate) fn new(tag: &str) -> Result<Self, Box<dyn Error>> {
-        let unique = SCRATCH_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "ritual-import-{tag}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path)?;
-        Ok(Self(path))
-    }
-
-    pub(crate) fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for ScratchDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// What a command line parses `import`'s arguments from, so a test can give
 /// them as a person types them.
