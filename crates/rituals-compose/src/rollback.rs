@@ -2192,10 +2192,8 @@ mod tests {
             Err::<(), _>(Failure::new("writing demo/Cargo.toml failed"))
         });
 
-        // Before any assertion can return early, so the scratch directory
-        // can still be removed on drop.
-        std::fs::set_permissions(&made, std::fs::Permissions::from_mode(0o755))?;
-
+        // A process that ignores the write bit, such as root, removed `made`
+        // in the undo, so there is nothing to restore and nothing to show.
         if !enforced {
             crate::test_support::report_skip(
                 "a_fresh_directory_that_cannot_be_removed_is_named_with_the_callers_retry could \
@@ -2204,6 +2202,10 @@ mod tests {
             );
             return Ok(());
         }
+
+        // Before any assertion can return early, so the scratch directory
+        // can still be removed on drop.
+        std::fs::set_permissions(&made, std::fs::Permissions::from_mode(0o755))?;
 
         let reported = outcome.err().ok_or("expected the run to fail")?;
         assert_eq!(
