@@ -320,7 +320,8 @@ pub fn regenerate(command_line: &CommandLine) -> Outcome {
 /// // Needs a real project on disk and runs `cargo metadata` in it, so this
 /// // example is `no_run`.
 /// let directory = Path::new("/path/to/the/workspace");
-/// let regenerated = rollback::attempt(Wording::project("running `remove lint` again"), |changes| {
+/// let wording = Wording::project(directory, "running `remove lint` again");
+/// let regenerated = rollback::attempt(wording, |changes| {
 ///     // ... edits that must be undone with the generated file, then:
 ///     let regenerated =
 ///         generated_file::regenerate_recording(changes, &command_line, directory)?;
@@ -397,7 +398,8 @@ fn regenerate_from(
 /// #     directory: &Path,
 /// # ) -> Result<(), rituals::Failure> {
 /// // Needs a real project on disk, so this example is `no_run`.
-/// let regenerated = rollback::attempt(Wording::project("running `remove lint` again"), |changes| {
+/// let wording = Wording::project(directory, "running `remove lint` again");
+/// let regenerated = rollback::attempt(wording, |changes| {
 ///     generated_file::regenerate_recording(changes, command_line, directory)
 /// })?;
 /// println!("{regenerated}");

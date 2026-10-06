@@ -145,7 +145,8 @@ fn directory_of(root_manifest: &Path) -> Result<PathBuf, Failure> {
 /// let directory = std::env::current_dir()
 ///     .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
 /// let lockfile = workspace::lockfile(&directory)?;
-/// let wording = Wording::project("running `import greeter` again");
+/// let root = workspace::root(&directory)?;
+/// let wording = Wording::project(&root, "running `import greeter` again");
 /// let created = rollback::attempt(wording, |changes| {
 ///     changes.run_changing(&[lockfile.as_path()], || {
 ///         // ... a subprocess that may write the lockfile.

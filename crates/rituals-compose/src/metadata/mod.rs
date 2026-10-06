@@ -133,8 +133,10 @@ pub fn fetch(current_dir: &Path) -> Result<Metadata, Failure> {
 ///
 /// // Shells out to a real `cargo metadata` and needs a workspace on disk
 /// // to run against, so this example is `no_run`.
-/// let members = rollback::attempt(Wording::project("running `remove lint` again"), |changes| {
-///     let document = metadata::fetch_recording(changes, Path::new("."))?;
+/// let root = Path::new("/path/to/the/workspace");
+/// let wording = Wording::project(root, "running `remove lint` again");
+/// let members = rollback::attempt(wording, |changes| {
+///     let document = metadata::fetch_recording(changes, root)?;
 ///     // ... a refusal from here on leaves the lockfile as it was found.
 ///     Ok(document.member_directories().len())
 /// })?;
@@ -261,11 +263,12 @@ pub fn surroundings(current_dir: &Path) -> Result<Surroundings, Failure> {
 ///
 /// // Shells out to a real `cargo metadata` and needs a workspace on disk
 /// // to run against, so this example is `no_run`.
-/// let wording = Wording::project(directory, "running `import greeter` again");
+/// let root = Path::new("/path/to/the/workspace");
+/// let wording = Wording::project(root, "running `import greeter` again");
 /// let workspace_root = rollback::attempt(wording, |changes| {
 ///     let document = metadata::fetch_in_its_own_project(
 ///         changes,
-///         Path::new("."),
+///         root,
 ///         "demo-ritual",
 ///         "import",
 ///         "greeter",
