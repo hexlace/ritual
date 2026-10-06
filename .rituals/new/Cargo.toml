@@ -19,6 +19,7 @@ rituals-compose.workspace = true
 # renders, rather than re-deriving the same escape table in a second,
 # hand-written check.
 toml_edit.workspace = true
+# The scratch directory and skip notice every crate's unit tests share.
 rituals-compose = { workspace = true, features = ["test-util"] }
 
 [package.metadata.ritual]
