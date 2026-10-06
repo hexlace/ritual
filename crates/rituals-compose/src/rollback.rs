@@ -749,11 +749,11 @@ impl Changes {
     }
 }
 
-/// `failure` with `clause` continuing its sentence. The full stop that ended
-/// the failure, which several refusals carry, goes first, because the clause
-/// follows a semicolon.
+/// `failure`, every cause included, with `clause` continuing its sentence.
+/// The full stop that ended the failure, which several refusals carry, goes
+/// first, because the clause follows a semicolon.
 fn continued(failure: &Failure, clause: &str) -> Failure {
-    let failure = failure.to_string();
+    let failure = failure.with_causes().to_string();
     let failure = failure.strip_suffix('.').unwrap_or(&failure);
     Failure::new(format!("{failure}{clause}"))
 }
@@ -1237,6 +1237,7 @@ mod tests {
         };
         assert!(
             reported
+                .with_causes()
                 .to_string()
                 .starts_with(&format!("reading {} failed", unreadable.display())),
             "expected the unreadable path to be named: {reported}"
@@ -1447,6 +1448,29 @@ mod tests {
             reported.to_string(),
             "`add` would be a top-level command twice; ritual put the project back as it \
              found it"
+        );
+        Ok(())
+    }
+
+    /// A failure with a cause is continued after the cause, so the report
+    /// keeps everything the refusal line would have named.
+    #[test]
+    fn a_failure_with_a_cause_is_continued_after_its_cause() -> TestOutcome {
+        let scratch = ScratchDir::new("rollback-caused-continued")?;
+        let path = scratch.path().join("Cargo.lock");
+
+        let outcome = attempt(wording(scratch.path()), |changes| {
+            changes.write(&path, "version = 4\n")?;
+            Err::<(), _>(
+                Failure::new("writing Cargo.toml failed")
+                    .caused_by(std::io::Error::other("disk full")),
+            )
+        });
+
+        let reported = outcome.err().ok_or("expected the run to fail")?;
+        assert_eq!(
+            reported.with_causes().to_string(),
+            "writing Cargo.toml failed: disk full; ritual put the project back as it found it"
         );
         Ok(())
     }

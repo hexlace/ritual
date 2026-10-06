@@ -13,12 +13,15 @@ pub type Outcome = Result<(), Failure>;
 ///
 /// Build one with [`Failure::new`], and chain [`Failure::caused_by`] when
 /// there is an underlying error to attach. The composed command line prints
-/// it as `<bin name>: <message>` and exits with status 1, so a message says
-/// what went wrong and what to do about it, without a prefix of its own.
+/// it as `<bin name>: <message>`, followed by each cause in turn, and exits
+/// with status 1, so a message says what went wrong and what to do about it,
+/// without a prefix of its own.
 ///
-/// [`Display`](fmt::Display) renders `<message>`, or `<message>: <cause>`
-/// when a cause is attached. The cause also stays reachable through
-/// [`std::error::Error::source`] for a caller that wants the typed value.
+/// It follows the usual convention for an error: [`Display`](fmt::Display)
+/// renders the message alone, and the cause is reachable through
+/// [`std::error::Error::source`]. [`Failure::with_causes`] renders the whole
+/// chain, `<message>: <cause>: <its cause>…`, the way the refusal line does,
+/// for code that writes a `Failure` into text of its own.
 ///
 /// # Examples
 ///
@@ -41,9 +44,9 @@ pub type Outcome = Result<(), Failure>;
 // One type for every refusal rather than an error type per failure mode:
 // its only consumer is a person reading stderr, a taxonomy nothing branches
 // on would be surface with no use, and the message itself is the contract.
-// Display carries the cause so that anything embedding a `Failure` in a
-// longer message carries the cause by construction and nothing prints it a
-// second time.
+// Display is the message alone so that a `Failure` can itself be a cause:
+// anything that walks the chain, the refusal line included, then prints each
+// link once, however deep it goes.
 #[derive(Debug)]
 pub struct Failure {
     message: String,
@@ -70,10 +73,13 @@ impl Failure {
 
     /// Attaches `cause` as this refusal's underlying error.
     ///
-    /// The cause becomes part of this failure's own [`Display`](fmt::Display)
-    /// — `<message>: <cause>` — and stays reachable on its own through
-    /// [`std::error::Error::source`] for a caller that wants the typed
-    /// value rather than its rendered text.
+    /// The cause is this failure's [`source`](std::error::Error::source),
+    /// and stays out of its [`Display`](fmt::Display), which is the message
+    /// alone. The refusal line names it after the message, and then the
+    /// cause's own source, and so on down the chain, so a cause whose own
+    /// `Display` names only its own situation, as the convention is, still
+    /// reaches the person reading it in full. [`Failure::with_causes`]
+    /// renders that same line without the bin name.
     ///
     /// # Examples
     ///
@@ -92,8 +98,9 @@ impl Failure {
     ///
     /// let failure = Failure::new("writing .rituals/lint/Cargo.toml failed").caused_by(IoLike);
     /// assert!(std::error::Error::source(&failure).is_some());
+    /// assert_eq!(failure.to_string(), "writing .rituals/lint/Cargo.toml failed");
     /// assert_eq!(
-    ///     failure.to_string(),
+    ///     failure.with_causes().to_string(),
     ///     "writing .rituals/lint/Cargo.toml failed: disk full"
     /// );
     /// ```
@@ -102,14 +109,56 @@ impl Failure {
         self.source = Some(Box::new(cause));
         self
     }
+
+    /// Renders this refusal with every cause under it: the message, then
+    /// each [`source`](std::error::Error::source) in turn, joined with `: `.
+    ///
+    /// This is the refusal line without the `<bin name>: ` in front, for
+    /// code that writes a `Failure` into text of its own, such as a longer
+    /// message. Each link is rendered by its own
+    /// [`Display`](fmt::Display), so a cause that follows the convention
+    /// (its own situation only, the rest through `source()`) appears once.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rituals::Failure;
+    ///
+    /// let failure = Failure::new("importing lint failed")
+    ///     .caused_by(Failure::new("regenerating the command line failed"));
+    /// assert_eq!(
+    ///     format!("{}; run regenerate to finish", failure.with_causes()),
+    ///     "importing lint failed: regenerating the command line failed; run regenerate to finish"
+    /// );
+    /// ```
+    #[must_use]
+    pub fn with_causes(&self) -> impl fmt::Display + '_ {
+        WithCauses(self)
+    }
+}
+
+/// A [`Failure`] rendered with its whole chain of causes, as
+/// [`Failure::with_causes`] returns it.
+struct WithCauses<'failure>(&'failure Failure);
+
+impl fmt::Display for WithCauses<'_> {
+    // No bound on the walk: each link in an error chain owns or borrows the
+    // next from something it holds, so the chain ends where an error has no
+    // source.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0.message)?;
+        let mut cause = std::error::Error::source(self.0);
+        while let Some(link) = cause {
+            write!(formatter, ": {link}")?;
+            cause = link.source();
+        }
+        Ok(())
+    }
 }
 
 impl fmt::Display for Failure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.source {
-            Some(cause) => write!(formatter, "{}: {cause}", self.message),
-            None => formatter.write_str(&self.message),
-        }
+        formatter.write_str(&self.message)
     }
 }
 
@@ -166,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn display_carries_the_cause_when_one_is_attached_and_omits_it_otherwise() {
+    fn display_is_the_message_alone_whether_or_not_a_cause_is_attached() {
         #[derive(Debug)]
         struct Cause;
         impl std::fmt::Display for Cause {
@@ -177,7 +226,7 @@ mod tests {
         impl Error for Cause {}
 
         let caused = Failure::new("writing failed").caused_by(Cause);
-        assert_eq!(caused.to_string(), "writing failed: the underlying cause");
+        assert_eq!(caused.to_string(), "writing failed");
 
         let plain = Failure::new("writing failed");
         assert_eq!(plain.to_string(), "writing failed");

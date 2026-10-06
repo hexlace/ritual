@@ -402,7 +402,7 @@ mod tests {
     fn enclosing_checkout() -> Result<std::path::PathBuf, String> {
         let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let located = crate::workspace::locate_project(crate_dir, true)
-            .map_err(|failure| format!("cargo could not be asked: {failure}"))?;
+            .map_err(|failure| format!("cargo could not be asked: {}", failure.with_causes()))?;
         let manifest = match located {
             crate::workspace::Located::Found(manifest) => manifest,
             crate::workspace::Located::NotFound(stderr) => {

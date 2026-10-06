@@ -48,7 +48,7 @@ mod tests {
         let work_tree = WorkTree::take(root);
         let repository = work_tree
             .ensure_clean("cargo ritual migrate")
-            .map_err(|failure| failure.to_string())?;
+            .map_err(|failure| failure.with_causes().to_string())?;
         Ok(lines(root, repository))
     }
 
@@ -91,7 +91,7 @@ mod tests {
         let work_tree = WorkTree::take(&repository_root);
         let repository = work_tree
             .ensure_clean("cargo ritual migrate")
-            .map_err(|failure| failure.to_string())?;
+            .map_err(|failure| failure.with_causes().to_string())?;
         let elsewhere = scratch.path().join("elsewhere");
         std::fs::create_dir_all(&elsewhere)?;
 
@@ -157,7 +157,7 @@ mod tests {
 
         let repository = work_tree
             .ensure_clean("cargo ritual migrate")
-            .map_err(|failure| failure.to_string())?;
+            .map_err(|failure| failure.with_causes().to_string())?;
 
         assert_eq!(lines(root, repository), ["new.md still mentions tasks/"]);
         Ok(())

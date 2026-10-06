@@ -255,6 +255,7 @@ mod tests {
 
         assert!(
             refused.err().is_some_and(|failure| failure
+                .with_causes()
                 .to_string()
                 .contains(&missing.display().to_string())),
             "expected the failure to name {}",

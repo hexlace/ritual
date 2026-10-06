@@ -714,7 +714,7 @@ mod tests {
             return Err("deleting a missing directory should fail".into());
         };
 
-        let message = failure.to_string();
+        let message = failure.with_causes().to_string();
         assert!(message.contains("deleting tasks/lint failed"), "{message}");
         assert!(
             message.contains("the manifests are already updated"),

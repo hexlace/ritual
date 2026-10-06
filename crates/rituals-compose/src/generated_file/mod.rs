@@ -517,7 +517,8 @@ mod tests {
     #[test]
     fn a_task_key_is_never_made_from_std_or_core() -> TestOutcome {
         for hidden in ["std", "core"] {
-            let refused = TaskKey::new(Name::new(hidden)?).map_err(|failure| failure.to_string());
+            let refused = TaskKey::new(Name::new(hidden)?)
+                .map_err(|failure| failure.with_causes().to_string());
             assert_eq!(
                 refused,
                 Err(format!(

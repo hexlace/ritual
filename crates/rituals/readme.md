@@ -86,6 +86,12 @@ $ cargo ritual lines missing.txt
 ritual: reading missing.txt failed: No such file or directory (os error 2)
 ```
 
+The line names the cause after the message, then the cause's own
+`source()`, and so on down the chain, each joined with `: `. A `Failure`
+follows the usual convention for an error: its `Display` is the message
+alone, and the cause is its `source()`. To write a `Failure` into text of your
+own, with every cause, use `failure.with_causes()`.
+
 ## Running a task
 
 A task runs inside a project's command line. The `ritual` binary, from

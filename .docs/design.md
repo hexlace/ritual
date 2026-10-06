@@ -954,6 +954,10 @@ One type, `rituals::Failure`, carries every refusal. Its only consumer is a
 person reading stderr, so the message is the contract, and a taxonomy
 nothing branches on would be surface without a use. Dispatch prefixes every
 refusal line with `<bin name>: `, in one place, so no task writes that prefix
-itself. Refusals exit with status 1. Argument errors clap raises on its own,
+itself. A `Failure` follows the usual convention for an error: its `Display`
+is the message alone and its cause is `source()`. The refusal line walks that
+chain, joining each link with `: `, so a cause several levels down still
+reaches the person reading it and none is printed twice. Refusals exit with
+status 1. Argument errors clap raises on its own,
 such as an unknown flag or a missing value, keep clap's formatting and exit
 with status 2.
