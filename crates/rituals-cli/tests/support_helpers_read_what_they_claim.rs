@@ -222,6 +222,34 @@ fn a_snapshot_records_an_empty_directory() -> TestOutcome {
     Ok(())
 }
 
+/// A link pointed at a second file with the same bytes as the first reads
+/// the same through the link, so only a snapshot that records the link
+/// itself sees that it was retargeted. A link is never followed, so one that
+/// leads nowhere is recorded too.
+#[test]
+fn a_snapshot_records_a_link_and_sees_it_retargeted() -> TestOutcome {
+    let root = TempDir::new("snapshot-retargeted-link")?;
+    write_text(&root.path().join("first"), "same\n")?;
+    write_text(&root.path().join("second"), "same\n")?;
+    std::os::unix::fs::symlink("first", root.path().join("link"))?;
+    std::os::unix::fs::symlink("missing", root.path().join("dangling"))?;
+    let before = snapshot_tree(root.path())?;
+
+    std::fs::remove_file(root.path().join("link"))?;
+    std::os::unix::fs::symlink("second", root.path().join("link"))?;
+    let after = snapshot_tree(root.path())?;
+
+    assert_eq!(
+        changed_paths(&before, &after),
+        [std::path::PathBuf::from("link")]
+    );
+    assert_eq!(
+        after.get(std::path::Path::new("dangling")),
+        Some(&Entry::Link("missing".into()))
+    );
+    Ok(())
+}
+
 /// A generated file, captured from a project scaffolded by `ritual new demo`
 /// after `cargo ritual add my-task`, from its `main` function down.
 const CAPTURED_GENERATED_FILE: &str = "#[rustfmt::skip]

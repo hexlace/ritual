@@ -34,7 +34,8 @@
 //! - `test-util` — adds `git::fixture`, a `git` that reads nothing from the
 //!   machine it runs on and the commands that build a fixture repository, for
 //!   a crate whose tests run against `git`; and `test_util`, the scratch
-//!   directory every crate's unit tests share. Nothing needs it at run time.
+//!   directory and tree snapshot every crate's unit tests share. Nothing needs
+//!   it at run time.
 //!
 //! # Examples
 //!

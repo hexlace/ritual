@@ -1,6 +1,7 @@
 //! What this crate's tests share: the outcome a test returns, a scratch
 //! project and `import`'s arguments as a person types them, and the scratch
-//! directory every crate's unit tests take from `rituals_compose::test_util`.
+//! directory and tree snapshot every crate's unit tests take from
+//! `rituals_compose::test_util`.
 //
 // `redundant_pub_crate` (clippy nursery) wants `pub` here because this
 // module is private, but `pub(crate)` is the visibility that is actually
@@ -19,7 +20,7 @@ use rituals::clap::{self, CommandFactory, Parser};
 
 use crate::arguments::ImportArguments;
 
-pub(crate) use rituals_compose::test_util::ScratchDir;
+pub(crate) use rituals_compose::test_util::{ScratchDir, Snapshot, snapshot};
 
 /// What a test in this crate returns — the error path carries only a setup
 /// failure (a filesystem operation, a TOML fixture that would not parse),
@@ -58,10 +59,6 @@ fn parse_typed(words: &[&str]) -> Result<Typed, clap::Error> {
     full.extend_from_slice(words);
     Typed::try_parse_from(full)
 }
-
-/// Every file under a directory tree, as a path paired with its bytes,
-/// sorted by path: a before and after to compare a run against.
-pub(crate) type Snapshot = Vec<(PathBuf, Vec<u8>)>;
 
 /// How the CLI crate and every crate written beside it depend on the
 /// project's `rituals`, from one directory below the workspace root.
@@ -163,22 +160,9 @@ impl ScratchProject {
         Ok(self)
     }
 
+    /// The project's whole tree, symbolic links as links, for a before and
+    /// after to compare a run against.
     pub(crate) fn snapshot(&self) -> Result<Snapshot, Box<dyn Error>> {
-        let mut files = Vec::new();
-        let mut pending = vec![self.root().to_path_buf()];
-        while let Some(directory) = pending.pop() {
-            for entry in std::fs::read_dir(&directory)? {
-                let entry = entry?;
-                let path = entry.path();
-                if entry.file_type()?.is_dir() {
-                    pending.push(path);
-                } else {
-                    let bytes = std::fs::read(&path)?;
-                    files.push((path, bytes));
-                }
-            }
-        }
-        files.sort_by(|left, right| left.0.cmp(&right.0));
-        Ok(files)
+        Ok(snapshot(self.root())?)
     }
 }

@@ -155,10 +155,10 @@ fn a_clean_submodule_in_the_task_is_refused_as_a_repository_of_its_own() -> Test
 /// `tasks/greet` as a symbolic link to `vendor/greet`, with only the target
 /// committed. Deleting the directory removes the link alone, so the link is
 /// what git has to give back, and an untracked one is refused, named by its
-/// own path rather than its target's, with the link still in place: the
-/// tree snapshot walks only directories and regular files, so the link is
-/// checked by itself. Once the link is committed, `remove` deletes the link
-/// and leaves its target.
+/// own path rather than its target's, with the link still in place and
+/// pointing where it did: the tree snapshot records a link with its target.
+/// Once the link is committed, `remove` deletes the link and leaves its
+/// target.
 #[test]
 fn an_untracked_link_at_the_task_directory_is_refused_naming_the_link() -> TestOutcome {
     in_checkout(|checkout| {
@@ -195,11 +195,6 @@ fn an_untracked_link_at_the_task_directory_is_refused_naming_the_link() -> TestO
             "greet",
             &[":/tasks/greet;", "git cannot give back"],
         )?;
-        assert_eq!(
-            std::fs::read_link(&link)?,
-            std::path::Path::new("../vendor/greet"),
-            "a refused remove must leave the link as it was"
-        );
 
         git::commit_everything(project.root())?;
         project

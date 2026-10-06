@@ -1,6 +1,6 @@
 //! What this crate's tests share: the outcome a test returns, and the
-//! scratch directory and skip notice every crate's unit tests take from
-//! `rituals_compose::test_util`.
+//! scratch directory, tree snapshot and skip notice every crate's unit
+//! tests take from `rituals_compose::test_util`.
 //
 // `redundant_pub_crate` (clippy nursery) wants `pub` here because this
 // module is private, but `pub(crate)` is the visibility that is actually
@@ -14,7 +14,7 @@
 
 use std::error::Error;
 
-pub(crate) use rituals_compose::test_util::{ScratchDir, report_skip};
+pub(crate) use rituals_compose::test_util::{ScratchDir, Snapshot, report_skip, snapshot};
 
 /// What a test in this crate returns — the error path carries only a setup
 /// failure (a filesystem operation, a TOML fixture that would not parse),
