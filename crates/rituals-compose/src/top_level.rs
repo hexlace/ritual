@@ -111,13 +111,22 @@ fn help_collision_refusal(command_line: &CommandLine) -> Failure {
 /// project names its command line something else.
 pub const MANAGEMENT_BUNDLE_KEY: &str = "ritual";
 
-/// Returns what a person types to run `command` from ritual's own bundle.
+/// Returns what a person types to run `command` from ritual's own bundle,
+/// called from one of that bundle's own tasks.
 ///
-/// That is `cargo ritual regenerate` in a default project, and
-/// `cargo acme ritual regenerate` in one made with `--cli acme`.
+/// The running task's command path says where the bundle is mounted: every
+/// name in it but the task's own. So this is `cargo ritual regenerate` in a
+/// default project, where the bundle is flattened into the top level,
+/// `cargo acme ritual regenerate` in one made with `--cli acme`, and
+/// `cargo ritual tools regenerate` in a project that mounted the bundle
+/// under `tools`. The bin and its alias are spelled as
+/// [`CommandLine::cargo_command`] spells them, and the result holds where
+/// that does.
 ///
 /// Every line ritual prints that names one of its own commands as a next
-/// step spells it with this, so the hint is one a person can copy.
+/// step spells it with this, so the hint is one a person can copy. Called
+/// from a task outside ritual's bundle, it names that task's own sibling,
+/// which is not ritual's `command`.
 ///
 /// # Examples
 ///
@@ -141,18 +150,18 @@ pub const MANAGEMENT_BUNDLE_KEY: &str = "ritual";
 /// ```
 #[must_use]
 pub fn management_command(command_line: &CommandLine, command: &str) -> String {
-    let bin_name = command_line.identity().binary_name();
-    // Ritual's bundle is flattened exactly when the bin is named after the
-    // key it is mounted under. The running binary cannot see which key a
-    // project mounted it under, so this names the one `new` writes; a
-    // project that remounted the bundle by hand chose that key itself.
-    // The flattened command list cannot decide this: it names commands, not
-    // the bundle they came from, so another flattened bundle's own
-    // `regenerate` would read as ritual's.
-    if bin_name == MANAGEMENT_BUNDLE_KEY {
-        return format!("cargo {bin_name} {command}");
+    let path = command_line.command_path();
+    // The path is never empty, so the running task's own name is always
+    // there to drop; what is left is the key path of the bundle it is in.
+    let bundle_path = path
+        .split_last()
+        .map_or(path, |(_, bundle_path)| bundle_path);
+    let mut hint = format!("cargo {}", command_line.identity().binary_name());
+    for name in bundle_path.iter().copied().chain([command]) {
+        hint.push(' ');
+        hint.push_str(name);
     }
-    format!("cargo {bin_name} {MANAGEMENT_BUNDLE_KEY} {command}")
+    hint
 }
 
 #[cfg(test)]
@@ -192,6 +201,35 @@ mod tests {
             management_command(&command_line, "regenerate"),
             "cargo ritual regenerate"
         );
+    }
+
+    /// A project that mounts ritual's bundle under a key of its own choosing
+    /// gets hints through that key, not through the one `new` writes.
+    #[test]
+    fn a_hint_goes_through_the_key_the_project_mounted_rituals_bundle_under() {
+        let command_line = a_command_line_running(&[], &["tools", "remove"]);
+        assert_eq!(
+            management_command(&command_line, "regenerate"),
+            "cargo acme tools regenerate"
+        );
+    }
+
+    /// Naming the running task itself gives back the command that ran: the
+    /// hint and the rendering `rituals` gives are one spelling, whichever
+    /// shape the bundle is mounted in.
+    #[test]
+    fn a_hint_for_the_running_task_is_its_own_cargo_command() {
+        for path in [
+            &["remove"][..],
+            &["ritual", "remove"],
+            &["tools", "nested", "remove"],
+        ] {
+            let command_line = a_command_line_running(&[], path);
+            assert_eq!(
+                management_command(&command_line, "remove"),
+                command_line.cargo_command()
+            );
+        }
     }
 
     fn a_command_line(flattened_commands: &[&'static str]) -> rituals::CommandLine {
