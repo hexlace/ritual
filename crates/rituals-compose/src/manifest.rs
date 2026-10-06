@@ -97,7 +97,7 @@ impl Manifest {
     ///
     /// ```
     /// use rituals_compose::manifest::Manifest;
-    /// use rituals_compose::rollback;
+    /// use rituals_compose::rollback::{self, Wording};
     ///
     /// # let directory = std::env::temp_dir()
     /// #     .join(format!("rituals-compose-doctest-manifest-write-{}", std::process::id()));
@@ -107,7 +107,8 @@ impl Manifest {
     /// let mut manifest = Manifest::read(&manifest_path)?;
     /// manifest.append_workspace_member(".rituals/lint")?;
     ///
-    /// rollback::attempt("running `add lint` again", |changes| manifest.write(changes))?;
+    /// let wording = Wording::project("running `create lint` again");
+    /// rollback::attempt(wording, |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
     /// assert!(on_disk.contains(".rituals/lint"));
@@ -219,7 +220,7 @@ impl Manifest {
     /// use rituals::Name;
     /// use rituals_compose::generated_file::TaskKey;
     /// use rituals_compose::manifest::Manifest;
-    /// use rituals_compose::rollback;
+    /// use rituals_compose::rollback::{self, Wording};
     ///
     /// # let directory = std::env::temp_dir()
     /// #     .join(format!("rituals-compose-doctest-manifest-import-{}", std::process::id()));
@@ -233,7 +234,8 @@ impl Manifest {
     /// let name = TaskKey::new(Name::new("lint")?)?;
     ///
     /// manifest.import_task(&name, "../.rituals/lint")?;
-    /// rollback::attempt("running `add lint` again", |changes| manifest.write(changes))?;
+    /// let wording = Wording::project("running `create lint` again");
+    /// rollback::attempt(wording, |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
     /// assert!(on_disk.contains("lint = { path = \"../.rituals/lint\" }"));
@@ -314,7 +316,7 @@ impl Manifest {
     /// use rituals::Name;
     /// use rituals_compose::generated_file::TaskKey;
     /// use rituals_compose::manifest::Manifest;
-    /// use rituals_compose::rollback;
+    /// use rituals_compose::rollback::{self, Wording};
     ///
     /// # let directory = std::env::temp_dir()
     /// #     .join(format!("rituals-compose-doctest-manifest-append-task-{}", std::process::id()));
@@ -328,7 +330,8 @@ impl Manifest {
     ///
     /// // `cargo add` wrote the dependency; the list is what is left to edit.
     /// manifest.append_task(&TaskKey::new(Name::new("greeter")?)?)?;
-    /// rollback::attempt("running `import greeter` again", |changes| manifest.write(changes))?;
+    /// let wording = Wording::project("running `import greeter` again");
+    /// rollback::attempt(wording, |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
     /// assert!(on_disk.contains("tasks = [\"new\", \"greeter\"]"));

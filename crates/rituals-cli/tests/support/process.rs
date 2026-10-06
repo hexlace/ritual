@@ -154,6 +154,35 @@ pub(crate) fn cargo_query(current_dir: &Path, arguments: &[&str]) -> Outcome<Run
     )
 }
 
+/// Runs `cargo` with `arguments` in `current_dir` so that it cannot reach
+/// any registry: `--offline` is what a caller would type, `CARGO_NET_OFFLINE`
+/// says it again to every Cargo the first starts, and `CARGO_HOME` is the
+/// empty directory `cargo_home`, so no registry index or crate the machine
+/// has cached can answer in the story's place.
+///
+/// For a story whose subject is what Cargo says before it needs a registry,
+/// such as `cargo publish --dry-run` refusing a crate that may not be
+/// published. Whatever it prints about a registry it could not read is the
+/// proof nothing was read.
+pub(crate) fn cargo_without_a_registry(
+    current_dir: &Path,
+    target_dir: &Path,
+    cargo_home: &Path,
+    arguments: &[&str],
+) -> Outcome<RunOutput> {
+    let mut command = Command::new(cargo_program()?);
+    command
+        .arg("--offline")
+        .args(arguments)
+        .current_dir(current_dir)
+        .env("CARGO_HOME", cargo_home)
+        .env("CARGO_NET_OFFLINE", "true");
+    run_to_completion(
+        in_own_target_dir(&mut command, target_dir),
+        &format!("`cargo --offline {}`", arguments.join(" ")),
+    )
+}
+
 /// Runs `cargo` with `arguments` in `current_dir` with neither Cargo
 /// location set, whatever this process's own environment carries — so the
 /// build lands where Cargo puts it by default, `<workspace>/target`, and

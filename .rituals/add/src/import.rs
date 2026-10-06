@@ -17,7 +17,7 @@ use rituals::{CommandLine, Failure, Name, Outcome, report};
 use rituals_compose::generated_file::TaskKey;
 use rituals_compose::layout::TaskPlace;
 use rituals_compose::manifest::Manifest;
-use rituals_compose::rollback::{self, Changes};
+use rituals_compose::rollback::{self, Changes, Wording};
 use rituals_compose::source::Source;
 use rituals_compose::{generated_file, task_crate, top_level};
 
@@ -82,7 +82,7 @@ impl Import {
 /// same path `regenerate` does, or puts the project back and reports why.
 pub(crate) fn finish(command_line: &CommandLine, mut import: Import) -> Outcome {
     let retry = import.retry();
-    rollback::attempt(&retry, |changes| import.write(changes))?;
+    rollback::attempt(Wording::project(&retry), |changes| import.write(changes))?;
     finish_by_regenerating(command_line, &import)
 }
 
@@ -156,7 +156,7 @@ mod tests {
     use rituals_compose::generated_file::TaskKey;
     use rituals_compose::layout;
     use rituals_compose::manifest::Manifest;
-    use rituals_compose::rollback::{self, Changes};
+    use rituals_compose::rollback::{self, Changes, Wording};
 
     use super::{Import, next_step};
     use crate::test_support::{ScratchDir, TestOutcome};
@@ -269,7 +269,7 @@ mod tests {
         steps: impl FnOnce(&mut Import, &mut Changes) -> Outcome,
     ) -> Failure {
         let retry = import.retry();
-        let outcome = rollback::attempt(&retry, |changes| {
+        let outcome = rollback::attempt(Wording::project(&retry), |changes| {
             steps(import, changes)?;
             Err::<(), _>(Failure::new("simulated failure"))
         });

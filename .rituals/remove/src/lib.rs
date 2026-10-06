@@ -50,8 +50,8 @@ pub fn task() -> Task {
 fn run(command_line: &CommandLine, arguments: &RemoveArguments) -> Outcome {
     let current_dir = std::env::current_dir()
         .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
-    // Where there is no project at all there is nothing to put back, so this
-    // is refused before the run that would say it put the project back.
+    // Where there is no project at all no command can run, so this is asked
+    // before the run begins, and the refusal names the command to run instead.
     metadata::ensure_inside_a_project(&current_dir, "remove", &arguments.name)?;
     removal::finish(command_line, &arguments.name, |changes| {
         // `cargo metadata` creates or rewrites a missing or stale lockfile,

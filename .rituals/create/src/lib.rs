@@ -5,6 +5,7 @@
 use std::path::Path;
 
 use rituals::{Failure, Name, Outcome, Task, clap, report};
+use rituals_compose::rollback::{self, Wording};
 use rituals_compose::source::{Source, SourceArguments, assert_is_a_ritual_checkout};
 use rituals_compose::{shell, task_crate, workspace};
 
@@ -52,13 +53,16 @@ fn run(arguments: &Arguments) -> Outcome {
         )));
     }
 
-    std::fs::create_dir(&target_dir).map_err(|error| {
-        Failure::new(format!("creating {} failed", target_dir.display())).caused_by(error)
-    })?;
-
-    if let Err(failure) = write_crate(&target_dir, &name, &source) {
-        return Err(undo(&target_dir, &name, &failure));
-    }
+    // The directory is spelled as typed in the report, because that is what
+    // a person looks for next to where they ran `create`.
+    let retry = format!("running `create {name}` again");
+    rollback::attempt(
+        Wording::fresh_directory(Path::new(name.as_str()), &retry),
+        |changes| {
+            changes.reserve_directory(&target_dir)?;
+            write_crate(&target_dir, &name, &source)
+        },
+    )?;
 
     for line in next_steps(&name, &target_dir) {
         report(line);
@@ -94,9 +98,9 @@ fn next_steps(name: &Name, crate_dir: &Path) -> Vec<String> {
 }
 
 /// Writes every file `create` scaffolds into `target_dir`, which the caller
-/// has already created and refused to reuse. Stops at the first failure —
-/// [`run`] removes `target_dir` wholesale on one, rather than this function
-/// trying to undo file by file.
+/// has already reserved and refused to reuse. Stops at the first failure —
+/// the rollback [`run`] holds removes `target_dir` wholesale on one, rather
+/// than this function trying to undo file by file.
 fn write_crate(target_dir: &Path, name: &Name, source: &Source) -> Outcome {
     let source_directory = target_dir.join("src");
     std::fs::create_dir_all(&source_directory).map_err(|error| {
@@ -116,26 +120,6 @@ fn write_crate(target_dir: &Path, name: &Name, source: &Source) -> Outcome {
     report(format!("created {name}/src/lib.rs"));
 
     Ok(())
-}
-
-/// Removes `target_dir` after [`write_crate`] fails partway, and folds the
-/// removal's own outcome into the refusal — parity with `add`'s own undo:
-/// a run that does not finish leaves nothing behind, and says whether it
-/// managed to.
-///
-/// `failure`'s own `Display` already carries its attached cause, so
-/// formatting `{failure}` directly here is enough — this needs no local
-/// rendering of its own.
-fn undo(target_dir: &Path, name: &Name, failure: &Failure) -> Failure {
-    match std::fs::remove_dir_all(target_dir) {
-        Ok(()) => Failure::new(format!(
-            "{failure}; ritual removed {name} so a retry starts clean"
-        )),
-        Err(_removal_error) => Failure::new(format!(
-            "{failure}; ritual could not remove {name} — check it before running `create \
-             {name}` again"
-        )),
-    }
 }
 
 /// Turns a `--path` source into the absolute path of the `rituals`
@@ -198,7 +182,8 @@ mod tests {
         drop(writeln!(std::io::stderr(), "SKIPPED {message}"));
     }
 
-    use rituals::Name;
+    use rituals::{Failure, Name};
+    use rituals_compose::rollback::{self, Wording};
     use rituals_compose::source::Source;
     use rituals_compose::workspace;
 
@@ -352,13 +337,29 @@ mod tests {
         }
     }
 
-    /// A directory in place of `Cargo.toml` makes `std::fs::write` fail with
-    /// `EISDIR` — the poison [`write_crate`](super::write_crate) exercises
-    /// here and in the sibling test below, mirroring how a real write can
-    /// fail partway through scaffolding.
-    fn poison_manifest_path(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        std::fs::create_dir_all(target_dir.join("Cargo.toml"))?;
-        Ok(())
+    /// Runs `create`'s write inside the rollback it runs in: reserves
+    /// `target_dir`, makes a directory where `Cargo.toml` is to go, so the
+    /// first file write fails with `EISDIR` the way a real write can fail
+    /// partway through scaffolding, and then lets `after_failed_write` act
+    /// before the rollback undoes the run.
+    fn failed_create(
+        target_dir: &Path,
+        after_failed_write: impl FnOnce() -> std::io::Result<()>,
+    ) -> Result<(), Failure> {
+        let name = demo_name();
+        let retry = "running `create demo` again";
+        rollback::attempt(
+            Wording::fresh_directory(Path::new("demo"), retry),
+            |changes| {
+                changes.reserve_directory(target_dir)?;
+                std::fs::create_dir(target_dir.join("Cargo.toml")).map_err(|error| {
+                    Failure::new("making the poisoned manifest path failed").caused_by(error)
+                })?;
+                let written = super::write_crate(target_dir, &name, &Source::Inherited);
+                after_failed_write().map_err(|error| Failure::new("setup").caused_by(error))?;
+                written
+            },
+        )
     }
 
     #[test]
@@ -366,27 +367,21 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let scratch = ScratchDir::new("write-failure")?;
         let target_dir = scratch.path().join("demo");
-        poison_manifest_path(&target_dir)?;
-        let name = demo_name();
 
-        let write_result = super::write_crate(&target_dir, &name, &Source::Inherited);
+        let outcome = failed_create(&target_dir, || Ok(()));
+
+        let failure = outcome
+            .err()
+            .ok_or("expected the poisoned manifest path to fail the write")?;
+        let message = failure.to_string();
         assert!(
-            write_result.is_err(),
-            "expected the poisoned manifest path to fail the write"
+            message.contains(&target_dir.join("Cargo.toml").display().to_string()),
+            "expected the message to name the path that failed to write: {message}"
         );
-
-        if let Err(failure) = write_result {
-            let reported = super::undo(&target_dir, &name, &failure);
-            let message = reported.to_string();
-            assert!(
-                message.contains(&target_dir.join("Cargo.toml").display().to_string()),
-                "expected the message to name the path that failed to write: {message}"
-            );
-            assert!(
-                message.contains("ritual removed demo so a retry starts clean"),
-                "expected the message to say the root was removed: {message}"
-            );
-        }
+        assert!(
+            message.ends_with("; ritual removed demo so a retry starts clean"),
+            "expected the message to say the root was removed: {message}"
+        );
         assert!(
             !target_dir.exists(),
             "the root must be gone after a successful removal"
@@ -395,11 +390,9 @@ mod tests {
     }
 
     /// A directory without write permission refuses to have entries removed
-    /// from it — `chmod 0o555` on `target_dir` after the poisoned write has
-    /// already failed makes `undo`'s `remove_dir_all` fail in turn, with no
-    /// need for anything to hold the directory open. Unix-only: this
-    /// permission model has no direct Windows equivalent.
-    #[cfg(unix)]
+    /// from it: `chmod 0o555` on `target_dir` after the poisoned write has
+    /// already failed makes the rollback's removal fail in turn, with no
+    /// need for anything to hold the directory open.
     #[test]
     fn a_write_failure_reports_the_root_when_removal_also_fails()
     -> Result<(), Box<dyn std::error::Error>> {
@@ -407,27 +400,23 @@ mod tests {
 
         let scratch = ScratchDir::new("write-failure-unremovable")?;
         let target_dir = scratch.path().join("demo");
-        poison_manifest_path(&target_dir)?;
-        let name = demo_name();
+        let mut permission_is_enforced = false;
 
-        let write_result = super::write_crate(&target_dir, &name, &Source::Inherited);
-        assert!(
-            write_result.is_err(),
-            "expected the poisoned manifest path to fail the write"
-        );
+        let outcome = failed_create(&target_dir, || {
+            std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o555))?;
+            // Root ignores a directory's missing write bit, so this probe
+            // tells whether the permission above actually blocks this
+            // process.
+            permission_is_enforced = std::fs::File::create(target_dir.join("probe")).is_err();
+            Ok(())
+        });
 
-        std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o555))?;
+        // Restore permissions before any assertion can return early, so the
+        // scratch directory this test made is still removable on drop
+        // whether or not the assertions below pass.
+        std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o755))?;
 
-        // Root ignores a directory's missing write bit, so this probe tells
-        // whether the permission below actually blocks this process. If it
-        // does not, the scenario cannot be demonstrated: restore and return
-        // rather than asserting a state that never occurred, and say so
-        // rather than passing silently.
-        let probe = target_dir.join("probe");
-        let permission_is_enforced = std::fs::File::create(&probe).is_err();
         if !permission_is_enforced {
-            let _ = std::fs::remove_file(&probe);
-            std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o755))?;
             report_skip(
                 "a_write_failure_reports_the_root_when_removal_also_fails could \
                      not demonstrate a permission-denied removal because this process does \
@@ -436,24 +425,21 @@ mod tests {
             return Ok(());
         }
 
-        if let Err(failure) = write_result {
-            let reported = super::undo(&target_dir, &name, &failure);
-
-            // Restore permissions before any assertion can return early, so
-            // the scratch directory this test made is still removable on
-            // drop whether or not the assertions below pass.
-            std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o755))?;
-
-            let message = reported.to_string();
-            assert!(
-                message.contains(&target_dir.display().to_string()),
-                "expected the message to name the root that could not be removed: {message}"
-            );
-            assert!(
-                target_dir.exists(),
-                "the root undo could not remove must still be there"
-            );
-        }
+        let failure = outcome
+            .err()
+            .ok_or("expected the poisoned manifest path to fail the write")?;
+        let message = failure.to_string();
+        assert!(
+            message.contains(&format!(
+                "ritual could not remove {} — check it before running `create demo` again",
+                target_dir.display()
+            )),
+            "expected the message to name the root that could not be removed: {message}"
+        );
+        assert!(
+            target_dir.exists(),
+            "the root the rollback could not remove must still be there"
+        );
         Ok(())
     }
 }

@@ -137,14 +137,16 @@ fn directory_of(root_manifest: &Path) -> Result<PathBuf, Failure> {
 ///
 /// ```no_run
 /// use rituals::Failure;
-/// use rituals_compose::{rollback, workspace};
+/// use rituals_compose::rollback::{self, Wording};
+/// use rituals_compose::workspace;
 ///
 /// // Needs a real project on disk and runs `cargo`, so this example is
 /// // `no_run`.
 /// let directory = std::env::current_dir()
 ///     .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
 /// let lockfile = workspace::lockfile(&directory)?;
-/// let created = rollback::attempt("running `import greeter` again", |changes| {
+/// let wording = Wording::project("running `import greeter` again");
+/// let created = rollback::attempt(wording, |changes| {
 ///     changes.run_changing(&[lockfile.as_path()], || {
 ///         // ... a subprocess that may write the lockfile.
 ///         Ok(())

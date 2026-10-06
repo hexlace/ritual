@@ -36,7 +36,7 @@ impl Manifest {
     ///
     /// ```
     /// use rituals_compose::manifest::Manifest;
-    /// use rituals_compose::rollback;
+    /// use rituals_compose::rollback::{self, Wording};
     ///
     /// # let directory = std::env::temp_dir()
     /// #     .join(format!("rituals-compose-doctest-manifest-unlist-{}", std::process::id()));
@@ -49,7 +49,8 @@ impl Manifest {
     /// let mut manifest = Manifest::read(&manifest_path)?;
     ///
     /// manifest.unlist_task("lint")?;
-    /// rollback::attempt("running `remove lint` again", |changes| manifest.write(changes))?;
+    /// let wording = Wording::project("running `remove lint` again");
+    /// rollback::attempt(wording, |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
     /// assert_eq!(on_disk, "[package.metadata.ritual]\ntasks = [\n    \"ritual\",\n]\n");
@@ -103,7 +104,7 @@ impl Manifest {
     ///
     /// ```
     /// use rituals_compose::manifest::Manifest;
-    /// use rituals_compose::rollback;
+    /// use rituals_compose::rollback::{self, Wording};
     ///
     /// # let directory = std::env::temp_dir()
     /// #     .join(format!("rituals-compose-doctest-manifest-dependency-{}", std::process::id()));
@@ -118,7 +119,8 @@ impl Manifest {
     ///
     /// assert!(manifest.remove_dependency("lint"));
     /// assert!(!manifest.remove_dependency("lint"));
-    /// rollback::attempt("running `remove lint` again", |changes| manifest.write(changes))?;
+    /// let wording = Wording::project("running `remove lint` again");
+    /// rollback::attempt(wording, |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
     /// assert_eq!(on_disk, "[dependencies]\n# tasks\nritual.workspace = true\n");

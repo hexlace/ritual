@@ -598,3 +598,118 @@ fn isolating_git_stops_configuration_injected_through_parameters() -> TestOutcom
     );
     Ok(())
 }
+
+/// A fresh task's manifest as `create` writes it for each audience.
+const PRIVATE_MANIFEST: &str = "[package]\nname = \"lint\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\
+    publish = false\n\n[dependencies]\nrituals.workspace = true\n\n[package.metadata.ritual]\n\
+    task = true\n";
+const PUBLIC_MANIFEST: &str = "[package]\nname = \"lint\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+    [dependencies]\nrituals.workspace = true\n\n[package.metadata.ritual]\ntask = true\n";
+
+/// The audience check tells the two manifests apart, in both directions, and
+/// names what differs, so a story that asserts on it cannot pass on either.
+#[test]
+fn the_audience_check_tells_a_private_manifest_from_a_public_one() {
+    use support::created::{Audience, manifest_problem};
+
+    let private = parse(PRIVATE_MANIFEST);
+    let public = parse(PUBLIC_MANIFEST);
+    assert_eq!(
+        manifest_problem(&private, "lint", Audience::Private, true),
+        None
+    );
+    assert_eq!(
+        manifest_problem(&public, "lint", Audience::Public, true),
+        None
+    );
+    assert!(
+        manifest_problem(&private, "lint", Audience::Public, true)
+            .is_some_and(|problem| problem.contains("publish")),
+        "a private manifest is not a public one"
+    );
+    assert!(
+        manifest_problem(&public, "lint", Audience::Private, true)
+            .is_some_and(|problem| problem.contains("publish")),
+        "a public manifest is not a private one"
+    );
+    assert!(manifest_problem(&private, "other", Audience::Private, true).is_some());
+    let published_true = parse(&PRIVATE_MANIFEST.replace("publish = false", "publish = true"));
+    assert!(manifest_problem(&published_true, "lint", Audience::Private, true).is_some());
+    let not_inherited =
+        parse(&PRIVATE_MANIFEST.replace("rituals.workspace = true", "rituals = \"1\""));
+    assert!(manifest_problem(&not_inherited, "lint", Audience::Private, true).is_some());
+    assert_eq!(
+        manifest_problem(&not_inherited, "lint", Audience::Private, false),
+        None
+    );
+}
+
+/// The fresh `src/lib.rs` the stories compare against is what the shipped
+/// binary writes outside a project, where nothing about the file depends on
+/// who the ritual is for.
+#[test]
+fn the_fresh_library_text_is_what_a_standalone_create_writes() -> TestOutcome {
+    support::in_checkout(|checkout| {
+        let working_dir = TempDir::new("fresh-lib-text")?;
+        support::run_ritual(
+            working_dir.path(),
+            &["create", "lint", "--path", checkout.path_argument()?],
+        )?
+        .expect_success("`ritual create lint`");
+        assert_eq!(
+            support::read_text(&working_dir.path().join("lint/src/lib.rs"))?,
+            support::created::fresh_lib("lint")
+        );
+        Ok(())
+    })
+}
+
+/// Folding the command line into the root leaves one manifest with both a
+/// `[package]` and a `[workspace]`, no `ritual/` directory, and a project
+/// Cargo still loads.
+#[test]
+fn folding_the_command_line_into_the_root_leaves_a_project_cargo_loads() -> TestOutcome {
+    support::in_checkout(|checkout| {
+        let working_dir = TempDir::new("fold-the-command-line")?;
+        let scaffolded = support::Project::scaffold(checkout, working_dir.path(), "demo", &[])?;
+        let project = support::root_cli::fold_the_command_line_into_the_root(&scaffolded)?;
+
+        assert_eq!(
+            project.cli_manifest_path(),
+            project.workspace_manifest_path()
+        );
+        assert!(!project.root().join("ritual").exists());
+        let root = project.workspace_manifest()?;
+        assert!(root.get("package").is_some() && root.get("workspace").is_some());
+        assert_eq!(manifest::workspace_members(&root), Some(vec![]));
+        assert_eq!(manifest::tasks(&root)?, ["ritual"]);
+        project.build()?;
+        Ok(())
+    })
+}
+
+/// The two ways of unsettling the lockfile each leave it as claimed, and each
+/// proves with Cargo that reading the project would change it.
+#[test]
+fn the_unsettled_lockfile_helpers_leave_what_they_claim() -> TestOutcome {
+    support::in_checkout(|checkout| {
+        let working_dir = TempDir::new("unsettle-the-lockfile")?;
+        let project = support::legacy::project_with_tasks(checkout, &working_dir, &["greet"])?;
+        let lockfile = project.root().join("Cargo.lock");
+        assert!(support::read_text(&lockfile)?.contains("name = \"greet\""));
+
+        support::created::leave_the_lockfile_stale(&project, "greet")?;
+        let stale = support::read_text(&lockfile)?;
+        assert!(!stale.contains("name = \"greet\""), "greet is dropped");
+        assert!(stale.contains("name = \"demo-ritual\""), "the rest is kept");
+
+        support::created::leave_no_lockfile(&project)?;
+        assert!(!lockfile.exists());
+
+        assert!(
+            support::created::leave_the_lockfile_stale(&project, "nosuch").is_err(),
+            "a package the lockfile does not name cannot be dropped from it"
+        );
+        Ok(())
+    })
+}

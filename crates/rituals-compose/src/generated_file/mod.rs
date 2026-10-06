@@ -310,7 +310,8 @@ pub fn regenerate(command_line: &CommandLine) -> Outcome {
 /// use std::path::Path;
 ///
 /// use rituals::{CommandLine, Failure, Identity};
-/// use rituals_compose::{generated_file, rollback};
+/// use rituals_compose::generated_file;
+/// use rituals_compose::rollback::{self, Wording};
 ///
 /// # let command_line = CommandLine::from_dispatch(
 /// #     Identity::from_macro_expansion("demo-ritual", "ritual", "0.1.0"),
@@ -319,7 +320,7 @@ pub fn regenerate(command_line: &CommandLine) -> Outcome {
 /// // Needs a real project on disk and runs `cargo metadata` in it, so this
 /// // example is `no_run`.
 /// let directory = Path::new("/path/to/the/workspace");
-/// let regenerated = rollback::attempt("running `remove lint` again", |changes| {
+/// let regenerated = rollback::attempt(Wording::project("running `remove lint` again"), |changes| {
 ///     // ... edits that must be undone with the generated file, then:
 ///     let regenerated =
 ///         generated_file::regenerate_recording(changes, &command_line, directory)?;
@@ -387,7 +388,8 @@ fn regenerate_from(
 ///
 /// ```no_run
 /// use rituals::CommandLine;
-/// use rituals_compose::{generated_file, rollback};
+/// use rituals_compose::generated_file;
+/// use rituals_compose::rollback::{self, Wording};
 /// use std::path::Path;
 ///
 /// # fn example(
@@ -395,7 +397,7 @@ fn regenerate_from(
 /// #     directory: &Path,
 /// # ) -> Result<(), rituals::Failure> {
 /// // Needs a real project on disk, so this example is `no_run`.
-/// let regenerated = rollback::attempt("running `remove lint` again", |changes| {
+/// let regenerated = rollback::attempt(Wording::project("running `remove lint` again"), |changes| {
 ///     generated_file::regenerate_recording(changes, command_line, directory)
 /// })?;
 /// println!("{regenerated}");
@@ -504,7 +506,7 @@ mod tests {
     use super::{
         Entry, TaskKey, WriteOutcome, regenerate_recording, render, write_to_disk, write_with,
     };
-    use crate::rollback;
+    use crate::rollback::{self, Wording};
     use crate::test_support::{ScratchDir, TestOutcome};
 
     /// A key that would hide a crate the generated file names is never a
@@ -781,12 +783,15 @@ mod tests {
         let command_line = the_demo_command_line();
 
         let mut seen_inside_the_run = String::new();
-        let failure = rollback::attempt("running `remove hello` again", |changes| {
-            regenerate_recording(changes, &command_line, &root)?;
-            seen_inside_the_run = fs::read_to_string(&generated)
-                .map_err(|error| Failure::new("reading the generated file").caused_by(error))?;
-            Err::<(), _>(Failure::new("a later step failed"))
-        })
+        let failure = rollback::attempt(
+            Wording::project("running `remove hello` again"),
+            |changes| {
+                regenerate_recording(changes, &command_line, &root)?;
+                seen_inside_the_run = fs::read_to_string(&generated)
+                    .map_err(|error| Failure::new("reading the generated file").caused_by(error))?;
+                Err::<(), _>(Failure::new("a later step failed"))
+            },
+        )
         .err()
         .ok_or("the run was meant to fail")?;
 
@@ -814,9 +819,10 @@ mod tests {
         let root = a_project_with_a_stale_generated_file(&scratch)?;
         let command_line = the_demo_command_line();
 
-        let regenerated = rollback::attempt("running `remove hello` again", |changes| {
-            regenerate_recording(changes, &command_line, &root)
-        })?;
+        let regenerated = rollback::attempt(
+            Wording::project("running `remove hello` again"),
+            |changes| regenerate_recording(changes, &command_line, &root),
+        )?;
 
         let expected = render("demo-ritual", &[Entry::new("hello", "hello")]);
         assert_eq!(fs::read_to_string(root.join("src/main.rs"))?, expected);
@@ -835,9 +841,10 @@ mod tests {
         let root = a_project_with_a_stale_generated_file(&scratch)?;
         let generated = root.join("src/main.rs");
         let command_line = the_demo_command_line();
-        rollback::attempt("running `remove hello` again", |changes| {
-            regenerate_recording(changes, &command_line, &root)
-        })?;
+        rollback::attempt(
+            Wording::project("running `remove hello` again"),
+            |changes| regenerate_recording(changes, &command_line, &root),
+        )?;
 
         let mut permissions = fs::metadata(&generated)?.permissions();
         permissions.set_readonly(true);
@@ -848,7 +855,7 @@ mod tests {
 
         let regenerated = if permission_is_enforced {
             Some(rollback::attempt(
-                "running `remove hello` again",
+                Wording::project("running `remove hello` again"),
                 |changes| regenerate_recording(changes, &command_line, &root),
             ))
         } else {
@@ -887,9 +894,10 @@ mod tests {
         let root = a_project_with_a_stale_generated_file(&scratch)?;
         let command_line = the_demo_command_line();
         let regenerate_once = || {
-            rollback::attempt("running `remove hello` again", |changes| {
-                regenerate_recording(changes, &command_line, &root)
-            })
+            rollback::attempt(
+                Wording::project("running `remove hello` again"),
+                |changes| regenerate_recording(changes, &command_line, &root),
+            )
         };
 
         assert_eq!(
@@ -914,10 +922,13 @@ mod tests {
         let command_line = the_demo_command_line();
         let member_directory: &Path = &root.join("hello");
 
-        let failure = rollback::attempt("running `remove hello` again", |changes| {
-            regenerate_recording(changes, &command_line, member_directory)?;
-            Err::<(), _>(Failure::new("a later step failed"))
-        })
+        let failure = rollback::attempt(
+            Wording::project("running `remove hello` again"),
+            |changes| {
+                regenerate_recording(changes, &command_line, member_directory)?;
+                Err::<(), _>(Failure::new("a later step failed"))
+            },
+        )
         .err()
         .ok_or("the run was meant to fail")?;
 

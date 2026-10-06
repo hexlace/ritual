@@ -128,11 +128,12 @@ pub fn fetch(current_dir: &Path) -> Result<Metadata, Failure> {
 /// ```no_run
 /// use std::path::Path;
 ///
-/// use rituals_compose::{metadata, rollback};
+/// use rituals_compose::metadata;
+/// use rituals_compose::rollback::{self, Wording};
 ///
 /// // Shells out to a real `cargo metadata` and needs a workspace on disk
 /// // to run against, so this example is `no_run`.
-/// let members = rollback::attempt("running `remove lint` again", |changes| {
+/// let members = rollback::attempt(Wording::project("running `remove lint` again"), |changes| {
 ///     let document = metadata::fetch_recording(changes, Path::new("."))?;
 ///     // ... a refusal from here on leaves the lockfile as it was found.
 ///     Ok(document.member_directories().len())
@@ -152,10 +153,10 @@ pub fn fetch_recording(changes: &mut Changes, directory: &Path) -> Result<Metada
 /// [`fetch_in_its_own_project`], which names the command to run inside the
 /// right one, where Cargo's own words say what is missing and nothing about
 /// what to do. It is asked with `cargo locate-project`, which writes
-/// nothing, so a task asks it before its run begins: with no project there
-/// is nothing a run could put back, and a refusal from inside one would say
-/// it put the project back. A manifest Cargo finds but cannot place in a
-/// workspace keeps Cargo's own words, which say what is wrong with it.
+/// nothing, so a task asks it before its run begins, when no command has
+/// run and nothing has been recorded. A manifest Cargo finds but cannot
+/// place in a workspace keeps Cargo's own words, which say what is wrong with
+/// it.
 ///
 /// `command` and `arguments` are what the person typed after the binary's
 /// name, as for [`Metadata::ensure_runs_in_its_own_project`].
@@ -209,11 +210,13 @@ pub fn ensure_inside_a_project(current_dir: &Path, command: &str, arguments: &st
 /// ```no_run
 /// use std::path::Path;
 ///
-/// use rituals_compose::{metadata, rollback};
+/// use rituals_compose::metadata;
+/// use rituals_compose::rollback::{self, Wording};
 ///
 /// // Shells out to a real `cargo metadata` and needs a workspace on disk
 /// // to run against, so this example is `no_run`.
-/// let workspace_root = rollback::attempt("running `import greeter` again", |changes| {
+/// let wording = Wording::project("running `import greeter` again");
+/// let workspace_root = rollback::attempt(wording, |changes| {
 ///     let document = metadata::fetch_in_its_own_project(
 ///         changes,
 ///         Path::new("."),
@@ -694,7 +697,7 @@ mod tests {
         Metadata, WorkspaceMember, ensure_inside_a_project, fetch_in_its_own_project,
         outside_its_project_refusal, parse,
     };
-    use crate::rollback::attempt;
+    use crate::rollback::{Wording, attempt};
     use crate::test_support::{ScratchDir, TestOutcome};
 
     #[test]
@@ -726,23 +729,27 @@ mod tests {
         Ok(scratch)
     }
 
-    /// What the rollback appends to every failure of a run, which a task
-    /// that fetches inside [`attempt`] sees on each refusal below.
+    /// What the rollback appends to a failure of a run that put something
+    /// back, such as the lockfile `cargo metadata` wrote before it refused.
     const PUT_BACK: &str = "; ritual put the project back as it found it";
 
     /// [`fetch_in_its_own_project`] as a task calls it: inside a run that
-    /// records what `cargo metadata` writes. The failure is returned without
-    /// the rollback's report, which is asserted to be there.
-    fn fetch_in_a_run(directory: &Path, package: &str) -> Result<Metadata, String> {
-        let outcome = attempt("running `import greeter` again", |changes| {
-            fetch_in_its_own_project(changes, directory, package, "import", "greeter")
-        });
-        outcome.map_err(|failure| {
-            let message = failure.to_string();
-            message
-                .strip_suffix(PUT_BACK)
-                .unwrap_or_else(|| unreachable!("the rollback reports every failure: {message}"))
-                .to_string()
+    /// records what `cargo metadata` writes. The failure is returned as the
+    /// run reports it: with the rollback's words when it put something back,
+    /// and bare when it had nothing to put back.
+    fn fetch_in_a_run(directory: &Path, package: &str) -> Result<Metadata, Failure> {
+        attempt(
+            Wording::project("running `import greeter` again"),
+            |changes| fetch_in_its_own_project(changes, directory, package, "import", "greeter"),
+        )
+    }
+
+    /// `message` without the rollback's report, which is asserted to be
+    /// there: for a refusal that came after `cargo metadata` wrote a lockfile
+    /// the rollback removed.
+    fn without_the_put_back_report(message: &str) -> &str {
+        message.strip_suffix(PUT_BACK).unwrap_or_else(|| {
+            unreachable!("the rollback removed the lockfile and says so: {message}")
         })
     }
 
@@ -785,13 +792,13 @@ mod tests {
 
         let outcome = fetch_in_a_run(scratch.path(), "demo-ritual");
 
+        let message = outcome
+            .err()
+            .ok_or("expected a workspace without the package to be refused")?
+            .to_string();
         assert_eq!(
-            outcome.err().as_deref(),
-            Some(
-                outside_its_project_refusal("import", "greeter")
-                    .to_string()
-                    .as_str()
-            ),
+            without_the_put_back_report(&message),
+            outside_its_project_refusal("import", "greeter").to_string(),
             "expected a workspace without the package to be refused"
         );
         assert!(
@@ -833,10 +840,16 @@ mod tests {
 
         let message = outcome
             .err()
-            .ok_or("expected cargo to refuse this directory")?;
+            .ok_or("expected cargo to refuse this directory")?
+            .to_string();
         assert!(
             message.starts_with("cargo locate-project failed: "),
             "expected cargo's own refusal; got: {message}"
+        );
+        assert!(
+            !message.ends_with(PUT_BACK),
+            "cargo refused before writing anything, so there was nothing to put back; got: \
+             {message}"
         );
         assert!(
             !scratch.path().join("Cargo.lock").exists(),
@@ -850,10 +863,13 @@ mod tests {
     /// of package `demo`, inside a run that then ends as `ending`, and returns
     /// what the run reported.
     fn fetch_then(directory: &Path, ending: Result<(), Failure>) -> Result<(), Failure> {
-        attempt("running `import greeter` again", |changes| {
-            fetch_in_its_own_project(changes, directory, "demo", "import", "greeter")?;
-            ending
-        })
+        attempt(
+            Wording::project("running `import greeter` again"),
+            |changes| {
+                fetch_in_its_own_project(changes, directory, "demo", "import", "greeter")?;
+                ending
+            },
+        )
     }
 
     /// `cargo metadata` creates the lockfile a project lacks, so a run that

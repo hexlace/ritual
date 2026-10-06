@@ -118,7 +118,7 @@ mod tests {
     use std::path::Path;
 
     use rituals::Failure;
-    use rituals_compose::rollback;
+    use rituals_compose::rollback::{self, Wording};
 
     use super::{Vacated, tidy};
     use crate::test_support::{ScratchDir, TestOutcome};
@@ -133,7 +133,7 @@ mod tests {
     /// The lines [`tidy`] reports for `sources` under `tasks/`, from a run
     /// that keeps what it removed.
     fn tidied(root: &Path, sources: &[&str]) -> Result<Vec<String>, Failure> {
-        rollback::attempt("tidying again", |changes| {
+        rollback::attempt(Wording::project("tidying again"), |changes| {
             Ok(tidy(root, &vacated(root, sources), changes))
         })
     }
@@ -146,7 +146,7 @@ mod tests {
         let root = scratch.path();
         std::fs::create_dir_all(root.join("tasks/group"))?;
 
-        let outcome = rollback::attempt("tidying again", |changes| {
+        let outcome = rollback::attempt(Wording::project("tidying again"), |changes| {
             let lines = tidy(root, &vacated(root, &["tasks/group/deep"]), changes);
             assert_eq!(lines.len(), 2, "{lines:?}");
             Err::<(), _>(Failure::new("the project no longer loads"))

@@ -79,8 +79,15 @@ records each change before making it, and on failure every change is undone,
 the most recent first. A changed file gets its bytes back whether or not it
 is TOML, a file the run created is removed, a directory it created goes, and
 anything that could not be put back is named, with the caller's own words
-for trying again. The failure's own full stop is dropped so the report
-continues its sentence, and a run can ask what it found when it first
+for trying again. The caller also chooses the wording, through a `Wording`:
+one for a run that changes a project that was already there ("ritual put the
+project back as it found it"), one for a run that makes a directory from
+nothing and removes it on failure ("ritual removed `lint` so a retry starts
+clean"). When the undo put nothing back, because nothing had been recorded or
+every change was already as found, the failure is returned exactly as the run
+raised it, so a refusal that came before anything changed never claims a
+recovery. The failure's own full stop is dropped only when a clause continues
+its sentence, and a run can ask what it found when it first
 recorded a file, to say "created" rather than "updated". A directory the run
 moved goes back whole, ignored files included, which no version control could
 give back. A manifest can only

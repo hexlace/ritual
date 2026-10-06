@@ -98,7 +98,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use rituals_compose::metadata;
-    use rituals_compose::rollback;
+    use rituals_compose::rollback::{self, Wording};
 
     use super::{apply, find};
     use crate::precondition::WorkTree;
@@ -277,7 +277,7 @@ mod tests {
         let Some(candidates) = find(&before, root) else {
             return Err("fixture precondition: the project must have tasks to move".into());
         };
-        let outcome = rollback::attempt("running `migrate` again", |changes| {
+        let outcome = rollback::attempt(Wording::project("running `migrate` again"), |changes| {
             apply(&candidates, &migrating, &before, changes)
         });
         Ok(outcome
@@ -431,7 +431,8 @@ mod tests {
 
     /// Git ignores `vendor/x`, so once migrate edits its manifest git could
     /// not give the old bytes back: the step refuses, naming the file and the
-    /// edit, and writes nothing.
+    /// edit, and writes nothing, so the refusal says nothing about putting
+    /// anything back.
     #[test]
     fn an_untracked_manifest_that_needs_an_edit_is_refused() -> TestOutcome {
         let scratch = ScratchDir::new("step1-untracked")?;
@@ -448,8 +449,7 @@ mod tests {
             "refusing to migrate: git does not track vendor/x/Cargo.toml, which Cargo reads and \
              which would need editing ([dependencies] greet path `../../tasks/greet` is now \
              `../../.rituals/greet`); git could not give it back once migrate edits it, so \
-             commit it, or take that path out of it, then run `cargo ritual migrate` again; \
-             ritual put the project back as it found it"
+             commit it, or take that path out of it, then run `cargo ritual migrate` again"
         );
         assert!(root.join("tasks/greet/Cargo.toml").is_file());
         assert!(!root.join(".rituals").exists());
