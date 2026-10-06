@@ -9,6 +9,9 @@ use support::created::{ADD_IS_NOW_CREATE, Audience, stdout_lines};
 use support::tree::{assert_trees_identical, snapshot_tree};
 use support::{Project, TempDir, TestOutcome, help, in_checkout, run_binary};
 
+/// What `add`'s `--help` opens with: the task's own about and nothing else.
+const ADD_ABOUT: &str = "deprecated: add is now create, and will be removed in ritual 0.3.0";
+
 /// Scaffolds two identical projects, runs `add` in one and `create` in the other
 /// with the same arguments, and asserts the reports, the trees and the
 /// standard error agree as `add`'s deprecation requires.
@@ -96,9 +99,22 @@ fn add_says_it_is_deprecated_in_its_help_and_in_the_bundles_list() -> TestOutcom
 
         let own_help = run_binary(&binary, project.root(), &["add", "--help"])?;
         own_help.expect_success("`ritual add --help`");
+        assert_eq!(
+            own_help.stdout.lines().next(),
+            Some(ADD_ABOUT),
+            "expected `add --help` to describe `add` with its deprecation line alone; stdout \
+             was:\n{}",
+            own_help.stdout
+        );
         assert!(
-            own_help.stdout.to_lowercase().contains("deprecated"),
-            "expected `add --help` to say `add` is deprecated; stdout was:\n{}",
+            !own_help
+                .stdout
+                .contains("deprecated `add` takes these alone")
+                && !own_help
+                    .stdout
+                    .contains("The arguments of a task that scaffolds"),
+            "expected `add --help` to carry nothing of the argument struct's doc; stdout \
+             was:\n{}",
             own_help.stdout
         );
         Ok(())

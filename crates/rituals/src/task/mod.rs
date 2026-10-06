@@ -257,13 +257,12 @@ impl Task {
     /// [`Task::receiving_command_line`], or the whole subtree of a bundle's
     /// children when it was built with [`Task::group`].
     ///
-    /// `about` is applied *after* `augment`, not before: `#[derive(clap::Args)]`
-    /// generates an `augment_args` that applies the argument struct's own doc
-    /// comment as the command's about text, unconditionally, as the very last
-    /// thing it does — so calling `.about()` before augmenting has no effect
-    /// once the struct carries a doc comment, which every scaffolded task's
-    /// `Arguments` does. Applying it after is what makes `Task::new`'s
-    /// `about` argument the one that actually reaches `--help`.
+    /// The command's only description is this task's `about`, in `-h` and in
+    /// `--help`, whatever the argument struct's doc comment says: that comment
+    /// is for readers of the code. `#[derive(clap::Args)]` generates an
+    /// `augment_args` that sets the struct's doc as the command's about, and as
+    /// its long about too when the doc has more than one paragraph, so the task's
+    /// `about` is applied *after* augmenting and the long about is cleared.
     ///
     /// Crate-internal: only the dispatcher needs to turn a task into a
     /// `clap::Command`; it is not part of what a task author reads.
