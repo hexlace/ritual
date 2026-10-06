@@ -17,6 +17,11 @@ use std::path::Path;
 
 use rituals_compose::git::fixture;
 
+// Every test in this crate asks for `ScratchDir::resolved`. `migrate`
+// decides what to do by comparing the directories Cargo reports, which are
+// resolved, with paths built from the root. Under a root spelled through a
+// link nothing matches, so a test asserting that something is not moved or
+// does not apply would pass whatever the code under test decided.
 pub(crate) use rituals_compose::test_util::ScratchDir;
 
 /// What a test in this crate returns — the error path carries only a setup
