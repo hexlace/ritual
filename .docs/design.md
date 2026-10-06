@@ -308,9 +308,26 @@ workspace's members.
 A task built with `Task::new` never sees the command line it is mounted in.
 That keeps an ordinary task ignorant of where it lives. A task that needs the
 command line builds itself with `Task::receiving_command_line` instead. It is
-then handed a `CommandLine` at invocation, carrying the identity and the
-commands the top level got from a flattened bundle. The change is two edits:
-the constructor's name, and one prepended parameter.
+then handed a `CommandLine` at invocation, carrying the identity, the
+commands the top level got from a flattened bundle, and the command path.
+The change is two edits: the constructor's name, and one prepended parameter.
+
+**The command path is the subcommand names dispatch walked** to reach the
+running task, top first: `["tools", "db", "sync"]` for `sync` inside `db`
+inside a bundle the project mounted under `tools`. The first name is the
+project's choice of key, never one the bundle suggests, so a bundle learns
+where it was mounted without guessing. A child of the bundle mounted under
+the bin's own name sits at the top level, so its path is its own name. The
+names are always true, however the binary was reached.
+
+**`CommandLine::cargo_command` renders the path as a command**:
+`cargo <bin> <path…>`, such as `cargo ritual tools db sync`. A task that tells a
+person to run something again spells it with this rather than building the
+string, so there is one spelling. The rendering holds inside a project made
+by `new`, because `new` names the bin and the alias together, `--cli`
+included. It does not hold for the global binary, a binary run directly, or
+an alias renamed by hand, and nothing in the running process can tell those
+apart: an alias is invisible to the program it runs.
 
 `create`, `import`, `regenerate`, `remove` and `migrate` use exactly this, and
 so does `add`, which is `create`'s in-project path under its old name. They

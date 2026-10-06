@@ -128,12 +128,14 @@ pub const MANAGEMENT_BUNDLE_KEY: &str = "ritual";
 /// let default = CommandLine::from_dispatch(
 ///     Identity::from_macro_expansion("demo-ritual", "ritual", "0.1.0"),
 ///     ["add", "regenerate", "new", "create", "import", "remove", "migrate"],
+///     ["remove"],
 /// );
 /// assert_eq!(top_level::management_command(&default, "regenerate"), "cargo ritual regenerate");
 ///
 /// let named = CommandLine::from_dispatch(
 ///     Identity::from_macro_expansion("demo-ritual", "acme", "0.1.0"),
 ///     [],
+///     ["ritual", "remove"],
 /// );
 /// assert_eq!(top_level::management_command(&named, "regenerate"), "cargo acme ritual regenerate");
 /// ```
@@ -164,7 +166,7 @@ mod tests {
     /// `ritual`: the hint must reach ritual's `regenerate`, not acme's.
     #[test]
     fn a_hint_reaches_ritual_when_another_bundle_flattens_a_command_of_the_same_name() {
-        let command_line = a_command_line(&["regenerate", "deploy"]);
+        let command_line = a_command_line_running(&["regenerate", "deploy"], &["ritual", "remove"]);
         assert_eq!(
             management_command(&command_line, "regenerate"),
             "cargo acme ritual regenerate"
@@ -184,6 +186,7 @@ mod tests {
                 "remove",
                 "migrate",
             ],
+            ["remove"],
         );
         assert_eq!(
             management_command(&command_line, "regenerate"),
@@ -192,9 +195,17 @@ mod tests {
     }
 
     fn a_command_line(flattened_commands: &[&'static str]) -> rituals::CommandLine {
+        a_command_line_running(flattened_commands, &["create"])
+    }
+
+    fn a_command_line_running(
+        flattened_commands: &[&'static str],
+        command_path: &[&'static str],
+    ) -> rituals::CommandLine {
         rituals::CommandLine::from_dispatch(
             Identity::from_macro_expansion("acme-ritual", "acme", "0.1.0"),
             flattened_commands.iter().copied(),
+            command_path.iter().copied(),
         )
     }
 
