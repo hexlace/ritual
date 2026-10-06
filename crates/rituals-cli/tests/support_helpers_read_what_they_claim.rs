@@ -243,6 +243,15 @@ fn a_snapshot_records_a_link_and_sees_it_retargeted() -> TestOutcome {
         changed_paths(&before, &after),
         [std::path::PathBuf::from("link")]
     );
+
+    // Respelled `second/`, the link resolves no more, because `second` is a
+    // file, yet a path compared by its components reads it as `second`.
+    std::fs::remove_file(root.path().join("link"))?;
+    std::os::unix::fs::symlink("second/", root.path().join("link"))?;
+    assert_eq!(
+        changed_paths(&after, &snapshot_tree(root.path())?),
+        [std::path::PathBuf::from("link")]
+    );
     assert_eq!(
         after.get(std::path::Path::new("dangling")),
         Some(&Entry::Link("missing".into()))
