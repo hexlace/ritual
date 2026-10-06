@@ -260,6 +260,36 @@ pub(crate) fn the_refusal<'output>(output: &'output RunOutput, bin_name: &str) -
     output.sole_line_prefixed_with(bin_name)
 }
 
+/// Asserts `output` is a refusal from the deprecated `add`: exactly two lines
+/// on stderr, the deprecation notice and then the refusal with `bin_name`'s
+/// prefix, and returns the refusal.
+#[track_caller]
+pub(crate) fn the_refusal_after_the_notice<'output>(
+    output: &'output RunOutput,
+    bin_name: &str,
+) -> &'output str {
+    output.expect_failure("the command");
+    let lines: Vec<&str> = output.stderr.lines().collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "expected the notice and then the refusal on stderr; stderr was:\n{}",
+        output.stderr
+    );
+    assert_eq!(
+        lines[0], ADD_IS_NOW_CREATE,
+        "expected the deprecation notice first; stderr was:\n{}",
+        output.stderr
+    );
+    let message = lines[1].strip_prefix(&format!("{bin_name}: "));
+    assert!(
+        message.is_some(),
+        "expected the refusal to be prefixed with `{bin_name}: `; stderr was:\n{}",
+        output.stderr
+    );
+    message.unwrap_or_default()
+}
+
 /// Runs `arguments` on the built command line `binary` in `directory`,
 /// asserts it was refused with a message for which `says` holds, and that
 /// the project's tree is byte-identical to what it was.
@@ -273,7 +303,14 @@ pub(crate) fn assert_refused_and_left_alone(
 ) -> TestOutcome {
     let before = snapshot_tree(project.root())?;
     let output = run_binary(binary, directory, arguments)?;
-    let message = the_refusal(&output, &project.bin_name()?);
+    let bin_name = project.bin_name()?;
+    // `add` says it is going away before it does `create`'s work, refusals
+    // included, so its refusal is the line after that notice.
+    let message = if arguments.first() == Some(&"add") {
+        the_refusal_after_the_notice(&output, &bin_name)
+    } else {
+        the_refusal(&output, &bin_name)
+    };
     assert!(
         says(message),
         "the refusal of `{}` did not say what was wanted; it said:\n{message}",
