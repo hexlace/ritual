@@ -150,12 +150,13 @@ pub const MANAGEMENT_BUNDLE_KEY: &str = "ritual";
 /// ```
 #[must_use]
 pub fn management_command(command_line: &CommandLine, command: &str) -> String {
-    let path = command_line.command_path();
-    // The path is never empty, so the running task's own name is always
-    // there to drop; what is left is the key path of the bundle it is in.
-    let bundle_path = path
-        .split_last()
-        .map_or(path, |(_, bundle_path)| bundle_path);
+    // Dropping the running task's own name leaves the key path of the bundle
+    // it is in.
+    let Some((_, bundle_path)) = command_line.command_path().split_last() else {
+        // `CommandLine::from_dispatch`, its only constructor, refuses an
+        // empty command path.
+        unreachable!("a command line's command path is never empty (from_dispatch)");
+    };
     let mut hint = format!("cargo {}", command_line.identity().binary_name());
     for name in bundle_path.iter().copied().chain([command]) {
         hint.push(' ');
