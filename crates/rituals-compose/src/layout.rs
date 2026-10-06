@@ -6,7 +6,9 @@
 //! There are two ways to ask. [`place_for`] takes a name and places the
 //! ritual directly in `.rituals/`. [`place_at`] takes a path a person typed
 //! and places the ritual wherever below `.rituals/` it leads; nothing here
-//! reads a meaning into the directories between.
+//! reads a meaning into the directories between, except that a ritual's own
+//! directory is not one of them: [`ensure_in_no_member`] refuses a place
+//! inside a crate that is already there.
 //!
 //! # Examples
 //!
@@ -29,7 +31,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rituals::{Failure, Name};
+use rituals::{Failure, Name, Outcome};
 
 use crate::paths;
 
@@ -324,6 +326,68 @@ pub fn place_at(workspace_root: &Path, typed: TypedPath<'_>) -> Result<TaskPlace
     })
 }
 
+/// Refuses a ritual placed at or below a crate already in the workspace.
+///
+/// A ritual's own directory is its crate, not a grouping directory: a crate
+/// made inside it would sit inside another member, and that member could no
+/// longer be removed on its own. `members` are the workspace's members, each
+/// a package name and its directory, as Cargo spells them. Only those inside
+/// the tasks directory are asked about, so a command line crate at the
+/// workspace root, which every ritual is below, is no obstacle. `typed` is the
+/// path as the person typed it, which the refusal hands back.
+///
+/// # Errors
+///
+/// Returns a [`Failure`] naming the path, where it leads and the member it
+/// leads into or to.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+///
+/// use rituals_compose::layout::{self, TypedPath};
+///
+/// let root = Path::new("/work/demo");
+/// let members = [("lint", Path::new("/work/demo/.rituals/lint")), ("demo-ritual", root)];
+/// let typed = Path::new(".rituals/lint/inner");
+/// let place = layout::place_at(root, TypedPath { current_dir: root, path: typed })?;
+///
+/// assert!(layout::ensure_in_no_member(root, typed, &place, members).is_err());
+///
+/// let grouped = Path::new(".rituals/private/inner");
+/// let place = layout::place_at(root, TypedPath { current_dir: root, path: grouped })?;
+/// layout::ensure_in_no_member(root, grouped, &place, members)?;
+/// # Ok::<(), rituals::Failure>(())
+/// ```
+pub fn ensure_in_no_member<'a>(
+    workspace_root: &Path,
+    typed: &Path,
+    place: &TaskPlace,
+    members: impl IntoIterator<Item = (&'a str, &'a Path)>,
+) -> Outcome {
+    let tasks = tasks_directory(workspace_root);
+    let Some((member, directory)) = members.into_iter().find(|(_, directory)| {
+        directory.starts_with(&tasks) && place.directory().starts_with(directory)
+    }) else {
+        return Ok(());
+    };
+    let into = if place.directory() == directory {
+        format!("which is the crate `{member}`")
+    } else {
+        format!(
+            "inside the crate `{member}` at {}",
+            paths::relative(workspace_root, directory)
+        )
+    };
+    Err(Failure::new(format!(
+        "refusing to create {}: this one leads to {}, {into}; a ritual never goes inside \
+         another crate, so give a path that leads elsewhere below {TASKS_DIRECTORY}/",
+        typed.display(),
+        place.from_the_root(),
+    )))
+}
+
 /// The refusal for a path that does not lead strictly below the tasks
 /// directory: what was typed, and `landed`, where it leads, spelled from the
 /// workspace root. Naming where it led, and that a path is read from the
@@ -345,7 +409,7 @@ mod tests {
 
     use rituals::Name;
 
-    use super::{TypedPath, place_at, place_for, tasks_directory};
+    use super::{TypedPath, ensure_in_no_member, place_at, place_for, tasks_directory};
 
     const ROOT: &str = "/work/demo";
 
@@ -515,5 +579,72 @@ mod tests {
     #[should_panic(expected = "current_dir must be absolute")]
     fn a_relative_current_dir_is_a_bug() {
         let _ = place_at(Path::new(ROOT), typed("demo", "lint"));
+    }
+
+    /// The members of a project at [`ROOT`] whose command line crate is the
+    /// workspace root, with one ritual directly in `.rituals/` and one in a
+    /// grouping directory.
+    fn members() -> [(&'static str, &'static Path); 3] {
+        [
+            ("demo-ritual", Path::new(ROOT)),
+            ("lint", Path::new("/work/demo/.rituals/lint")),
+            ("fmt", Path::new("/work/demo/.rituals/private/fmt")),
+        ]
+    }
+
+    fn refusal_for(typed: &str) -> Option<String> {
+        let root = Path::new(ROOT);
+        let typed = Path::new(typed);
+        let place = place_at(
+            root,
+            TypedPath {
+                current_dir: root,
+                path: typed,
+            },
+        )
+        .expect("a test passes only paths that lead below the tasks directory");
+        ensure_in_no_member(root, typed, &place, members())
+            .err()
+            .map(|failure| failure.to_string())
+    }
+
+    #[test]
+    fn a_place_inside_a_ritual_is_refused_naming_it_and_where_it_is() {
+        assert_eq!(
+            refusal_for(".rituals/lint/src/inner").as_deref(),
+            Some(
+                "refusing to create .rituals/lint/src/inner: this one leads to \
+                 .rituals/lint/src/inner, inside the crate `lint` at .rituals/lint; a ritual \
+                 never goes inside another crate, so give a path that leads elsewhere below \
+                 .rituals/"
+            )
+        );
+        assert!(
+            refusal_for(".rituals/private/fmt/inner").is_some_and(
+                |refusal| refusal.contains("inside the crate `fmt` at .rituals/private/fmt")
+            )
+        );
+    }
+
+    #[test]
+    fn a_place_that_is_a_ritual_is_refused_as_that_crate() {
+        assert_eq!(
+            refusal_for(".rituals/lint").as_deref(),
+            Some(
+                "refusing to create .rituals/lint: this one leads to .rituals/lint, which is the \
+                 crate `lint`; a ritual never goes inside another crate, so give a path that \
+                 leads elsewhere below .rituals/"
+            )
+        );
+    }
+
+    /// A grouping directory is no member, a name that only begins with a
+    /// member's is a different directory, and the command line crate at the
+    /// root holds every ritual without being one they go inside.
+    #[test]
+    fn a_place_beside_every_ritual_is_allowed_whatever_holds_the_root() {
+        for typed in [".rituals/private/lint", ".rituals/lint-two", ".rituals/new"] {
+            assert_eq!(refusal_for(typed), None, "{typed}");
+        }
     }
 }

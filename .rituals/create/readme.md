@@ -6,7 +6,8 @@ where a crate builds on its own. Whose workspace it runs in decides which.
 In a project, `cargo ritual create lint` scaffolds `.rituals/lint`, adds it
 to the workspace and to the command line crate's manifest, and regenerates. It
 also takes a path below `.rituals/`, such as `.rituals/private/lint`, and reads
-no meaning into the directories between; the last part is the task's name.
+no meaning into the directories between; the last part is the task's name. A
+path into a ritual that is already there is refused.
 
 Outside any Cargo workspace, or under an ordinary package with no
 `[workspace]`, `ritual create lint` scaffolds a crate of its own in the

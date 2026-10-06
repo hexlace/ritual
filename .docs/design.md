@@ -442,7 +442,11 @@ lexically. It has to lead strictly below `.rituals/`, so
 inside `.rituals/` mean the same place, and `create src/lint` is refused. Its
 last component is the task's name, its key and its crate's name, and is
 validated as a name like any other. The member entry and the report lines
-spell it from the workspace root.
+spell it from the workspace root. A path that leads to a workspace member's
+directory, or below it, is refused before anything is written: a ritual's own
+directory is its crate, not a grouping directory, and a crate inside it would
+leave that member unable to be removed on its own. Directories that are not
+members group freely.
 
 **Audience.** `create` writes `publish = false` into the new crate's
 `[package]` unless given `--public`, inside a project and outside one. See

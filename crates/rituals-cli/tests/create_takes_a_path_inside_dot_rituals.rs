@@ -4,7 +4,8 @@
 //! A path is read the way a shell reads it, from the directory the command
 //! is run in. A path that does not lead strictly below `.rituals/` is
 //! refused, naming `.rituals/` and where the path led from the project root,
-//! and leaves the project byte-identical.
+//! and leaves the project byte-identical, as is a path that leads into a
+//! ritual that is already there.
 //! `--path` and `--git` choose where an outside crate's dependency comes
 //! from, so inside a project, where the task inherits it, they are refused.
 
@@ -185,6 +186,51 @@ fn a_path_typed_from_a_subdirectory_is_refused_saying_where_it_led() -> TestOutc
                         directory, and this one leads to ritual/.rituals/lint; inside a project \
                         every ritual lives below .rituals/ at the project's root, so give a bare \
                         name, or a path that leads below it"
+            },
+        )
+    })
+}
+
+/// A ritual's own directory is its crate, not a grouping directory, so a
+/// path that leads into one, or to it, is refused before anything is
+/// written: a crate made there would sit inside another member, and that
+/// member could no longer be removed on its own.
+#[test]
+fn a_path_into_an_existing_ritual_is_refused() -> TestOutcome {
+    in_checkout(|checkout| {
+        let (_working_dir, project, binary) =
+            project_with_a_first_task(checkout, "create-nested-in-a-member")?;
+        let first = project.root().join(".rituals/first");
+
+        assert_refused_and_left_alone(
+            &project,
+            &binary,
+            &first,
+            &["create", "./inner"],
+            |message| {
+                message
+                    == "refusing to create ./inner: this one leads to .rituals/first/inner, inside \
+                    the crate `first` at .rituals/first; a ritual never goes inside another \
+                    crate, so give a path that leads elsewhere below .rituals/"
+            },
+        )?;
+        assert_refused_and_left_alone(
+            &project,
+            &binary,
+            project.root(),
+            &["create", ".rituals/first/src/inner"],
+            |message| message.contains("inside the crate `first` at .rituals/first"),
+        )?;
+        assert_refused_and_left_alone(
+            &project,
+            &binary,
+            &first.join("src"),
+            &["create", "../../first"],
+            |message| {
+                message
+                    == "refusing to create ../../first: this one leads to .rituals/first, which \
+                        is the crate `first`; a ritual never goes inside another crate, so give \
+                        a path that leads elsewhere below .rituals/"
             },
         )
     })

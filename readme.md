@@ -212,7 +212,9 @@ cargo ritual create .rituals/private/lint
 The path is read from where you are, as a shell reads it, so
 `cargo ritual create private/lint` from inside `.rituals/` means the same
 place. Its last part, `lint`, is the task's name. A path that does not lead
-below `.rituals/` is refused.
+below `.rituals/` is refused, and so is one that leads into a ritual already
+there, such as `.rituals/lint/inner`: a ritual's directory is its crate, not a
+subdirectory to arrange.
 
 **Where rituals live.** Every ritual lives in `.rituals/`, whoever it is for:
 one directory, in every project, with no exceptions. Subdirectories of

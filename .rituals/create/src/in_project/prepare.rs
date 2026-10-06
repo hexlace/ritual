@@ -95,7 +95,8 @@ pub(crate) fn prepare(changes: &mut Changes, request: Request<'_>) -> Result<Sca
         request.run_again,
     )?;
     let project = document.locate_project(package)?;
-    let (name, place) = place_the_task(&project, request.current_dir, request.requested)?;
+    let (name, place) =
+        place_the_task(&document, &project, request.current_dir, request.requested)?;
 
     let regenerate = top_level::management_command(request.command_line, "regenerate");
     ensure_the_name_is_free(request.command_line, &project, &name, &regenerate)?;
@@ -127,8 +128,10 @@ pub(crate) fn prepare(changes: &mut Changes, request: Request<'_>) -> Result<Sca
 
 /// Where the task goes, and the key it is listed under: a bare name is placed
 /// directly in the tasks directory, whatever directory it was typed in, and a
-/// path is read from the directory it was typed in.
+/// path is read from the directory it was typed in and refused when it leads
+/// into a ritual that is already there.
 fn place_the_task(
+    document: &Metadata,
     project: &Project<'_>,
     current_dir: &Path,
     requested: Requested<'_>,
@@ -141,6 +144,15 @@ fn place_the_task(
         Requested::Path(path) => {
             let place =
                 layout::place_at(project.workspace_root(), TypedPath { current_dir, path })?;
+            layout::ensure_in_no_member(
+                project.workspace_root(),
+                path,
+                &place,
+                document
+                    .workspace_members()
+                    .into_iter()
+                    .map(|member| (member.package_name(), member.directory())),
+            )?;
             let key = TaskKey::new(place.name().clone())?;
             Ok((key, place))
         }
