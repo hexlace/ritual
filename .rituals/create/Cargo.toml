@@ -17,6 +17,11 @@ rituals-compose.workspace = true
 [package.metadata.ritual]
 task = true
 
-# See the note on this table in .rituals/add/Cargo.toml.
+# A task crate `create` scaffolds does not carry this table:
+# inheriting an unknown project's lint table would fail that project's own
+# gate, since a scaffolded handler that always returns Ok(()) trips
+# clippy::unnecessary_wraps under pedantic. Ritual's own task crates are held
+# to this workspace's standard, so each carries the table by hand, and its
+# handler has a real body that can fail.
 [lints]
 workspace = true

@@ -21,6 +21,6 @@ rituals-compose = { workspace = true, features = ["test-util"] }
 [package.metadata.ritual]
 task = true
 
-# See the note on this table in .rituals/add/Cargo.toml.
+# See the note on this table in .rituals/create/Cargo.toml.
 [lints]
 workspace = true

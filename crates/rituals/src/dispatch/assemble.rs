@@ -6,7 +6,8 @@ use crate::name::Name;
 use crate::outcome::Failure;
 use crate::task::Task;
 
-use super::{refusal_line, report_to_stderr};
+use super::refusal_line;
+use crate::report::write_to_stderr;
 
 /// The message written when an imported command can't be mounted — its name
 /// collides with a name already assembled, or is not a usable [`Name`] —
@@ -39,7 +40,7 @@ pub(super) fn assemble(
         let usable = Name::new(name).is_ok();
 
         if already_present || !usable {
-            report_to_stderr(refusal_line(binary_name, mount_refusal(name)));
+            write_to_stderr(&refusal_line(binary_name, mount_refusal(name)));
             continue;
         }
 

@@ -12,6 +12,7 @@ use assemble::{assemble, flatten};
 use crate::command_line::CommandLine;
 use crate::identity::Identity;
 use crate::outcome::Outcome;
+use crate::report::write_to_stderr;
 use crate::task::Task;
 
 /// Assembles `imported` into one command line, dispatches the process's own
@@ -56,7 +57,7 @@ pub fn run(
             // collision in a debug build and silently drop a command in a
             // release build, so there is nothing safe to build here — not
             // even to answer `--help`.
-            report_to_stderr(refusal_line(identity.binary_name(), &failure));
+            write_to_stderr(&refusal_line(identity.binary_name(), &failure));
             return ExitCode::FAILURE;
         }
     };
@@ -68,7 +69,7 @@ pub fn run(
     let command_line = CommandLine::from_dispatch(identity, top_level.flattened);
     let outcome = task.invoke(&command_line, matches);
     if let Err(failure) = &outcome {
-        report_to_stderr(refusal_line(identity.binary_name(), failure));
+        write_to_stderr(&refusal_line(identity.binary_name(), failure));
     }
     exit_code_for(&outcome)
 }
@@ -160,19 +161,6 @@ const fn exit_code_for(outcome: &Outcome) -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(_) => ExitCode::FAILURE,
     }
-}
-
-/// Writes one line to stderr — this framework's one refusal-reporting site,
-/// mirroring [`crate::report()`]'s one stdout-reporting site.
-///
-/// Uses a locked `writeln!` rather than `eprintln!` for the same reason
-/// `report` avoids `println!`: a failed write is discarded rather than
-/// panicking.
-fn report_to_stderr(message: impl AsRef<str>) {
-    use std::io::Write;
-
-    let mut stderr = std::io::stderr().lock();
-    let _ = writeln!(stderr, "{}", message.as_ref());
 }
 
 #[cfg(test)]
