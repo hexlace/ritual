@@ -92,6 +92,12 @@ follows the usual convention for an error: its `Display` is the message
 alone, and the cause is its `source()`. To write a `Failure` into text of your
 own, with every cause, use `failure.with_causes()`.
 
+A cause whose own `Display` already includes its source shows that source
+twice in the refusal line, as thiserror's `#[error("failed to start: {0}")]
+Io(#[from] io::Error)` does, since `#[from]` makes the io error its source
+too; for such an error, use `Failure::new(error.to_string())` in place of
+`caused_by`, or take the source out of the error's message.
+
 A task with more than one way to refuse can give each its own exit status, so
 a caller such as a CI job can tell "the check found differences" from "the
 check could not run" without reading stderr:
