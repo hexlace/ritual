@@ -18,8 +18,8 @@ use crate::outcome::{Failure, Outcome};
 /// bundle: a task whose command is a group of named children.
 ///
 /// A task is never named here. The name it answers to is the dependency key
-/// of whichever project imports it, which is why the same crate can be
-/// mounted twice under two different names. `Task::new("greet", run)` reads
+/// of whichever project imports it, so two projects can mount the same crate
+/// under two different names. `Task::new("greet", run)` reads
 /// as though the first argument names the task; it does not, it is the
 /// one-line description shown in `--help`.
 pub struct Task {

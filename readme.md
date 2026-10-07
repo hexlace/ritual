@@ -466,9 +466,9 @@ has already moved and Cargo reads the project as it should.
 
 `cargo ritual` works from any directory inside the project. The global
 `ritual` carries `create`, `regenerate`, `import`, `remove`, `migrate` and
-`add` too, but they refuse in your project: use `cargo ritual create`. `add` is `create`'s
-old name: it still works in 0.2.0, says on standard error that it is
-deprecated, and goes in 0.3.0.
+`add` too, but they refuse in your project: use `cargo ritual create`.
+`add` is `create`'s old name: it still works in 0.2.0, says on standard
+error that it is deprecated, and goes in 0.3.0.
 
 ## Where next
 

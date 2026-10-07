@@ -16,7 +16,8 @@
 //! `rituals-core-import`, `rituals-core-remove` and `rituals-core-migrate`,
 //! imported here under the names they answer to — `add`, `regenerate`, `new`,
 //! `create`, `import`, `remove` and `migrate` — the same way a composed command
-//! line imports any task.
+//! line imports any task. `add` is the deprecated old name of `create`, and
+//! goes in ritual 0.3.0.
 
 use rituals::Task;
 
