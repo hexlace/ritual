@@ -43,8 +43,8 @@ enum Body {
     },
     /// A bundle: named children, in the order given to [`Task::group`],
     /// which is also where the invariants this variant relies on — at
-    /// least one child, distinct names, none of them `help` — are
-    /// enforced, once, at construction.
+    /// least one child, distinct names, each spelled like a [`Name`], none
+    /// of them `help` — are enforced, once, at construction.
     Children(Vec<(&'static str, Task)>),
 }
 
