@@ -71,8 +71,25 @@ A release takes three steps, and GitHub Actions does the work between them:
    everyone who authored or co-authored a commit.
 3. Write the prose and publish the release. Publishing creates the tag, and
    **Publish** publishes every crate to crates.io through trusted publishing.
-   If it fails partway, run it again: crates already on crates.io at that
-   version are skipped.
+   If it fails partway, re-run **all** its jobs, not only the failed one:
+   `verify` is what asks crates.io which crates it already has, so re-running
+   `publish` alone retries the old plan and stops at the first crate that is
+   now there. Crates already on crates.io at that version are skipped.
+
+**A crate's first release is published by hand.** crates.io issues trusted
+publishing tokens only for crates that already exist, so **Publish** stops
+with `403 Forbidden` at a crate crates.io doesn't have yet, after uploading
+what comes before it. Once that has happened, from the tagged commit:
+
+```sh
+CARGO_REGISTRY_TOKEN=<token> cargo publish --locked -p <new crate>
+```
+
+The token is a crates.io API token with only the publish-new scope, limited to
+the new crates' names. Then add a trusted publisher to each new crate on
+crates.io, the same as the others (repository `hexlace/ritual`, workflow
+`publish.yml`, environment `crates-io`), revoke the token, and re-run all of
+**Publish**'s jobs.
 
 Each of these workflows runs as two jobs, split on one rule: **a token that
 can write, to this repository or to crates.io, only ever exists in a job that
