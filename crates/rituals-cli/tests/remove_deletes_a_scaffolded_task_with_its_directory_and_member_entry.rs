@@ -62,8 +62,9 @@ fn removing_a_scaffolded_task_by_key_deletes_it_and_leaves_a_project_that_builds
             "expected the unrelated file outside the task to be left alone"
         );
 
-        // The order that used to break the build now works: the project's
-        // command line builds, and the removed command is gone from it.
+        // With the task's directory, member entry and dependency gone, the
+        // project's command line still builds, and the removed command is
+        // gone from it.
         assert_help_lists(
             &project,
             "`remove greet`",

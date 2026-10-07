@@ -16,7 +16,7 @@ use rituals_compose::sentence::join_with_and;
 use rituals_compose::{cargo_config, top_level, workspace};
 
 /// The package every composed command line's own commands come from: the
-/// bundle of `add`, `regenerate` and the rest, which nothing could put back
+/// bundle of `create`, `regenerate` and the rest, which nothing could put back
 /// once it is gone.
 const BUNDLE_PACKAGE: &str = "rituals-core";
 
