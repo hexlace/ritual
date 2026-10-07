@@ -6,6 +6,7 @@ mod declare;
 use std::fmt;
 
 use crate::command_line::CommandLine;
+use crate::name::Name;
 use crate::outcome::{Failure, Outcome};
 
 /// One task: a one-line description, and either the command-line arguments
@@ -204,9 +205,10 @@ impl Task {
     ///
     /// # Panics
     ///
-    /// Panics when `children` is empty, when it names one command twice, or
-    /// when it names a command `help`: clap adds a `help` command under
-    /// every group, so a child called that is two commands with one name.
+    /// Panics when `children` is empty, when it names one command twice,
+    /// when a name is not spelled the way [`Name`] requires, or when it names
+    /// a command `help`: clap adds a `help` command under every group, so a
+    /// child called that is two commands with one name.
     #[must_use]
     pub fn group(
         about: &'static str,
@@ -235,6 +237,14 @@ impl Task {
         }
 
         for (name, _) in &children {
+            // A child's key is one word of the command a person types to
+            // reach it, the same as a project's key for a task, so it is
+            // held to the same rule. A key with a space renders as two words
+            // that reach nothing when pasted.
+            if let Err(error) = Name::new(name) {
+                panic!("a bundle's children are named like any task: {error}");
+            }
+
             // clap adds its own `help` command under every group that has
             // subcommands, so a child called that is two commands with one
             // name — the same collision a top-level `help` is refused for
@@ -520,10 +530,31 @@ mod tests {
         let _ = Task::group("a bundle with help", [("help", Task::new("nope", run_ok))]);
     }
 
-    /// A bundle with no duplicate and no `help` child builds without
-    /// panicking — the positive-space companion to the three panic tests
-    /// above, so the checks are shown to accept good input, not only
-    /// reject bad input.
+    // A child key is one word of a command a person types, so a key with
+    // a space in it renders as two words that reach nothing when pasted.
+    #[test]
+    #[should_panic(expected = "named like any task: `db sync` is not a usable name; a name starts")]
+    fn group_panics_on_a_child_key_with_a_space() {
+        let _ = Task::group("a bundle", [("db sync", Task::new("sync", run_ok))]);
+    }
+
+    #[test]
+    #[should_panic(expected = "named like any task: `Sync` is not a usable name; a name starts")]
+    fn group_panics_on_an_uppercase_child_key() {
+        let _ = Task::group("a bundle", [("Sync", Task::new("sync", run_ok))]);
+    }
+
+    #[test]
+    #[should_panic(expected = "named like any task: `db_sync` is not a usable name; a name starts")]
+    fn group_panics_on_an_underscored_child_key() {
+        let _ = Task::group("a bundle", [("db_sync", Task::new("sync", run_ok))]);
+    }
+
+    /// A bundle whose keys are distinct, not `help`, and spelled like a
+    /// task's name builds without panicking — the positive-space companion
+    /// to the panic tests above, so the checks are shown to accept good
+    /// input, not only reject bad input. `db-sync2` holds a hyphen and a
+    /// digit, both of which the name rule allows.
     #[test]
     fn group_builds_a_well_formed_bundle_without_panicking() {
         let bundle = Task::group(
@@ -531,8 +562,9 @@ mod tests {
             [
                 ("add", Task::new("first", run_ok)),
                 ("regenerate", Task::new("second", run_ok)),
+                ("db-sync2", Task::new("third", run_ok)),
             ],
         );
-        assert_eq!(bundle.children().map(<[_]>::len), Some(2));
+        assert_eq!(bundle.children().map(<[_]>::len), Some(3));
     }
 }
