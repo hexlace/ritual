@@ -49,7 +49,7 @@ impl Manifest {
     /// let mut manifest = Manifest::read(&manifest_path)?;
     ///
     /// manifest.unlist_task("lint")?;
-    /// let wording = Wording::project(&directory, "running `remove lint` again");
+    /// let wording = Wording::project(&directory, "running `cargo ritual remove lint` again");
     /// rollback::attempt(wording, |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;
@@ -119,7 +119,7 @@ impl Manifest {
     ///
     /// assert!(manifest.remove_dependency("lint"));
     /// assert!(!manifest.remove_dependency("lint"));
-    /// let wording = Wording::project(&directory, "running `remove lint` again");
+    /// let wording = Wording::project(&directory, "running `cargo ritual remove lint` again");
     /// rollback::attempt(wording, |changes| manifest.write(changes))?;
     ///
     /// let on_disk = std::fs::read_to_string(&manifest_path)?;

@@ -93,7 +93,7 @@ fn prepare(
     let package = command_line.identity().package_name();
 
     let imports = document.task_imports(package)?;
-    let remove_command = top_level::management_command(command_line, "remove");
+    let remove_command = command_line.cargo_command();
     let import = pick(
         &arguments.name,
         package,

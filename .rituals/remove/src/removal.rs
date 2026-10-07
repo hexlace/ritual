@@ -64,9 +64,15 @@ struct Written {
 }
 
 /// What a person runs again once they have checked whatever a failed run
-/// could not put back, given what they typed as the task's name.
-pub(crate) fn retry(argument: &str) -> String {
-    format!("running `remove {argument}` again")
+/// could not put back: the command that reached this removal, as
+/// [`CommandLine::cargo_command`] renders it, then what they typed as the
+/// task's name. That command is the key `remove` was mounted under, so the
+/// retry can be pasted wherever it was mounted, on its own included.
+pub(crate) fn retry(command_line: &CommandLine, argument: &str) -> String {
+    format!(
+        "running `{} {argument}` again",
+        command_line.cargo_command()
+    )
 }
 
 impl Removal {
@@ -193,7 +199,7 @@ pub(crate) fn finish(
     argument: &str,
     prepare: impl FnOnce(&mut Changes) -> Result<Removal, Failure>,
 ) -> Outcome {
-    let retry = retry(argument);
+    let retry = retry(command_line, argument);
     let (removal, written) = rollback::attempt(Wording::project(root, &retry), |changes| {
         let mut removal = prepare(changes)?;
         let written = removal.write(changes, command_line)?;
@@ -287,7 +293,7 @@ mod tests {
     use std::error::Error;
     use std::path::PathBuf;
 
-    use rituals::{Failure, Outcome};
+    use rituals::{CommandLine, Failure, Identity, Outcome};
     use rituals_compose::manifest::{ManifestPaths, Manifests};
     use rituals_compose::rollback::{self, Changes, Wording};
 
@@ -389,10 +395,13 @@ mod tests {
         steps: impl FnOnce(&mut Removal, &mut Changes) -> Outcome,
     ) -> Failure {
         let root = removal.workspace_root.clone();
-        let outcome = rollback::attempt(Wording::project(&root, &retry("lint")), |changes| {
-            steps(removal, changes)?;
-            Err::<(), _>(Failure::new("simulated failure"))
-        });
+        let outcome = rollback::attempt(
+            Wording::project(&root, &retry(&command_line("ritual", ["remove"]), "lint")),
+            |changes| {
+                steps(removal, changes)?;
+                Err::<(), _>(Failure::new("simulated failure"))
+            },
+        );
         let Err(reported) = outcome else {
             unreachable!("a run that always ends in Err cannot succeed");
         };
@@ -403,11 +412,34 @@ mod tests {
         reported
     }
 
+    /// A command line built as `bin`, reached through `path`.
+    fn command_line(
+        bin: &'static str,
+        path: impl IntoIterator<Item = &'static str>,
+    ) -> CommandLine {
+        CommandLine::from_dispatch(
+            Identity::from_macro_expansion("demo-ritual", bin, "0.1.0"),
+            ["add", "regenerate"],
+            path,
+        )
+    }
+
     #[test]
     fn the_retry_names_remove_and_what_the_person_typed() {
         assert_eq!(
-            retry("rituals-core-lint"),
-            "running `remove rituals-core-lint` again"
+            retry(&command_line("ritual", ["remove"]), "rituals-core-lint"),
+            "running `cargo ritual remove rituals-core-lint` again"
+        );
+    }
+
+    /// `remove` mounted on its own, under `rm`, in a project made with
+    /// `--cli acme`, is reached as `cargo acme rm`; a retry that named
+    /// `remove` would send a person to a command that is not there.
+    #[test]
+    fn the_retry_names_the_key_remove_was_mounted_under() {
+        assert_eq!(
+            retry(&command_line("acme", ["rm"]), "lint"),
+            "running `cargo acme rm lint` again"
         );
     }
 
@@ -569,10 +601,13 @@ mod tests {
 
     fn fail_after_taking_out_a_missing_dependency(removal: &mut Removal) -> String {
         let root = removal.workspace_root.clone();
-        let outcome = rollback::attempt(Wording::project(&root, &retry("lint")), |changes| {
-            removal.unlist(changes)?;
-            removal.take_out_dependency(changes)
-        });
+        let outcome = rollback::attempt(
+            Wording::project(&root, &retry(&command_line("ritual", ["remove"]), "lint")),
+            |changes| {
+                removal.unlist(changes)?;
+                removal.take_out_dependency(changes)
+            },
+        );
         match outcome {
             Err(failure) => failure.to_string(),
             Ok(_) => unreachable!("the manifest has no such dependency"),

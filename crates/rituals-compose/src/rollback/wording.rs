@@ -39,7 +39,7 @@ use crate::sentence::join_with_and;
 /// # std::fs::create_dir_all(&directory)?;
 /// let lockfile = directory.join("Cargo.lock");
 ///
-/// let wording = Wording::project(&directory, "running `import lint` again");
+/// let wording = Wording::project(&directory, "running `cargo ritual import lint` again");
 /// let outcome = rollback::attempt(wording, |changes| {
 ///     changes.write(&lockfile, "version = 4\n")?;
 ///     Err::<(), _>(Failure::new("the task check failed"))
@@ -104,10 +104,13 @@ impl<'a> Wording<'a> {
     ///
     /// `root` is the directory holding the workspace's root manifest, and
     /// every path the report names is spelled from it, as the run's
-    /// `created` and `updated` lines are. `retry` is what a person types to
-    /// try again, such as ``"running `import lint` again"``, because only the
-    /// caller knows. It ends the report when something could not be put
-    /// back: "check it before running `import lint` again".
+    /// `created` and `updated` lines are. `retry` is what a person runs to
+    /// try again, because only the caller knows how it was reached: a task
+    /// spells it from [`rituals::CommandLine::cargo_command`] and the words
+    /// it was given, so it can be pasted however the task was mounted, such
+    /// as ``"running `cargo ritual import lint` again"``. It ends the report
+    /// when something could not be put back: "check it before running
+    /// `cargo ritual import lint` again".
     ///
     /// # Examples
     ///
@@ -116,7 +119,8 @@ impl<'a> Wording<'a> {
     ///
     /// use rituals_compose::rollback::Wording;
     ///
-    /// let wording = Wording::project(Path::new("/work/acme"), "running `remove lint` again");
+    /// let retry = "running `cargo ritual remove lint` again";
+    /// let wording = Wording::project(Path::new("/work/acme"), retry);
     /// # let _ = wording;
     /// ```
     ///
@@ -142,8 +146,11 @@ impl<'a> Wording<'a> {
     /// reserves `current_dir.join(directory)` first, through
     /// [`Changes::reserve_directory`](super::Changes::reserve_directory). A
     /// run that reserves another directory is a bug, and the undo panics
-    /// rather than report the wrong directory as removed. `retry` is as for
-    /// [`Wording::project`].
+    /// rather than report the wrong directory as removed. `retry` ends the
+    /// report as it does for [`Wording::project`]. A run that makes a
+    /// directory from nothing runs where there is no project, and so no
+    /// `cargo` alias to spell it with, so it names the command as typed
+    /// after the binary's name, such as ``"running `new demo` again"``.
     ///
     /// # Examples
     ///

@@ -225,7 +225,7 @@ mod tests {
     ) -> Failure {
         let root = scaffolding.workspace_root.clone();
         let outcome = rollback::attempt(
-            Wording::project(&root, "running `create lint` again"),
+            Wording::project(&root, "running `cargo ritual create lint` again"),
             |changes| {
                 steps(scaffolding, changes)?;
                 Err::<(), _>(Failure::new("simulated failure"))
@@ -282,7 +282,7 @@ mod tests {
         let root = scaffolding.workspace_root.clone();
 
         let lines = rollback::attempt(
-            Wording::project(&root, "running `create lint` again"),
+            Wording::project(&root, "running `cargo ritual create lint` again"),
             |changes| scaffolding.write_manifests(changes),
         )?;
 
@@ -310,7 +310,7 @@ mod tests {
         let root = scaffolding.workspace_root.clone();
 
         let lines = rollback::attempt(
-            Wording::project(&root, "running `create lint` again"),
+            Wording::project(&root, "running `cargo ritual create lint` again"),
             |changes| scaffolding.write_manifests(changes),
         )?;
 
@@ -510,7 +510,7 @@ mod tests {
         assert_eq!(
             reported.to_string(),
             "simulated failure; ritual could not put back .rituals/lint — check it before \
-             running `create lint` again"
+             running `cargo ritual create lint` again"
         );
         assert!(
             scaffolding.place.directory().exists(),

@@ -84,7 +84,7 @@ pub(crate) fn scaffold(
     // run's first step asks it the same question, so a project it cannot
     // find is refused in the same words either way.
     let root = workspace::root(current_dir)?;
-    let retry = retry(&run_again);
+    let retry = retry(command_line, &run_again);
 
     let (lines, next_step) = rollback::attempt(Wording::project(&root, &retry), |changes| {
         let mut scaffolding = prepare::prepare(
@@ -110,24 +110,59 @@ pub(crate) fn scaffold(
 }
 
 /// What a person runs again once they have checked whatever a failed run
-/// could not put back.
-fn retry(run_again: &str) -> String {
-    format!("running `create {run_again}` again")
+/// could not put back: the command that reached this `create`, as
+/// [`CommandLine::cargo_command`] renders it, then the words it was given.
+/// That command is the key `create` was mounted under, so the retry can be
+/// pasted wherever it was mounted, on its own included.
+fn retry(command_line: &CommandLine, run_again: &str) -> String {
+    format!(
+        "running `{} {run_again}` again",
+        command_line.cargo_command()
+    )
 }
 
 #[cfg(test)]
 mod tests {
+    use rituals::{CommandLine, Identity};
+
     use super::retry;
+
+    /// A command line built as `bin`, reached through `path`.
+    fn command_line(
+        bin: &'static str,
+        path: impl IntoIterator<Item = &'static str>,
+    ) -> CommandLine {
+        CommandLine::from_dispatch(
+            Identity::from_macro_expansion("demo-ritual", bin, "0.1.0"),
+            ["add", "regenerate"],
+            path,
+        )
+    }
 
     /// The retry wording is the end of `create`'s failure message when the
     /// undo could not put everything back, so it names the command a person
     /// types again, with the argument and flags they gave.
     #[test]
     fn the_retry_names_create_and_the_words_it_was_given() {
-        assert_eq!(retry("lint"), "running `create lint` again");
+        let create = command_line("ritual", ["create"]);
         assert_eq!(
-            retry(".rituals/private/lint --public"),
-            "running `create .rituals/private/lint --public` again"
+            retry(&create, "lint"),
+            "running `cargo ritual create lint` again"
+        );
+        assert_eq!(
+            retry(&create, ".rituals/private/lint --public"),
+            "running `cargo ritual create .rituals/private/lint --public` again"
+        );
+    }
+
+    /// `create` mounted on its own, under `mk`, in a project made with
+    /// `--cli acme`, is reached as `cargo acme mk`; a retry that named
+    /// `create` would send a person to a command that is not there.
+    #[test]
+    fn the_retry_names_the_key_create_was_mounted_under() {
+        assert_eq!(
+            retry(&command_line("acme", ["mk"]), "lint"),
+            "running `cargo acme mk lint` again"
         );
     }
 }

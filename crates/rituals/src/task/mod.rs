@@ -6,6 +6,7 @@ mod declare;
 use std::fmt;
 
 use crate::command_line::CommandLine;
+use crate::name::Name;
 use crate::outcome::{Failure, Outcome};
 
 /// One task: a one-line description, and either the command-line arguments
@@ -42,8 +43,8 @@ enum Body {
     },
     /// A bundle: named children, in the order given to [`Task::group`],
     /// which is also where the invariants this variant relies on — at
-    /// least one child, distinct names, none of them `help` — are
-    /// enforced, once, at construction.
+    /// least one child, distinct names, each one a [`Name`], none of them
+    /// `help` — are enforced, once, at construction.
     Children(Vec<(&'static str, Task)>),
 }
 
@@ -204,9 +205,13 @@ impl Task {
     ///
     /// # Panics
     ///
-    /// Panics when `children` is empty, when it names one command twice, or
-    /// when it names a command `help`: clap adds a `help` command under
-    /// every group, so a child called that is two commands with one name.
+    /// Panics when `children` is empty, when it names one command twice,
+    /// when a name is one [`Name::new`] refuses, or when it names a command
+    /// `help`: clap adds a `help` command under every group, so a child
+    /// called that is two commands with one name. [`Name::new`] refuses a
+    /// name that is not spelled the way [`Name`] requires, and `crate`,
+    /// `self` and `super`, which are spelled that way but cannot be written
+    /// as a Rust identifier.
     #[must_use]
     pub fn group(
         about: &'static str,
@@ -235,6 +240,21 @@ impl Task {
         }
 
         for (name, _) in &children {
+            // A child's key is one word of the command a person types to
+            // reach it, the same as a project's key for a task, so it is
+            // held to the same rule. A key with a space renders as two words
+            // that reach nothing when pasted.
+            if let Err(refusal) = Name::new(name) {
+                #[expect(
+                    clippy::panic,
+                    reason = "a contract violation in the bundle crate's own source, like the \
+                              assertions around it, whose message is the refusal's own reason"
+                )]
+                {
+                    panic!("a bundle's children are named like any task: {refusal}");
+                }
+            }
+
             // clap adds its own `help` command under every group that has
             // subcommands, so a child called that is two commands with one
             // name — the same collision a top-level `help` is refused for
@@ -520,10 +540,43 @@ mod tests {
         let _ = Task::group("a bundle with help", [("help", Task::new("nope", run_ok))]);
     }
 
-    /// A bundle with no duplicate and no `help` child builds without
-    /// panicking — the positive-space companion to the three panic tests
-    /// above, so the checks are shown to accept good input, not only
-    /// reject bad input.
+    // A child key is one word of a command a person types, so a key with
+    // a space in it renders as two words that reach nothing when pasted.
+    #[test]
+    #[should_panic(expected = "named like any task: `db sync` is not a usable name; a name starts")]
+    fn group_panics_on_a_child_key_with_a_space() {
+        let _ = Task::group("a bundle", [("db sync", Task::new("sync", run_ok))]);
+    }
+
+    #[test]
+    #[should_panic(expected = "named like any task: `Sync` is not a usable name; a name starts")]
+    fn group_panics_on_an_uppercase_child_key() {
+        let _ = Task::group("a bundle", [("Sync", Task::new("sync", run_ok))]);
+    }
+
+    #[test]
+    #[should_panic(expected = "named like any task: `db_sync` is not a usable name; a name starts")]
+    fn group_panics_on_an_underscored_child_key() {
+        let _ = Task::group("a bundle", [("db_sync", Task::new("sync", run_ok))]);
+    }
+
+    // `crate` is spelled like a name but cannot be written as a Rust
+    // identifier, so `Name::new` refuses it for its own reason, not the
+    // spelling rule's.
+    #[test]
+    #[should_panic(
+        expected = "named like any task: `crate` is not a usable name; `crate`, `self` and `super` \
+                    cannot be written as a Rust identifier"
+    )]
+    fn group_panics_on_a_child_key_named_crate() {
+        let _ = Task::group("a bundle", [("crate", Task::new("crate", run_ok))]);
+    }
+
+    /// A bundle whose keys are distinct, not `help`, and spelled like a
+    /// task's name builds without panicking — the positive-space companion
+    /// to the panic tests above, so the checks are shown to accept good
+    /// input, not only reject bad input. `db-sync2` holds a hyphen and a
+    /// digit, both of which the name rule allows.
     #[test]
     fn group_builds_a_well_formed_bundle_without_panicking() {
         let bundle = Task::group(
@@ -531,8 +584,9 @@ mod tests {
             [
                 ("add", Task::new("first", run_ok)),
                 ("regenerate", Task::new("second", run_ok)),
+                ("db-sync2", Task::new("third", run_ok)),
             ],
         );
-        assert_eq!(bundle.children().map(<[_]>::len), Some(2));
+        assert_eq!(bundle.children().map(<[_]>::len), Some(3));
     }
 }

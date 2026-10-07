@@ -144,8 +144,9 @@ impl ImportArguments {
     /// A crate name is not always a name a command can have (`my_crate` has an
     /// underscore), and the person gave no other, so that refusal says to give
     /// one and hands back the whole command to run with a suggestion in it.
-    /// `import_command` is how this command line spells `import`, and
-    /// `current_dir` is where the person typed it.
+    /// `import_command` is the command that reached this import, as
+    /// [`rituals::CommandLine::cargo_command`] renders it, and `current_dir`
+    /// is where the person typed it.
     pub(crate) fn key(&self, import_command: &str, current_dir: &Path) -> Result<Name, Failure> {
         if let Some(key) = &self.key {
             return Ok(Name::new(key)?);

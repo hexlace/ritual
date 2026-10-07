@@ -85,9 +85,12 @@ impl Import {
 }
 
 /// What a person runs again once they have checked whatever a failed run
-/// could not put back, for the words `again` that run the import.
-pub(crate) fn retry(again: &str) -> String {
-    format!("running `import {again}` again")
+/// could not put back: the command that reached this import, as
+/// [`CommandLine::cargo_command`] renders it, then the words `again` that
+/// run the import. That command is the key `import` was mounted under, so
+/// the retry can be pasted wherever it was mounted, on its own included.
+pub(crate) fn retry(command_line: &CommandLine, again: &str) -> String {
+    format!("running `{} {again}` again", command_line.cargo_command())
 }
 
 /// `import` has no idea of the task list of its own: it writes the manifest
@@ -159,7 +162,7 @@ fn next_step(key: &Name, binary_name: &str) -> String {
 mod tests {
     use std::path::Path;
 
-    use rituals::{Failure, Name, RefusalStatus};
+    use rituals::{CommandLine, Failure, Identity, Name, RefusalStatus};
     use rituals_compose::generated_file::TaskKey;
     use rituals_compose::rollback::{self, Wording};
 
@@ -265,16 +268,45 @@ mod tests {
 
     fn run_in_attempt(import: &Import) -> Result<(), Failure> {
         rollback::attempt(
-            Wording::project(&import.workspace_root, &retry("greeter")),
+            Wording::project(
+                &import.workspace_root,
+                &retry(&command_line("ritual", ["import"]), "greeter"),
+            ),
             |changes| import.run(changes),
+        )
+    }
+
+    /// A command line built as `bin`, reached through `path`.
+    fn command_line(
+        bin: &'static str,
+        path: impl IntoIterator<Item = &'static str>,
+    ) -> CommandLine {
+        CommandLine::from_dispatch(
+            Identity::from_macro_expansion("demo-ritual", bin, "0.1.0"),
+            ["add", "regenerate"],
+            path,
         )
     }
 
     #[test]
     fn the_retry_names_import_and_the_words_that_run_it_again() {
         assert_eq!(
-            retry("greeter --path /w/greeter"),
-            "running `import greeter --path /w/greeter` again"
+            retry(
+                &command_line("ritual", ["import"]),
+                "greeter --path /w/greeter"
+            ),
+            "running `cargo ritual import greeter --path /w/greeter` again"
+        );
+    }
+
+    /// `import` mounted on its own, under `imp`, in a project made with
+    /// `--cli acme`, is reached as `cargo acme imp`; a retry that named
+    /// `import` would send a person to a command that is not there.
+    #[test]
+    fn the_retry_names_the_key_import_was_mounted_under() {
+        assert_eq!(
+            retry(&command_line("acme", ["imp"]), "greeter"),
+            "running `cargo acme imp greeter` again"
         );
     }
 

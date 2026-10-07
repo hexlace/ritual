@@ -165,7 +165,7 @@ mod tests {
             .parent()
             .ok_or("a manifest is a file in a directory")?;
         rollback::attempt(
-            Wording::project(root, "running `create lint` again"),
+            Wording::project(root, "running `cargo ritual create lint` again"),
             |changes| manifest.write(changes),
         )?;
         Ok(())
