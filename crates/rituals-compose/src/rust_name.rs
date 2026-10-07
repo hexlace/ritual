@@ -10,17 +10,8 @@ use rituals::Name;
 
 /// Returns the name Rust sees for a dependency key or package name: the
 /// spelling with every hyphen read as an underscore.
-///
-/// # Examples
-///
-/// ```
-/// use rituals_compose::rust_name::extern_identifier;
-///
-/// assert_eq!(extern_identifier("ritual-task"), "ritual_task");
-/// assert_eq!(extern_identifier("lint"), "lint");
-/// ```
 #[must_use]
-pub fn extern_identifier(spelling: &str) -> String {
+pub(crate) fn extern_identifier(spelling: &str) -> String {
     spelling.replace('-', "_")
 }
 

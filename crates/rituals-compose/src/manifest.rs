@@ -20,7 +20,7 @@ mod path_dependencies;
 mod removal;
 mod repointing;
 
-pub use dependency_places::ManifestRole;
+pub(crate) use dependency_places::ManifestRole;
 pub use manifests::{ManifestPaths, Manifests};
 pub use path_change::PathChange;
 
@@ -517,10 +517,8 @@ fn raw_text(raw: Option<&RawString>) -> String {
 ///
 /// Used to tell a leftover task crate `create` can finish importing from an
 /// unrelated collision. Any failure to read or parse answers `false`: an
-/// unreadable directory is exactly the unrelated-collision case. Twin of
-/// [`declares_a_workspace`], which shares this contract: both parse
-/// read-only with [`toml_edit::ImDocument::parse`] and answer one
-/// structural question.
+/// unreadable directory is exactly the unrelated-collision case. The
+/// manifest is parsed read-only with [`toml_edit::ImDocument::parse`].
 ///
 /// # Examples
 ///
@@ -572,27 +570,8 @@ pub fn declares_a_task_crate(path: &Path) -> bool {
 /// [`declares_a_task_crate`], which shares this contract: both parse
 /// read-only with [`toml_edit::ImDocument::parse`] and answer one
 /// structural question.
-///
-/// # Examples
-///
-/// ```
-/// use rituals_compose::manifest::declares_a_workspace;
-///
-/// # let directory = std::env::temp_dir()
-/// #     .join(format!("rituals-compose-doctest-declares-a-workspace-{}", std::process::id()));
-/// # std::fs::create_dir_all(&directory)?;
-/// let workspace_manifest = directory.join("Cargo.toml");
-/// # std::fs::write(&workspace_manifest, "[workspace]\nmembers = []\n")?;
-/// assert!(declares_a_workspace(&workspace_manifest));
-///
-/// let package_manifest = directory.join("package.toml");
-/// # std::fs::write(&package_manifest, "[package]\nname = \"demo\"\n")?;
-/// assert!(!declares_a_workspace(&package_manifest));
-/// # std::fs::remove_dir_all(&directory)?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
 #[must_use]
-pub fn declares_a_workspace(path: &Path) -> bool {
+pub(crate) fn declares_a_workspace(path: &Path) -> bool {
     let Ok(text) = std::fs::read_to_string(path) else {
         return false;
     };

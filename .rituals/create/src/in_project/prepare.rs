@@ -127,7 +127,7 @@ pub(crate) fn prepare(changes: &mut Changes, request: Request<'_>) -> Result<Sca
 }
 
 /// Where the task goes, and the key it is listed under: a bare name is placed
-/// directly in the tasks directory, whatever directory it was typed in, and a
+/// directly in the rituals directory, whatever directory it was typed in, and a
 /// path is read from the directory it was typed in and refused when it leads
 /// into a ritual that is already there.
 fn place_the_task(

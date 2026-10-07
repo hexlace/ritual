@@ -14,7 +14,7 @@ use crate::tidy::{self, Vacated};
 
 // This step owns both ends literally, and so will every step after it:
 // `tasks/` is where 0.1 put a project's tasks and `.rituals/` is where 0.2
-// does, for good. `layout::tasks_directory` says where scaffolding puts a
+// does, for good. `layout::rituals_directory` says where scaffolding puts a
 // task today, and reading the destination from it would make this step move
 // tasks to wherever the layout says next. A later release that changes the
 // layout adds a step that runs after this one in release order, so a project

@@ -34,8 +34,10 @@
 //! - `test-util` — adds `git::fixture`, a `git` that reads nothing from the
 //!   machine it runs on and the commands that build a fixture repository, for
 //!   a crate whose tests run against `git`; and `test_util`, the scratch
-//!   directory and tree snapshot every crate's unit tests share. Nothing needs
-//!   it at run time.
+//!   directory and tree snapshot every crate's unit tests share. It is test
+//!   support for the crates of ritual's own repository, nothing needs it at
+//!   run time, and it sits outside this crate's stability promise: either
+//!   module can change or go in any release.
 //!
 //! # Examples
 //!
