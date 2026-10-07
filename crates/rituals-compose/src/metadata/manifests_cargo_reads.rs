@@ -381,6 +381,7 @@ mod tests {
 
         assert!(
             failure
+                .with_causes()
                 .to_string()
                 .contains(&root.join("vendor/broken/Cargo.toml").display().to_string()),
             "{failure}"

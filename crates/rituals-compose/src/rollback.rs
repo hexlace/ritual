@@ -749,13 +749,15 @@ impl Changes {
     }
 }
 
-/// `failure` with `clause` continuing its sentence. The full stop that ended
-/// the failure, which several refusals carry, goes first, because the clause
+/// `failure`, every cause included, with `clause` continuing its sentence,
+/// exiting with the status `failure` chose. The full stop that ended the
+/// failure, which several refusals carry, goes first, because the clause
 /// follows a semicolon.
 fn continued(failure: &Failure, clause: &str) -> Failure {
-    let failure = failure.to_string();
+    let status = failure.status();
+    let failure = failure.with_causes().to_string();
     let failure = failure.strip_suffix('.').unwrap_or(&failure);
-    Failure::new(format!("{failure}{clause}"))
+    Failure::new(format!("{failure}{clause}")).exiting_with(status)
 }
 
 /// What undoing one step did to the project.
@@ -987,7 +989,7 @@ fn remove_created_file(path: &Path) -> Result<Undone, Failure> {
 mod tests {
     use std::path::Path;
 
-    use rituals::Failure;
+    use rituals::{Failure, RefusalStatus};
 
     use super::{Changes, Wording, attempt};
     use crate::test_support::{ScratchDir, TestOutcome};
@@ -1237,6 +1239,7 @@ mod tests {
         };
         assert!(
             reported
+                .with_causes()
                 .to_string()
                 .starts_with(&format!("reading {} failed", unreadable.display())),
             "expected the unreadable path to be named: {reported}"
@@ -1448,6 +1451,51 @@ mod tests {
             "`add` would be a top-level command twice; ritual put the project back as it \
              found it"
         );
+        Ok(())
+    }
+
+    /// A failure with a cause is continued after the cause, so the report
+    /// keeps everything the refusal line would have named.
+    #[test]
+    fn a_failure_with_a_cause_is_continued_after_its_cause() -> TestOutcome {
+        let scratch = ScratchDir::new("rollback-caused-continued")?;
+        let path = scratch.path().join("Cargo.lock");
+
+        let outcome = attempt(wording(scratch.path()), |changes| {
+            changes.write(&path, "version = 4\n")?;
+            Err::<(), _>(
+                Failure::new("writing Cargo.toml failed")
+                    .caused_by(std::io::Error::other("disk full")),
+            )
+        });
+
+        let reported = outcome.err().ok_or("expected the run to fail")?;
+        assert_eq!(
+            reported.with_causes().to_string(),
+            "writing Cargo.toml failed: disk full; ritual put the project back as it found it"
+        );
+        Ok(())
+    }
+
+    /// A rolled-back failure exits with the status the run refused with,
+    /// though its report is a new sentence.
+    #[test]
+    fn a_continued_failure_keeps_the_status_it_was_raised_with() -> TestOutcome {
+        let scratch = ScratchDir::new("rollback-continued-status")?;
+        let path = scratch.path().join("Cargo.lock");
+        let status = RefusalStatus::new(3)?;
+
+        let outcome = attempt(wording(scratch.path()), |changes| {
+            changes.write(&path, "version = 4\n")?;
+            Err::<(), _>(Failure::new("3 tasks differ").exiting_with(status))
+        });
+
+        let reported = outcome.err().ok_or("expected the run to fail")?;
+        assert_eq!(
+            reported.to_string(),
+            "3 tasks differ; ritual put the project back as it found it"
+        );
+        assert_eq!(reported.status(), status);
         Ok(())
     }
 

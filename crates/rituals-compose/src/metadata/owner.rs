@@ -174,7 +174,8 @@ mod tests {
 
     #[test]
     fn a_member_named_after_the_command_line_makes_it_its_own() -> TestOutcome {
-        let members = parse_members(DOCUMENT.as_bytes()).map_err(|failure| failure.to_string())?;
+        let members = parse_members(DOCUMENT.as_bytes())
+            .map_err(|failure| failure.with_causes().to_string())?;
         assert_eq!(owner(&members, "demo-ritual", true), Owner::TheCommandLine);
         assert_eq!(owner(&members, "demo-ritual", false), Owner::TheCommandLine);
         Ok(())
@@ -183,7 +184,8 @@ mod tests {
     /// Only a member counts: `other-ritual` declares `tasks` but is not one.
     #[test]
     fn a_declared_workspace_with_another_task_list_is_another_command_lines() -> TestOutcome {
-        let members = parse_members(DOCUMENT.as_bytes()).map_err(|failure| failure.to_string())?;
+        let members = parse_members(DOCUMENT.as_bytes())
+            .map_err(|failure| failure.with_causes().to_string())?;
         assert_eq!(
             owner(&members, "other-ritual", true),
             Owner::AnotherCommandLine
@@ -197,12 +199,13 @@ mod tests {
 
     #[test]
     fn with_no_workspace_table_or_no_task_list_no_command_line_owns_it() -> TestOutcome {
-        let members = parse_members(DOCUMENT.as_bytes()).map_err(|failure| failure.to_string())?;
+        let members = parse_members(DOCUMENT.as_bytes())
+            .map_err(|failure| failure.with_causes().to_string())?;
         assert_eq!(owner(&members, "other-ritual", false), Owner::NoCommandLine);
 
         let without_a_task_list = DOCUMENT.replace(r#"{"ritual": {"tasks": []}}"#, "null");
-        let members =
-            parse_members(without_a_task_list.as_bytes()).map_err(|failure| failure.to_string())?;
+        let members = parse_members(without_a_task_list.as_bytes())
+            .map_err(|failure| failure.with_causes().to_string())?;
         assert_eq!(owner(&members, "other-ritual", true), Owner::NoCommandLine);
         Ok(())
     }
@@ -229,7 +232,8 @@ mod tests {
     fn a_directory_in_no_workspace_is_owned_by_no_command_line() -> TestOutcome {
         let scratch = ScratchDir::new("owner-no-workspace")?;
         assert_eq!(
-            whose_workspace(scratch.path(), "demo-ritual").map_err(|failure| failure.to_string())?,
+            whose_workspace(scratch.path(), "demo-ritual")
+                .map_err(|failure| failure.with_causes().to_string())?,
             Owner::NoCommandLine
         );
         Ok(())
@@ -253,7 +257,7 @@ mod tests {
 
         assert_eq!(
             whose_workspace(&scratch.path().join("member"), "member")
-                .map_err(|failure| failure.to_string())?,
+                .map_err(|failure| failure.with_causes().to_string())?,
             Owner::TheCommandLine
         );
         assert!(

@@ -65,6 +65,7 @@ pub(crate) fn deletion_failed(directory: &str, cause: std::io::Error) -> String 
          project as it should; delete {directory}/ by hand"
     ))
     .caused_by(cause)
+    .with_causes()
     .to_string()
 }
 

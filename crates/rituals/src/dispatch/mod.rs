@@ -4,14 +4,13 @@
 
 mod assemble;
 
-use std::fmt;
 use std::process::ExitCode;
 
 use assemble::{assemble, flatten};
 
 use crate::command_line::CommandLine;
 use crate::identity::Identity;
-use crate::outcome::Outcome;
+use crate::outcome::{Failure, Outcome};
 use crate::report::write_to_stderr;
 use crate::task::Task;
 
@@ -27,8 +26,10 @@ use crate::task::Task;
 /// Every argument error clap raises on its own — an unknown flag, a missing
 /// value, an unknown subcommand — exits 2 with clap's own formatting.
 /// Everything ritual itself refuses, including a task's own [`crate::Failure`],
-/// exits 1 with `<bin name>: ` in front of the message — the one place that
-/// prefix is added, so a task author never writes it.
+/// is written with `<bin name>: ` in front of the message and each of its
+/// causes — the one place that prefix is added, so a task author never
+/// writes it — and exits 1, or with the [`crate::RefusalStatus`] the
+/// failure chose.
 ///
 /// # Examples
 ///
@@ -164,18 +165,20 @@ fn build_command(identity: Identity, tasks: &[(&'static str, Task)]) -> clap::Co
 }
 
 /// Builds the one line ritual writes to stderr for a refusal —
-/// `<binary_name>: <message>` — the one place this prefix is added, so
-/// nothing that produces a message writes it a second time.
-fn refusal_line(binary_name: &str, message: impl fmt::Display) -> String {
-    format!("{binary_name}: {message}")
+/// `<binary_name>: <message>: <cause>…`, every cause in `failure`'s chain
+/// after its message — the one place this prefix is added, so nothing that
+/// produces a message writes it a second time.
+fn refusal_line(binary_name: &str, failure: &Failure) -> String {
+    format!("{binary_name}: {}", failure.with_causes())
 }
 
 /// Maps a task's [`Outcome`] to the process exit status a caller sees:
-/// success to [`ExitCode::SUCCESS`], any refusal to [`ExitCode::FAILURE`].
-const fn exit_code_for(outcome: &Outcome) -> ExitCode {
+/// success to [`ExitCode::SUCCESS`], a refusal to its own
+/// [`Failure::status`], which is 1 unless the task chose another.
+fn exit_code_for(outcome: &Outcome) -> ExitCode {
     match outcome {
         Ok(()) => ExitCode::SUCCESS,
-        Err(_) => ExitCode::FAILURE,
+        Err(failure) => ExitCode::from(failure.status().get()),
     }
 }
 
@@ -186,7 +189,7 @@ mod tests {
     use super::{build_command, exit_code_for, flatten, refusal_line, resolve};
     use crate::command_line::CommandLine;
     use crate::identity::Identity;
-    use crate::outcome::{Failure, Outcome};
+    use crate::outcome::{Failure, Outcome, RefusalStatus};
     use crate::task::Task;
     use crate::test_support::{NoArguments, run_ok};
 
@@ -208,11 +211,88 @@ mod tests {
     }
 
     #[test]
+    fn exit_code_for_a_failure_with_a_status_is_that_status() {
+        let status = RefusalStatus::new(3).expect("3 is a usable refusal status");
+        let outcome: Outcome = Err(Failure::new("3 tasks differ").exiting_with(status));
+        assert_eq!(exit_code_for(&outcome), ExitCode::from(3));
+    }
+
+    #[test]
     fn refusal_line_carries_the_bin_prefix_exactly_once() {
         let failure = Failure::new("tasks/lint already exists");
         let line = refusal_line("myapp-ritual", &failure);
         assert_eq!(line, "myapp-ritual: tasks/lint already exists");
         assert_eq!(line.matches("myapp-ritual:").count(), 1);
+    }
+
+    /// An error that names only its own situation and hands whatever caused
+    /// it on through `source()`, the usual convention for an error's
+    /// `Display`.
+    #[derive(Debug)]
+    struct Link {
+        message: &'static str,
+        source: Option<Box<Self>>,
+    }
+
+    impl Link {
+        fn new(message: &'static str) -> Self {
+            Self {
+                message,
+                source: None,
+            }
+        }
+
+        fn caused_by(mut self, cause: Self) -> Self {
+            self.source = Some(Box::new(cause));
+            self
+        }
+    }
+
+    impl std::fmt::Display for Link {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.message)
+        }
+    }
+
+    impl std::error::Error for Link {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.source
+                .as_deref()
+                .map(|link| link as &(dyn std::error::Error + 'static))
+        }
+    }
+
+    #[test]
+    fn refusal_line_with_one_cause_is_the_message_then_the_cause() {
+        let failure = Failure::new("writing .rituals/lint/Cargo.toml failed")
+            .caused_by(Link::new("disk full"));
+        assert_eq!(
+            refusal_line("myapp-ritual", &failure),
+            "myapp-ritual: writing .rituals/lint/Cargo.toml failed: disk full"
+        );
+    }
+
+    #[test]
+    fn refusal_line_names_every_cause_in_the_chain_once_in_order() {
+        let failure = Failure::new("syncing the declared set failed").caused_by(
+            Link::new("the registry did not answer").caused_by(Link::new("connection refused")),
+        );
+        assert_eq!(
+            refusal_line("myapp-ritual", &failure),
+            "myapp-ritual: syncing the declared set failed: the registry did not answer: \
+             connection refused"
+        );
+    }
+
+    #[test]
+    fn refusal_line_walks_through_a_failure_that_is_itself_a_cause() {
+        let failure = Failure::new("importing lint failed").caused_by(
+            Failure::new("regenerating the command line failed").caused_by(Link::new("disk full")),
+        );
+        assert_eq!(
+            refusal_line("myapp-ritual", &failure),
+            "myapp-ritual: importing lint failed: regenerating the command line failed: disk full"
+        );
     }
 
     /// The global tool's binary is named `ritual` while its package is

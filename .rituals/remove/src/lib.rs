@@ -592,7 +592,7 @@ mod tests {
     fn picked_key<'a>(argument: &str, candidates: &'a [Candidate<'a>]) -> Result<&'a str, String> {
         pick(argument, "demo-ritual", REMOVE, candidates, view)
             .map(|candidate| candidate.0)
-            .map_err(|failure| failure.to_string())
+            .map_err(|failure| failure.with_causes().to_string())
     }
 
     #[test]

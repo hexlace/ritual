@@ -152,6 +152,7 @@ mod tests {
 
         assert!(
             failure
+                .with_causes()
                 .to_string()
                 .contains(&directory.join("Cargo.toml").display().to_string()),
             "{failure}"

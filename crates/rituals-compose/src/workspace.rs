@@ -592,7 +592,7 @@ mod tests {
             scratch.path().join("member/src"),
         ] {
             assert_eq!(
-                root(&directory).map_err(|failure| failure.to_string())?,
+                root(&directory).map_err(|failure| failure.with_causes().to_string())?,
                 resolved,
                 "asked from {}",
                 directory.display()
@@ -605,7 +605,8 @@ mod tests {
     fn asking_for_the_root_writes_nothing() -> TestOutcome {
         let (scratch, _resolved) = a_workspace_with_a_member("root-writes-nothing")?;
 
-        root(&scratch.path().join("member")).map_err(|failure| failure.to_string())?;
+        root(&scratch.path().join("member"))
+            .map_err(|failure| failure.with_causes().to_string())?;
 
         assert!(
             !scratch.path().join("Cargo.lock").exists(),
@@ -636,7 +637,8 @@ mod tests {
         let (scratch, resolved) = a_workspace_with_a_member("lockfile-beside-root")?;
 
         assert_eq!(
-            lockfile(&scratch.path().join("member/src")).map_err(|failure| failure.to_string())?,
+            lockfile(&scratch.path().join("member/src"))
+                .map_err(|failure| failure.with_causes().to_string())?,
             resolved.join("Cargo.lock")
         );
         Ok(())
