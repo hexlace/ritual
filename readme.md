@@ -483,8 +483,8 @@ error that it is deprecated, and goes in 0.3.0.
 
 ## Contributing
 
-Contributions are welcome. The process for them is being worked out as of
-September 22, 2026, and issues and pull requests are expected to open soon.
+Contributions will be welcome, but issues and pull requests aren't open to
+them yet: the process for them is still being worked out.
 
 ## Versions
 
