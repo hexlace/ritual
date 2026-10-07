@@ -26,7 +26,7 @@ use precondition::{Repository, WorkTree};
 use rituals::{CommandLine, Failure, Outcome, Task, clap, report};
 use rituals_compose::metadata;
 use rituals_compose::rollback::{self, Changes, Wording};
-use rituals_compose::{top_level, workspace};
+use rituals_compose::workspace;
 use step::{Migrating, Step};
 
 /// `migrate` takes no arguments: the layout a project is brought up to is the
@@ -79,7 +79,7 @@ fn run(command_line: &CommandLine) -> Outcome {
     // applies: a project with nothing to migrate has nothing to give back, so
     // it is told so whatever git says.
     let work_tree = WorkTree::take(&root);
-    let migrate_command = top_level::management_command(command_line, "migrate");
+    let migrate_command = command_line.cargo_command();
 
     let done = rollback::attempt(
         Wording::project(&root, "running `migrate` again"),

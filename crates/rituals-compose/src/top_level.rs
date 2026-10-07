@@ -123,10 +123,13 @@ pub const MANAGEMENT_BUNDLE_KEY: &str = "ritual";
 /// [`CommandLine::cargo_command`] spells them, and the result holds where
 /// that does.
 ///
-/// Every line ritual prints that names one of its own commands as a next
-/// step spells it with this, so the hint is one a person can copy. Called
-/// from a task outside ritual's bundle, it names that task's own sibling,
-/// which is not ritual's `command`.
+/// Every line ritual prints that names another of its own commands as a
+/// next step spells it with this, so the hint is one a person can copy. A
+/// task naming its own re-run uses [`CommandLine::cargo_command`] instead,
+/// which needs no guess about where the bundle is. Called from a task
+/// outside ritual's bundle, including one of ritual's own tasks mounted on
+/// its own, it names that task's own sibling, which is not ritual's
+/// `command`.
 ///
 /// # Examples
 ///

@@ -37,7 +37,7 @@ pub fn task() -> Task {
 fn run(command_line: &CommandLine, arguments: &ImportArguments) -> Outcome {
     let current_dir = std::env::current_dir()
         .map_err(|error| Failure::new("reading the current directory failed").caused_by(error))?;
-    let import_command = top_level::management_command(command_line, "import");
+    let import_command = command_line.cargo_command();
     // The key and the words that run this again come from what was typed and
     // run no subprocess, so they are decided before the attempt begins, when
     // nothing has been recorded. That includes a key that would hide `std`
@@ -96,7 +96,7 @@ fn prepare(
     changes: &mut Changes,
 ) -> Result<Import, Failure> {
     let package = command_line.identity().package_name();
-    let import_command = top_level::management_command(command_line, "import");
+    let import_command = command_line.cargo_command();
 
     let document =
         metadata::fetch_in_its_own_project(changes, current_dir, package, "import", again)?;

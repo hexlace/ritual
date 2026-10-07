@@ -47,9 +47,10 @@ pub(crate) fn ensure_the_key_is_not_the_bin_name(key: &Name, binary_name: &str) 
     Ok(())
 }
 
-/// The two commands an already-imported refusal can send a person to, each
-/// spelled as [`rituals_compose::top_level::management_command`] spells it
-/// for this command line.
+/// The two commands an already-imported refusal can send a person to:
+/// `regenerate` spelled as [`rituals_compose::top_level::management_command`]
+/// spells it for this command line, and this import spelled from
+/// [`rituals::CommandLine::cargo_command`], the words that reached it.
 ///
 /// Both are plain command strings, so as two positional arguments they could
 /// be swapped without the compiler noticing; named fields cannot be.
@@ -68,9 +69,10 @@ pub(crate) struct RemedyCommands<'a> {
 /// The two flags decide four outcomes, so they are matched as a pair: a
 /// reader sees every state at once, and the compiler checks that none was
 /// left out. `regenerate` is how a person types this command line's
-/// `regenerate`, and `import_again` how they type this import again, each as
-/// [`rituals_compose::top_level::management_command`] spells it, so every
-/// remedy here can be copied as written. They are named fields of
+/// `regenerate`, as [`rituals_compose::top_level::management_command`]
+/// spells it, and `import_again` how they type this import again, from
+/// [`rituals::CommandLine::cargo_command`], so every remedy here can be
+/// copied as written. They are named fields of
 /// [`RemedyCommands`] because both are command strings, and a swap would
 /// compile and send a person to the wrong command.
 ///
