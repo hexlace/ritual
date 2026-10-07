@@ -64,9 +64,10 @@ fn assert_remove_succeeds_and_it_builds(project: &Project, name: &str) -> TestOu
     Ok(())
 }
 
-/// Delphi's first reproduction: `fmt` depends on `lint` behind a feature
-/// nothing turns on, so the resolved graph has no edge for it, and Cargo
-/// still reads `lint`'s manifest to load the workspace.
+/// `fmt` depends on `lint` behind a feature nothing turns on, so the
+/// resolved graph has no edge for it, and Cargo still reads `lint`'s
+/// manifest to load the workspace. A check that read only the resolved graph
+/// would delete `lint` and leave a workspace Cargo cannot load.
 #[test]
 fn an_optional_dependent_behind_a_feature_is_refused_by_name() -> TestOutcome {
     in_checkout(|checkout| {
@@ -208,9 +209,10 @@ fn a_patch_cargo_ignores_is_not_a_dependent() -> TestOutcome {
     })
 }
 
-/// Delphi's third reproduction: with `members = ["ritual", "tasks/*"]` and
-/// one task, the glob's only match is the directory, and Cargo reads a glob
-/// that matches nothing as a literal path.
+/// With `members = ["ritual", "tasks/*"]` and one task, the glob's only
+/// match is the directory, and Cargo reads a glob that matches nothing as a
+/// literal path, so deleting the directory would leave a member Cargo cannot
+/// find.
 #[test]
 fn the_last_match_of_a_members_glob_is_refused_naming_the_glob() -> TestOutcome {
     in_checkout(|checkout| {
@@ -243,8 +245,9 @@ fn the_last_match_of_a_members_glob_is_refused_naming_the_glob() -> TestOutcome 
     })
 }
 
-/// Delphi's fourth reproduction: a `members` entry Cargo reads as the
-/// directory, spelled some other way. Each is taken out, and the project
+/// A `members` entry Cargo reads as the directory, spelled some other way.
+/// An entry left behind because its spelling did not match would name a
+/// directory that no longer exists, so each is taken out, and the project
 /// builds.
 #[test]
 fn a_member_entry_spelled_any_way_cargo_reads_it_is_taken_out() -> TestOutcome {
@@ -520,9 +523,10 @@ fn a_patch_in_a_members_own_cargo_config_is_refused_from_the_root() -> TestOutco
     })
 }
 
-/// Delphi's reproduction: a build started in `docs/`, which is neither a
-/// member nor above one, reads `docs/.cargo/config.toml`, which no build
-/// from the root or a member sees. A `[patch]` into the task there is
+/// A build started in `docs/`, which is neither a member nor above one,
+/// reads `docs/.cargo/config.toml`, which no build from the root or a member
+/// sees, so a check that looked only where those builds look would let
+/// `remove` break the build from `docs/`. A `[patch]` into the task there is
 /// refused, and once it is gone the same `remove` succeeds and a build from
 /// `docs/` still works.
 #[test]

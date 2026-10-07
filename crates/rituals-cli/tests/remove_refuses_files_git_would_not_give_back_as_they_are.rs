@@ -119,9 +119,10 @@ fn an_edited_skip_worktree_file_is_refused_naming_it() -> TestOutcome {
     })
 }
 
-/// Delphi's reproduction: a `sed`-style clean filter drops a line on the way
-/// into git, so the committed file is short of what is on disk while
-/// `git status` calls it clean.
+/// A `sed`-style clean filter drops a line on the way into git, so the
+/// committed file is short of what is on disk while `git status` calls it
+/// clean. Deleting the file would lose the line git never stored, and a check
+/// that trusted `git status` alone would let it go.
 #[test]
 fn a_file_behind_a_lossy_clean_filter_is_refused_naming_it() -> TestOutcome {
     in_checkout(|checkout| {
@@ -160,10 +161,11 @@ fn a_file_behind_a_lossy_clean_filter_is_refused_naming_it() -> TestOutcome {
     })
 }
 
-/// Delphi's reproduction: `tasks` is a committed symbolic link into another,
-/// clean repository. Cargo spells the task's directory through the link, as
-/// if it were inside the project, and that repository's git calls it clean;
-/// this project's git could give none of it back.
+/// `tasks` is a committed symbolic link into another, clean repository.
+/// Cargo spells the task's directory through the link, as if it were inside
+/// the project, and that repository's git calls it clean, but this project's
+/// git could give none of it back: a check that asked whichever repository
+/// holds the files would delete work nothing here can restore.
 #[test]
 fn a_task_reached_through_a_link_into_another_repository_is_refused() -> TestOutcome {
     in_checkout(|checkout| {

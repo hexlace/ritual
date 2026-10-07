@@ -80,10 +80,10 @@ fn restore(project: &Project, path: &str, before: Option<&str>) -> TestOutcome {
     git::commit_everything(project.root())
 }
 
-/// One way of breaking the build by deleting `tasks/lint`, written with
-/// `spelling` standing for that directory, from the workspace root unless
-/// the reproduction says otherwise.
-struct Reproduction {
+/// A setting Cargo reads that refers into `tasks/lint`, so deleting that
+/// directory breaks the build, written with `spelling` standing for the
+/// directory, from the workspace root unless the reference says otherwise.
+struct Reference {
     /// The file the setting goes in, from the project root.
     file: &'static str,
     /// What that file holds, given the spelling of `tasks/lint` from the
@@ -93,11 +93,12 @@ struct Reproduction {
     expected: fn(&str) -> String,
 }
 
-/// Every reproduction this suite holds to: a `[patch]` in
-/// `.cargo/config.toml` and in the workspace manifest, an `include` that is
-/// not `optional`, and a target's `path` in another member.
-const REPRODUCTIONS: [Reproduction; 4] = [
-    Reproduction {
+/// Every kind of reference into the task directory this suite spells each
+/// way: a `[patch]` in `.cargo/config.toml` and in the workspace manifest,
+/// an `include` that is not `optional`, and a target's `path` in another
+/// member.
+const REFERENCES: [Reference; 4] = [
+    Reference {
         file: ".cargo/config.toml",
         contents: |spelling, before| {
             format!(
@@ -107,7 +108,7 @@ const REPRODUCTIONS: [Reproduction; 4] = [
         },
         expected: |_| "[patch.crates-io] lint in ".to_string(),
     },
-    Reproduction {
+    Reference {
         file: "Cargo.toml",
         contents: |spelling, before| {
             format!(
@@ -117,7 +118,7 @@ const REPRODUCTIONS: [Reproduction; 4] = [
         },
         expected: |_| "[patch.crates-io] lint".to_string(),
     },
-    Reproduction {
+    Reference {
         file: ".cargo/config.toml",
         contents: |spelling, before| {
             format!(
@@ -127,7 +128,7 @@ const REPRODUCTIONS: [Reproduction; 4] = [
         },
         expected: |spelling| format!("`include` of `../{spelling}/settings.toml` in "),
     },
-    Reproduction {
+    Reference {
         file: "tasks/fmt/Cargo.toml",
         contents: |spelling, before| {
             format!(
@@ -140,7 +141,7 @@ const REPRODUCTIONS: [Reproduction; 4] = [
 ];
 
 /// A project with the tasks `lint` and `fmt` committed, and in `lint` the
-/// two files the reproductions point at.
+/// two files the references point at.
 fn project_with_lint_and_fmt(
     checkout: &support::Checkout,
     working_dir: &TempDir,
@@ -159,29 +160,32 @@ fn project_with_lint_and_fmt(
     Ok(project)
 }
 
-/// Runs every reproduction with `tasks/lint` spelled `spelling`, each
+/// Writes every reference with `tasks/lint` spelled `spelling`, each
 /// refused with the project left as it was, and then removes `lint`.
-fn assert_every_reproduction_is_refused(project: &Project, spelling: &str) -> TestOutcome {
-    for reproduction in &REPRODUCTIONS {
-        let before = support::read_text(&project.root().join(reproduction.file)).ok();
-        let contents = (reproduction.contents)(spelling, before.as_deref());
-        write_and_commit(project, reproduction.file, &contents)?;
+fn assert_every_reference_is_refused(project: &Project, spelling: &str) -> TestOutcome {
+    for reference in &REFERENCES {
+        let before = support::read_text(&project.root().join(reference.file)).ok();
+        let contents = (reference.contents)(spelling, before.as_deref());
+        write_and_commit(project, reference.file, &contents)?;
         assert_remove_is_refused_and_leaves_the_lockfile(
             project,
             "lint",
-            &[&(reproduction.expected)(spelling)],
+            &[&(reference.expected)(spelling)],
             |_| Ok(()),
         )?;
-        restore(project, reproduction.file, before.as_deref())?;
+        restore(project, reference.file, before.as_deref())?;
     }
     assert_removing_lint_succeeds_and_it_builds(project)
 }
 
-/// Delphi's reproductions spelled `Tasks/Lint`. A file system that tells
-/// case apart reads that as a directory that does not exist, so there the
-/// fixture cannot be built, and the story says it was skipped.
+/// Every reference spelled `Tasks/Lint`, which a file system that folds
+/// case reads as `tasks/lint`, so Cargo still reads the task directory
+/// through it while a comparison of path text would see another directory.
+/// A file system that tells case apart reads it as a directory that does not
+/// exist, so there the fixture cannot be built, and the story says it was
+/// skipped.
 #[test]
-fn every_reproduction_in_another_case_is_refused_where_the_file_system_folds_case() -> TestOutcome {
+fn every_reference_in_another_case_is_refused_where_the_file_system_folds_case() -> TestOutcome {
     in_checkout(|checkout| {
         let working_dir = TempDir::new("remove-refuses-other-case")?;
         let project = project_with_lint_and_fmt(checkout, &working_dir)?;
@@ -192,20 +196,21 @@ fn every_reproduction_in_another_case_is_refused_where_the_file_system_folds_cas
             );
             return Ok(());
         }
-        assert_every_reproduction_is_refused(&project, "Tasks/Lint")
+        assert_every_reference_is_refused(&project, "Tasks/Lint")
     })
 }
 
-/// Delphi's reproductions spelled through `alias`, a link to `tasks` inside
-/// the project.
+/// Every reference spelled through `alias`, a link to `tasks` inside the
+/// project, which Cargo follows to the task directory while a comparison of
+/// path text would see another one.
 #[test]
-fn every_reproduction_through_a_link_in_the_project_is_refused() -> TestOutcome {
+fn every_reference_through_a_link_in_the_project_is_refused() -> TestOutcome {
     in_checkout(|checkout| {
         let working_dir = TempDir::new("remove-refuses-through-alias")?;
         let project = project_with_lint_and_fmt(checkout, &working_dir)?;
         std::os::unix::fs::symlink("tasks", project.root().join("alias"))?;
         git::commit_everything(project.root())?;
-        assert_every_reproduction_is_refused(&project, "alias/lint")
+        assert_every_reference_is_refused(&project, "alias/lint")
     })
 }
 

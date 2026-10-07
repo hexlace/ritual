@@ -136,12 +136,7 @@ mod tests {
     use rituals_compose::task_crate::Audience;
 
     use super::Scaffolding;
-    use crate::test_support::{ScratchDir, TestOutcome};
-
-    /// Every file under a directory tree, as a path paired with its bytes,
-    /// sorted by path — a before/after diff for the undo to be checked
-    /// against.
-    type Snapshot = Vec<(PathBuf, Vec<u8>)>;
+    use crate::test_support::{ScratchDir, Snapshot, TestOutcome, snapshot};
 
     const WORKSPACE_MANIFEST: &str =
         "[workspace]\nmembers = [\n    \"ritual\",\n]\nresolver = \"3\"\n";
@@ -212,23 +207,10 @@ mod tests {
             })
         }
 
+        /// The project's whole tree, symbolic links as links, for the undo
+        /// to be checked against.
         fn snapshot(&self) -> Result<Snapshot, Box<dyn Error>> {
-            let mut files = Vec::new();
-            let mut pending = vec![self.workspace_root.clone()];
-            while let Some(directory) = pending.pop() {
-                for entry in std::fs::read_dir(&directory)? {
-                    let entry = entry?;
-                    let path = entry.path();
-                    if entry.file_type()?.is_dir() {
-                        pending.push(path);
-                    } else {
-                        let bytes = std::fs::read(&path)?;
-                        files.push((path, bytes));
-                    }
-                }
-            }
-            files.sort_by(|left, right| left.0.cmp(&right.0));
-            Ok(files)
+            Ok(snapshot(&self.workspace_root)?)
         }
     }
 

@@ -54,7 +54,7 @@ mod tests {
 
     #[test]
     fn every_file_that_mentions_tasks_is_listed_in_path_order() -> TestOutcome {
-        let scratch = ScratchDir::new("mentions-listed")?;
+        let scratch = ScratchDir::resolved("mentions-listed")?;
         let root = scratch.path();
         write_files(
             root,
@@ -84,7 +84,7 @@ mod tests {
     /// no longer place in any.
     #[test]
     fn a_search_git_cannot_make_is_one_line_that_says_what_to_do() -> TestOutcome {
-        let scratch = ScratchDir::new("mentions-failed")?;
+        let scratch = ScratchDir::resolved("mentions-failed")?;
         let repository_root = scratch.path().join("repository");
         write_files(&repository_root, &[("a.txt", "x\n")])?;
         init_and_commit(&repository_root)?;
@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     fn nothing_mentioning_it_is_no_lines() -> TestOutcome {
-        let scratch = ScratchDir::new("mentions-none")?;
+        let scratch = ScratchDir::resolved("mentions-none")?;
         write_files(scratch.path(), &[("notes.txt", "nothing\n")])?;
         init_and_commit(scratch.path())?;
 
@@ -121,7 +121,7 @@ mod tests {
     /// A longer name that ends in `tasks/` is not the directory.
     #[test]
     fn a_longer_name_ending_in_tasks_is_not_a_mention() -> TestOutcome {
-        let scratch = ScratchDir::new("mentions-longer")?;
+        let scratch = ScratchDir::resolved("mentions-longer")?;
         write_files(
             scratch.path(),
             &[
@@ -140,7 +140,7 @@ mod tests {
     /// it.
     #[test]
     fn an_ignored_file_is_left_out_and_an_untracked_one_is_listed() -> TestOutcome {
-        let scratch = ScratchDir::new("mentions-ignored")?;
+        let scratch = ScratchDir::resolved("mentions-ignored")?;
         let root = scratch.path();
         write_files(root, &[(".gitignore", "*.log\n"), ("a.txt", "x\n")])?;
         init_and_commit(root)?;
@@ -169,7 +169,7 @@ mod tests {
     /// lines are sorted again.
     #[test]
     fn a_file_outside_the_projects_root_is_spelled_from_it() -> TestOutcome {
-        let scratch = ScratchDir::new("mentions-monorepo")?;
+        let scratch = ScratchDir::resolved("mentions-monorepo")?;
         let top = scratch.path();
         let root = top.join("project");
         write_files(

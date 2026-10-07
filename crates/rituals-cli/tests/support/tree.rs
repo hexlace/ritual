@@ -1,6 +1,7 @@
 //! Walking a directory tree, and comparing what is in it before and after.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -12,16 +13,19 @@ use super::{Outcome, ResultContext};
 /// constant.
 const EXCLUDED_ENTRIES: [&str; 3] = ["target", ".git", "Cargo.lock"];
 
-/// What a walk found at one path: a directory, or a regular file.
+/// What a walk found at one path: a directory, a regular file, or a
+/// symbolic link, by the entry's own type and never its target's.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Directory,
     File,
+    Link,
 }
 
-/// Every directory and regular file under `root` (not `root` itself),
-/// skipping [`EXCLUDED_ENTRIES`] and everything beneath them at any depth,
-/// as paths that start with `root`. The one walk both [`files_under`] and
+/// Every directory, regular file and symbolic link under `root` (not `root`
+/// itself), skipping [`EXCLUDED_ENTRIES`] and everything beneath them at any
+/// depth, as paths that start with `root`. A link is never followed, so
+/// nothing is found through one. The one walk both [`files_under`] and
 /// [`snapshot_tree`] read, so the two cannot disagree about what a tree
 /// holds.
 fn walk(root: &Path) -> Outcome<Vec<(PathBuf, Kind)>> {
@@ -50,6 +54,8 @@ fn walk(root: &Path) -> Outcome<Vec<(PathBuf, Kind)>> {
                 found.push((path, Kind::Directory));
             } else if file_type.is_file() {
                 found.push((path, Kind::File));
+            } else if file_type.is_symlink() {
+                found.push((path, Kind::Link));
             }
         }
     }
@@ -67,21 +73,30 @@ pub(crate) fn files_under(root: &Path) -> Outcome<Vec<PathBuf>> {
         .collect())
 }
 
-/// One entry in a [`Snapshot`]: a directory, or a regular file with its
-/// exact bytes.
+/// One entry in a [`Snapshot`]: a directory, a regular file with its exact
+/// bytes, or a symbolic link with the target it holds, as written: the
+/// bytes, not a `PathBuf`, because paths compare by their components, which
+/// read `first/` and `./first` as `first`, while a link to `first/` no
+/// longer resolves when `first` is a file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Entry {
     Directory,
     File(Vec<u8>),
+    Link(OsString),
 }
 
-/// A tree's directories and regular files, keyed by their path relative to
-/// the tree's root.
+/// A tree's directories, regular files and symbolic links, keyed by their
+/// path relative to the tree's root.
 pub(crate) type Snapshot = BTreeMap<PathBuf, Entry>;
 
-/// Collects every directory and regular file under `root` (not `root`
-/// itself), keyed by its path relative to `root`, with each file's exact
-/// bytes.
+/// Collects every directory, regular file and symbolic link under `root`
+/// (not `root` itself), keyed by its path relative to `root`, with each
+/// file's exact bytes and each link's target.
+///
+/// A link is recorded as a link and never followed. So a link that is added,
+/// removed or pointed somewhere else changes the snapshot even when what it
+/// leads to reads the same, and a link that leads nowhere is recorded rather
+/// than failing the walk.
 ///
 /// Directories are recorded, empty ones included, because a directory is
 /// something ritual can leave behind: `create` treats an existing
@@ -100,6 +115,11 @@ pub(crate) fn snapshot_tree(root: &Path) -> Outcome<Snapshot> {
                 Kind::Directory => Entry::Directory,
                 Kind::File => Entry::File(
                     fs::read(&path).context(&format!("reading {} failed", path.display()))?,
+                ),
+                Kind::Link => Entry::Link(
+                    fs::read_link(&path)
+                        .context(&format!("reading the link {} failed", path.display()))?
+                        .into_os_string(),
                 ),
             };
             let relative = path

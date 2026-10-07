@@ -220,22 +220,12 @@ fn refusal(name: &Name) -> workspace::Refusal {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
-
-    /// Says, on the test process's own stderr, that a check was skipped and
-    /// why. Written straight to the stream rather than through `eprintln!`,
-    /// which the test harness captures and discards for a passing test —
-    /// where a skip would read exactly like a pass.
-    fn report_skip(message: &str) {
-        use std::io::Write as _;
-        // Best effort: a notice that cannot be written changes nothing about
-        // the result, and a failed write to stderr has nowhere better to go.
-        drop(writeln!(std::io::stderr(), "SKIPPED {message}"));
-    }
+    use std::path::Path;
 
     use rituals::{Failure, Name};
     use rituals_compose::rollback::{self, Wording};
     use rituals_compose::source::Source;
+    use rituals_compose::test_util::{ScratchDir, report_skip};
 
     use super::validate_source;
 
@@ -261,36 +251,6 @@ mod tests {
             assert_eq!(source, Source::Git("https://example.invalid/x".to_string()));
         }
     }
-
-    /// A directory under the system temp root that removes itself on drop —
-    /// this crate's own copy of `rituals-compose`'s `test_support::ScratchDir`
-    /// and `.rituals/create`'s copy of the same: a different crate is a genuine
-    /// boundary none of the three can share across.
-    struct ScratchDir(PathBuf);
-
-    impl ScratchDir {
-        fn new(tag: &str) -> std::io::Result<Self> {
-            let path = std::env::temp_dir().join(format!(
-                "ritual-new-{tag}-{}-{}",
-                std::process::id(),
-                COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            ));
-            std::fs::create_dir_all(&path)?;
-            Ok(Self(path))
-        }
-
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    impl Drop for ScratchDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-
-    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
     fn demo_name() -> Name {
         Name::new("demo").expect("demo is a valid name")

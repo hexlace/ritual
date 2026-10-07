@@ -65,20 +65,32 @@ pub fn run(
     let command = build_command(identity, &top_level.mounts);
 
     let matches = command.get_matches();
-    let (task, matches) = resolve(&top_level.mounts, &matches);
+    let resolved = resolve(&top_level.mounts, &matches);
 
-    let command_line = CommandLine::from_dispatch(identity, top_level.flattened);
-    let outcome = task.invoke(&command_line, matches);
+    let command_line =
+        CommandLine::from_dispatch(identity, top_level.flattened, resolved.command_path);
+    let outcome = resolved.task.invoke(&command_line, resolved.matches);
     if let Err(failure) = &outcome {
         write_to_stderr(&refusal_line(identity.binary_name(), failure));
     }
     exit_code_for(&outcome)
 }
 
+/// The leaf task a parse selected, its own matches, and the subcommand
+/// names walked to reach it.
+struct Resolved<'a> {
+    task: &'a Task,
+    matches: &'a clap::ArgMatches,
+    /// From the top-level name down to the leaf's own, as the tree being
+    /// walked spells them: the keys the project and its bundles chose.
+    command_path: Vec<&'static str>,
+}
+
 /// Walks `matches` down through `tasks` to the leaf task the parse actually
-/// selected, and that leaf's own matches — one step for the top-level
-/// subcommand, then one more per level of bundle nesting, with a `while let`
-/// rather than recursion, so nesting depth never becomes stack depth.
+/// selected, that leaf's own matches, and every name it walked on the way —
+/// one step for the top-level subcommand, then one more per level of bundle
+/// nesting, with a `while let` rather than recursion, so nesting depth never
+/// becomes stack depth.
 ///
 /// The loop has no fixed iteration limit because it does not need one: the
 /// tree it walks is finite by construction, for the same reason
@@ -91,21 +103,19 @@ pub fn run(
 ///
 /// Kept separate from [`run`] so it can be exercised against matches built
 /// from [`build_command`] directly, without real process arguments.
-fn resolve<'a>(
-    tasks: &'a [(&'static str, Task)],
-    matches: &'a clap::ArgMatches,
-) -> (&'a Task, &'a clap::ArgMatches) {
+fn resolve<'a>(tasks: &'a [(&'static str, Task)], matches: &'a clap::ArgMatches) -> Resolved<'a> {
     let Some((subcommand_name, subcommand_matches)) = matches.subcommand() else {
         // `subcommand_required(true)` makes clap exit before returning here
         // when no subcommand was given.
         unreachable!("clap enforces subcommand_required(true) before returning matches");
     };
-    let Some((_, task)) = tasks.iter().find(|(name, _)| *name == subcommand_name) else {
+    let Some((task_name, task)) = tasks.iter().find(|(name, _)| *name == subcommand_name) else {
         // clap can only report a subcommand name this tree declared.
         unreachable!("clap returned an undeclared subcommand name `{subcommand_name}`");
     };
     let mut task = task;
     let mut matches = subcommand_matches;
+    let mut command_path = vec![*task_name];
 
     while let Some(children) = task.children() {
         let Some((child_name, child_matches)) = matches.subcommand() else {
@@ -113,15 +123,21 @@ fn resolve<'a>(
             // bundle's own command, the same way the top level sets it.
             unreachable!("subcommand_required(true) is set on every bundle (declare_tree)");
         };
-        let Some((_, child_task)) = children.iter().find(|(name, _)| *name == child_name) else {
+        let Some((child_key, child_task)) = children.iter().find(|(name, _)| *name == child_name)
+        else {
             // clap can only report a subcommand name this tree declared.
             unreachable!("clap returned an undeclared subcommand name `{child_name}`");
         };
+        command_path.push(*child_key);
         task = child_task;
         matches = child_matches;
     }
 
-    (task, matches)
+    Resolved {
+        task,
+        matches,
+        command_path,
+    }
 }
 
 /// Builds the top-level `clap::Command` for one composed command line.
@@ -170,7 +186,7 @@ fn exit_code_for(outcome: &Outcome) -> ExitCode {
 mod tests {
     use std::process::ExitCode;
 
-    use super::{build_command, exit_code_for, refusal_line, resolve};
+    use super::{build_command, exit_code_for, flatten, refusal_line, resolve};
     use crate::command_line::CommandLine;
     use crate::identity::Identity;
     use crate::outcome::{Failure, Outcome, RefusalStatus};
@@ -361,13 +377,84 @@ mod tests {
         );
 
         if let Ok(matches) = parsed {
-            let (task, task_matches) = resolve(&tasks, &matches);
-            let command_line = CommandLine::from_dispatch(identity, []);
-            let outcome = task.invoke(&command_line, task_matches);
+            let resolved = resolve(&tasks, &matches);
+            let command_line = CommandLine::from_dispatch(identity, [], resolved.command_path);
+            let outcome = resolved.task.invoke(&command_line, resolved.matches);
             let Err(failure) = outcome else {
                 unreachable!("the resolved leaf's own handler always returns Err");
             };
             assert_eq!(failure.to_string(), "the leaf two levels down ran");
+        }
+    }
+
+    /// Parses `argv` against `tasks` and returns the command path `resolve`
+    /// walked, the way [`super::run`] builds and parses its own tree.
+    fn command_path_for(tasks: &[(&'static str, Task)], argv: &[&str]) -> Vec<&'static str> {
+        let command = build_command(an_identity("demo", "0.0.0"), tasks);
+        let parsed = command.try_get_matches_from(argv);
+        assert!(
+            parsed.is_ok(),
+            "parsing {argv:?} should succeed: {parsed:?}"
+        );
+        parsed.map_or_else(
+            |_| Vec::new(),
+            |matches| resolve(tasks, &matches).command_path,
+        )
+    }
+
+    /// A bundle offering one child, `sync`, for a project to mount under
+    /// whatever key it chooses.
+    fn a_tools_bundle() -> Task {
+        Task::group("a bundle of tools", [("sync", Task::new("sync", run_ok))])
+    }
+
+    /// The same bundle mounted under two keys reports each key in its own
+    /// path: the top-level name is the project's choice of key, not anything
+    /// the bundle carries.
+    #[test]
+    fn a_bundle_mounted_under_a_renamed_key_sees_that_key_in_its_path() {
+        let tasks = [("acme", a_tools_bundle()), ("tools", a_tools_bundle())];
+
+        assert_eq!(
+            command_path_for(&tasks, &["demo", "tools", "sync"]),
+            ["tools", "sync"]
+        );
+        assert_eq!(
+            command_path_for(&tasks, &["demo", "acme", "sync"]),
+            ["acme", "sync"]
+        );
+    }
+
+    /// A task inside a bundle inside a bundle sees every level it was
+    /// reached through, top first.
+    #[test]
+    fn a_task_two_bundles_deep_sees_every_level_in_its_path() {
+        let inner = Task::group("an inner bundle", [("leaf", Task::new("leaf", run_ok))]);
+        let outer = Task::group("an outer bundle", [("inner", inner)]);
+        let tasks = [("outer", outer), ("sibling", Task::new("sibling", run_ok))];
+
+        assert_eq!(
+            command_path_for(&tasks, &["demo", "outer", "inner", "leaf"]),
+            ["outer", "inner", "leaf"]
+        );
+        assert_eq!(command_path_for(&tasks, &["demo", "sibling"]), ["sibling"]);
+    }
+
+    /// A child of the bundle mounted under the bin's own name is a top-level
+    /// command once flattened, so its path is its own name alone: the
+    /// bundle's key is not a word anybody types.
+    #[test]
+    fn a_flattened_child_s_path_is_its_own_name() {
+        let top_level = flatten("demo", vec![("demo", a_tools_bundle())]);
+        assert!(
+            top_level.is_ok(),
+            "flattening should succeed: {top_level:?}"
+        );
+        if let Ok(top_level) = top_level {
+            assert_eq!(
+                command_path_for(&top_level.mounts, &["demo", "sync"]),
+                ["sync"]
+            );
         }
     }
 }

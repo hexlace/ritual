@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn a_committed_work_tree_is_clean_and_knows_where_its_root_is() -> TestOutcome {
-        let scratch = ScratchDir::new("precondition-clean")?;
+        let scratch = ScratchDir::resolved("precondition-clean")?;
         let root = scratch.path().join("project");
         std::fs::create_dir_all(root.join("ritual"))?;
         std::fs::write(root.join("ritual/Cargo.toml"), "# committed\n")?;
@@ -231,7 +231,7 @@ mod tests {
     /// the root, with `..` to leave it.
     #[test]
     fn a_root_below_the_top_level_spells_paths_from_itself() -> TestOutcome {
-        let scratch = ScratchDir::new("precondition-below")?;
+        let scratch = ScratchDir::resolved("precondition-below")?;
         let root = scratch.path().join("monorepo/project");
         std::fs::create_dir_all(&root)?;
         std::fs::write(root.join("Cargo.toml"), "# committed\n")?;
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn a_changed_file_makes_the_work_tree_dirty() -> TestOutcome {
-        let scratch = ScratchDir::new("precondition-changed")?;
+        let scratch = ScratchDir::resolved("precondition-changed")?;
         std::fs::write(scratch.path().join("notes.txt"), "as committed\n")?;
         init_and_commit(scratch.path())?;
         std::fs::write(scratch.path().join("notes.txt"), "changed\n")?;
@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn an_untracked_file_makes_the_work_tree_dirty() -> TestOutcome {
-        let scratch = ScratchDir::new("precondition-untracked")?;
+        let scratch = ScratchDir::resolved("precondition-untracked")?;
         std::fs::write(scratch.path().join("a.txt"), "x\n")?;
         init_and_commit(scratch.path())?;
         std::fs::write(scratch.path().join("scratch.txt"), "not in git\n")?;
@@ -295,7 +295,7 @@ mod tests {
     /// carries it along with its directory, so it does not count.
     #[test]
     fn an_ignored_file_does_not_make_the_work_tree_dirty() -> TestOutcome {
-        let scratch = ScratchDir::new("precondition-ignored")?;
+        let scratch = ScratchDir::resolved("precondition-ignored")?;
         std::fs::write(scratch.path().join(".gitignore"), "*.log\n")?;
         init_and_commit(scratch.path())?;
         std::fs::write(scratch.path().join("build.log"), "ignored\n")?;
