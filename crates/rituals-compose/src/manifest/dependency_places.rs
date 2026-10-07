@@ -17,7 +17,12 @@ use toml_edit::{Item, TableLike};
 /// ignored without one; a member cannot hold `[workspace.dependencies]` at
 /// all, since that makes it a second workspace root.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ManifestRole {
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "pub(crate) is this type's actual visibility: it is re-exported from `manifest` \
+              for the metadata walk and is not part of the crate's public API"
+)]
+pub(crate) enum ManifestRole {
     /// The manifest at the workspace's root.
     WorkspaceRoot,
     /// Any other manifest Cargo reads: a member's, or that of a crate a path

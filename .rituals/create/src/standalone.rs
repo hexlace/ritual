@@ -17,7 +17,7 @@ use std::path::Path;
 use rituals::{Failure, Name, Outcome, report};
 use rituals_compose::rollback::{self, Wording};
 use rituals_compose::shell;
-use rituals_compose::source::{Source, SourceArguments, assert_is_a_ritual_checkout};
+use rituals_compose::source::{Source, SourceArguments, ensure_a_ritual_checkout};
 use rituals_compose::task_crate::Audience;
 
 use crate::arguments::{NameOrPath, ScaffoldArguments};
@@ -115,7 +115,7 @@ fn validate_source(source: Source) -> Result<Source, Failure> {
         return Ok(source);
     };
 
-    assert_is_a_ritual_checkout(&checkout_root)?;
+    ensure_a_ritual_checkout(&checkout_root)?;
 
     let absolute_checkout_root = std::path::absolute(&checkout_root).map_err(|error| {
         Failure::new(format!("resolving {} failed", checkout_root.display())).caused_by(error)

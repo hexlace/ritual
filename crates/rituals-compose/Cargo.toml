@@ -27,7 +27,8 @@ serde_json.workspace = true
 toml_edit.workspace = true
 
 [features]
-# Test fixtures for crates that test against `git`, never needed at run time.
+# Shared test support for this repository's own crates: git fixtures and the
+# scratch directory. Never needed at run time, and outside the stability promise.
 test-util = []
 
 [lints]

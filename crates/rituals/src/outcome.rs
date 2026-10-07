@@ -430,8 +430,8 @@ mod tests {
 
     #[test]
     fn display_is_the_message() {
-        let failure = Failure::new("tasks/lint already exists");
-        assert_eq!(failure.to_string(), "tasks/lint already exists");
+        let failure = Failure::new(".rituals/lint already exists");
+        assert_eq!(failure.to_string(), ".rituals/lint already exists");
     }
 
     #[test]

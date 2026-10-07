@@ -25,7 +25,7 @@
 //!
 //! assert_eq!(place.directory(), Path::new("/work/demo/.rituals/lint"));
 //! assert_eq!(place.from_the_root(), ".rituals/lint");
-//! assert_eq!(layout::tasks_directory(root), Path::new("/work/demo/.rituals"));
+//! assert_eq!(layout::rituals_directory(root), Path::new("/work/demo/.rituals"));
 //! # Ok::<(), rituals::InvalidName>(())
 //! ```
 
@@ -37,8 +37,8 @@ use crate::paths;
 
 /// The directory every ritual lives in, named from the workspace
 /// root. Private so that nothing spells it on its own: a caller asks
-/// [`tasks_directory`] or [`place_for`].
-const TASKS_DIRECTORY: &str = ".rituals";
+/// [`rituals_directory`] or [`place_for`].
+const RITUALS_DIRECTORY: &str = ".rituals";
 
 /// Where a task crate is written, spelled the two ways a task needs it.
 ///
@@ -170,11 +170,11 @@ pub struct TypedPath<'a> {
 /// use rituals_compose::layout;
 ///
 /// let root = Path::new("/work/demo");
-/// let tasks = layout::tasks_directory(root);
+/// let rituals = layout::rituals_directory(root);
 ///
-/// assert_eq!(tasks, Path::new("/work/demo/.rituals"));
-/// assert!(layout::place_for(root, &Name::new("lint")?).directory().starts_with(&tasks));
-/// assert!(!Path::new("/work/demo/src").starts_with(&tasks));
+/// assert_eq!(rituals, Path::new("/work/demo/.rituals"));
+/// assert!(layout::place_for(root, &Name::new("lint")?).directory().starts_with(&rituals));
+/// assert!(!Path::new("/work/demo/src").starts_with(&rituals));
 /// # Ok::<(), rituals::InvalidName>(())
 /// ```
 ///
@@ -183,13 +183,13 @@ pub struct TypedPath<'a> {
 /// Panics when `workspace_root` is not absolute: every path a task writes is
 /// absolute, so a relative root is a bug in the caller.
 #[must_use]
-pub fn tasks_directory(workspace_root: &Path) -> PathBuf {
+pub fn rituals_directory(workspace_root: &Path) -> PathBuf {
     assert!(
         workspace_root.is_absolute(),
         "workspace_root must be absolute, got {}",
         workspace_root.display()
     );
-    workspace_root.join(TASKS_DIRECTORY)
+    workspace_root.join(RITUALS_DIRECTORY)
 }
 
 /// Returns where the task called `name` goes in the workspace at
@@ -220,24 +220,24 @@ pub fn tasks_directory(workspace_root: &Path) -> PathBuf {
 /// Panics when `workspace_root` is not absolute.
 #[must_use]
 pub fn place_for(workspace_root: &Path, name: &Name) -> TaskPlace {
-    let tasks = tasks_directory(workspace_root);
-    let directory = tasks.join(name.as_str());
+    let rituals = rituals_directory(workspace_root);
+    let directory = rituals.join(name.as_str());
     // A validated name is one path component, so this holds for every name
     // there is; it is checked because the member entry and the dependency
-    // path both rely on the directory being inside `tasks`.
+    // path both rely on the directory being inside `rituals`.
     assert!(
-        directory.starts_with(&tasks),
+        directory.starts_with(&rituals),
         "joining a validated Name under {} must stay under it",
-        tasks.display()
+        rituals.display()
     );
     assert!(
-        directory != tasks,
+        directory != rituals,
         "joining a validated Name under {} must not name it itself",
-        tasks.display()
+        rituals.display()
     );
     TaskPlace {
         directory,
-        from_the_root: format!("{TASKS_DIRECTORY}/{name}"),
+        from_the_root: format!("{RITUALS_DIRECTORY}/{name}"),
         name: name.clone(),
     }
 }
@@ -248,13 +248,13 @@ pub fn place_for(workspace_root: &Path, name: &Name) -> TaskPlace {
 /// The path is read the way a shell reads it: against `typed.current_dir`,
 /// with `.` and `..` folded as text, so `.rituals/private/lint` from the root
 /// and `private/lint` from inside `.rituals/` name one place. It has to lead
-/// strictly below the tasks directory; its last component is the task's name,
+/// strictly below the rituals directory; its last component is the task's name,
 /// its key and its crate's name. Nothing is created and no link is followed.
 ///
 /// # Errors
 ///
 /// Returns a [`Failure`] naming `typed.path` as it was typed, where it leads
-/// from the workspace root, and the tasks directory, when the path does not
+/// from the workspace root, and the rituals directory, when the path does not
 /// lead strictly below it, and one naming
 /// the problem when its last component is not a valid [`Name`].
 ///
@@ -295,29 +295,29 @@ pub fn place_at(workspace_root: &Path, typed: TypedPath<'_>) -> Result<TaskPlace
         "current_dir must be absolute, got {}",
         typed.current_dir.display()
     );
-    let tasks = tasks_directory(workspace_root);
+    let rituals = rituals_directory(workspace_root);
     let folded = paths::normalize(&typed.current_dir.join(typed.path));
-    if !folded.starts_with(&tasks) || folded == tasks {
-        return Err(outside_the_tasks_directory(
+    if !folded.starts_with(&rituals) || folded == rituals {
+        return Err(outside_the_rituals_directory(
             typed.path,
             &paths::relative(workspace_root, &folded),
         ));
     }
 
-    // Strictly below `tasks`, so there is a last component and a path from
+    // Strictly below `rituals`, so there is a last component and a path from
     // the root to spell. A component that is not valid UTF-8 is not
     // supported: it reads lossily here and `Name` refuses the last.
     let Some(last) = folded.file_name() else {
-        unreachable!("a path strictly below the tasks directory has a last component");
+        unreachable!("a path strictly below the rituals directory has a last component");
     };
     let name = Name::new(&last.to_string_lossy())?;
     let Ok(below_the_root) = folded.strip_prefix(workspace_root) else {
-        unreachable!("a path below the tasks directory is below the workspace root");
+        unreachable!("a path below the rituals directory is below the workspace root");
     };
     let from_the_root = below_the_root.to_string_lossy().into_owned();
     assert!(
-        from_the_root.starts_with(TASKS_DIRECTORY),
-        "a path below the tasks directory starts with {TASKS_DIRECTORY}, got {from_the_root}"
+        from_the_root.starts_with(RITUALS_DIRECTORY),
+        "a path below the rituals directory starts with {RITUALS_DIRECTORY}, got {from_the_root}"
     );
     Ok(TaskPlace {
         directory: folded,
@@ -332,7 +332,7 @@ pub fn place_at(workspace_root: &Path, typed: TypedPath<'_>) -> Result<TaskPlace
 /// made inside it would sit inside another member, and that member could no
 /// longer be removed on its own. `members` are the workspace's members, each
 /// a package name and its directory, as Cargo spells them. Only those inside
-/// the tasks directory are asked about, so a command line crate at the
+/// the rituals directory are asked about, so a command line crate at the
 /// workspace root, which every ritual is below, is no obstacle. `typed` is the
 /// path as the person typed it, which the refusal hands back.
 ///
@@ -366,9 +366,9 @@ pub fn ensure_in_no_member<'a>(
     place: &TaskPlace,
     members: impl IntoIterator<Item = (&'a str, &'a Path)>,
 ) -> Outcome {
-    let tasks = tasks_directory(workspace_root);
+    let rituals = rituals_directory(workspace_root);
     let Some((member, directory)) = members.into_iter().find(|(_, directory)| {
-        directory.starts_with(&tasks) && place.directory().starts_with(directory)
+        directory.starts_with(&rituals) && place.directory().starts_with(directory)
     }) else {
         return Ok(());
     };
@@ -382,22 +382,22 @@ pub fn ensure_in_no_member<'a>(
     };
     Err(Failure::new(format!(
         "refusing to create {}: this one leads to {}, {into}; a ritual never goes inside \
-         another crate, so give a path that leads elsewhere below {TASKS_DIRECTORY}/",
+         another crate, so give a path that leads elsewhere below {RITUALS_DIRECTORY}/",
         typed.display(),
         place.from_the_root(),
     )))
 }
 
-/// The refusal for a path that does not lead strictly below the tasks
+/// The refusal for a path that does not lead strictly below the rituals
 /// directory: what was typed, and `landed`, where it leads, spelled from the
 /// workspace root. Naming where it led, and that a path is read from the
 /// current directory, is what makes the refusal make sense when what was
-/// typed looks as if it is below the tasks directory but was typed from
+/// typed looks as if it is below the rituals directory but was typed from
 /// somewhere else.
-fn outside_the_tasks_directory(typed: &Path, landed: &str) -> Failure {
+fn outside_the_rituals_directory(typed: &Path, landed: &str) -> Failure {
     Failure::new(format!(
         "refusing to create {}: a path is read from the current directory, and this one \
-         leads to {landed}; inside a project every ritual lives below {TASKS_DIRECTORY}/ at \
+         leads to {landed}; inside a project every ritual lives below {RITUALS_DIRECTORY}/ at \
          the project's root, so give a bare name, or a path that leads below it",
         typed.display()
     ))
@@ -409,7 +409,7 @@ mod tests {
 
     use rituals::Name;
 
-    use super::{TypedPath, ensure_in_no_member, place_at, place_for, tasks_directory};
+    use super::{TypedPath, ensure_in_no_member, place_at, place_for, rituals_directory};
 
     const ROOT: &str = "/work/demo";
 
@@ -420,21 +420,21 @@ mod tests {
     #[test]
     fn tasks_live_in_dot_rituals_under_the_workspace_root() {
         assert_eq!(
-            tasks_directory(Path::new(ROOT)),
+            rituals_directory(Path::new(ROOT)),
             Path::new("/work/demo/.rituals")
         );
     }
 
     #[test]
-    fn a_task_is_placed_under_the_tasks_directory() {
+    fn a_task_is_placed_under_the_rituals_directory() {
         let place = place_for(Path::new(ROOT), &valid_name("lint"));
         assert_eq!(place.directory(), Path::new("/work/demo/.rituals/lint"));
         assert!(
             place
                 .directory()
-                .starts_with(tasks_directory(Path::new(ROOT)))
+                .starts_with(rituals_directory(Path::new(ROOT)))
         );
-        assert_ne!(place.directory(), tasks_directory(Path::new(ROOT)));
+        assert_ne!(place.directory(), rituals_directory(Path::new(ROOT)));
     }
 
     #[test]
@@ -525,7 +525,7 @@ mod tests {
     /// naming what was typed, where it leads from the workspace root, and
     /// `.rituals/`.
     #[test]
-    fn a_path_that_does_not_lead_strictly_below_the_tasks_directory_is_refused() {
+    fn a_path_that_does_not_lead_strictly_below_the_rituals_directory_is_refused() {
         let cases = [
             (ROOT, "src/lint", "src/lint"),
             (ROOT, ".rituals", ".rituals"),
@@ -602,7 +602,7 @@ mod tests {
                 path: typed,
             },
         )
-        .expect("a test passes only paths that lead below the tasks directory");
+        .expect("a test passes only paths that lead below the rituals directory");
         ensure_in_no_member(root, typed, &place, members())
             .err()
             .map(|failure| failure.to_string())

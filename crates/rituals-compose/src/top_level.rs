@@ -45,11 +45,11 @@ use rituals::{CommandLine, Failure, Outcome};
 /// use rituals_compose::top_level;
 ///
 /// #[derive(clap::Args)]
-/// struct AddArguments {
+/// struct CreateArguments {
 ///     name: String,
 /// }
 ///
-/// fn run(command_line: &CommandLine, arguments: AddArguments) -> Outcome {
+/// fn run(command_line: &CommandLine, arguments: CreateArguments) -> Outcome {
 ///     top_level::ensure_command_is_free(command_line, &arguments.name)?;
 ///     // ... the rest of a writing task's own work goes here.
 ///     Ok(())
@@ -57,7 +57,7 @@ use rituals::{CommandLine, Failure, Outcome};
 ///
 /// // Never invoked here: this shows where the check goes in a writing
 /// // task, not what running one does.
-/// let _task = Task::receiving_command_line("scaffold a task", run);
+/// let _task = Task::receiving_command_line("scaffold a task crate", run);
 /// ```
 ///
 /// # Errors

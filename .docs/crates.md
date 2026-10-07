@@ -9,7 +9,8 @@ principles themselves are in [design.md](design.md).
 |---|---|---|
 | `rituals` | what a task needs | — |
 | `rituals-compose` | the composition library | `rituals` |
-| `rituals-core-add`, `-regenerate`, `-new`, `-create`, `-import`, `-remove`, `-migrate` | the management tasks | `rituals`, `rituals-compose` |
+| `rituals-core-regenerate`, `-new`, `-create`, `-import`, `-remove`, `-migrate` | the management tasks | `rituals`, `rituals-compose` |
+| `rituals-core-add` | `create`'s in-project path under its old name, until 0.3.0 | `rituals`, `rituals-core-create` |
 | `rituals-core` | the bundle of those tasks | `rituals`, the leaves |
 | `rituals-cli` | the `ritual` binary | `rituals`, `rituals-core` |
 | `xtask` | release tooling, never published | — |
@@ -22,9 +23,11 @@ other crates are in `crates/`, and `xtask` is in `xtask/`.
 ## `rituals` — the floor
 
 What a task needs, and only that: the `Task` type and its three constructors
-(`new`, `receiving_command_line`, `group`), `Outcome` and `Failure`, `Name`,
-`report` and `warn`, `Identity` and `identity!()`, `CommandLine`, and `run`,
-the dispatch a command line's generated file calls.
+(`new`, `receiving_command_line`, `group`), `Outcome` and `Failure`,
+`RefusalStatus` and `InvalidRefusalStatus`, `Name` and `InvalidName`,
+`report` and `warn`, `Identity` and `identity!()`, `CommandLine`, `VERSION`,
+and `run`, the dispatch a command line's generated file calls. The crate's
+docs on docs.rs list every item.
 
 A bundle is a task, so building a tree of tasks and dispatching over it is a
 task's need, not a command line's, and it lives here. What is left at a
@@ -129,8 +132,10 @@ An ordinary task never depends on `rituals-compose`, and nothing from
 directly, so there is one path to each item.
 
 The `test-util` feature adds `git::fixture`, an isolated `git` for the tests of
-a crate that builds fixture repositories; the management tasks turn it on for
-their own tests, and no build needs it.
+a crate that builds fixture repositories, and `test_util`, the scratch directory
+and tree snapshot the unit tests share. `create`, `import`, `migrate`, `new` and
+`remove` turn it on for their own tests, no build needs it, and it is outside
+the crate's stability promise.
 
 Beyond `rituals`, its dependencies are here because of what the job is:
 

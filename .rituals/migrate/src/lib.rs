@@ -63,8 +63,8 @@ pub fn task() -> Task {
     )
 }
 
-// TS-PRECISE-NAMES: `run` is a general verb, kept on purpose: every task crate
-// here (`add`, `create`, `import`, `new`, `remove`) gives the body its `task()`
+// TS-PRECISE-NAMES: `run` is a general verb, kept on purpose: `create`,
+// `import`, `migrate`, `new` and `remove` each give the body their `task()`
 // mounts that name, and one name for that role across the tasks is worth more
 // than a more precise verb in one of them.
 fn run(command_line: &CommandLine) -> Outcome {

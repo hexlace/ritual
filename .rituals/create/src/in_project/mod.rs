@@ -34,6 +34,9 @@ use crate::arguments::{NameOrPath, ScaffoldArguments};
 /// failure leaves the project as it was found, `Cargo.lock` included. Refuses
 /// with the command to run in the right project when run anywhere else.
 ///
+/// Public only for `add`, which is `create`'s in-project path under its old
+/// name. It stops being public when `add` is removed in 0.3.0.
+///
 /// # Errors
 ///
 /// Returns a [`Failure`] saying what to do instead when Cargo finds no

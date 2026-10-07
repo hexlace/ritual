@@ -163,7 +163,9 @@ pub fn fetch_recording(changes: &mut Changes, directory: &Path) -> Result<Metada
 /// it.
 ///
 /// `command` and `arguments` are what the person typed after the binary's
-/// name, as for [`Metadata::ensure_runs_in_its_own_project`].
+/// name, such as `import` and `greeter`; the refusal hands them back as the
+/// command to run in their own project. `arguments` is empty for a command
+/// that takes none.
 ///
 /// # Errors
 ///
@@ -194,14 +196,19 @@ pub fn ensure_inside_a_project(current_dir: &Path, command: &str, arguments: &st
 /// lockfile that fetch may write, and refuses unless that project is the one
 /// `package_name` belongs to.
 ///
-/// [`fetch_recording`] followed by
-/// [`Metadata::ensure_runs_in_its_own_project`], for a task that runs only
+/// [`fetch_recording`] followed by a check that some member of the fetched
+/// workspace is a package called `package_name`, for a task that runs only
 /// inside its own project and promises to leave it as it found it. A task
 /// asks [`ensure_inside_a_project`] first, before its run begins; called
 /// where there is no project at all, this fails with Cargo's own words.
 ///
+/// A command line is identified with its project by package name and nothing
+/// more, so a project's built binary, run by hand inside another project
+/// whose CLI crate has the same package name, takes that project for its own.
+///
 /// `command` and `arguments` are what the person typed after the binary's
-/// name, as for [`Metadata::ensure_runs_in_its_own_project`].
+/// name, such as `import` and `greeter`; the refusal hands them back as the
+/// command to run in their own project.
 ///
 /// # Errors
 ///
@@ -639,21 +646,7 @@ impl Metadata {
     ///
     /// Returns a [`Failure`] that names the command to run instead when no
     /// workspace member is called `package_name`.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::path::Path;
-    ///
-    /// use rituals_compose::metadata;
-    ///
-    /// // Reads a document `fetch` already produced from a real
-    /// // `cargo metadata` call, so this example stays `no_run`.
-    /// let document = metadata::fetch(Path::new("."))?;
-    /// document.ensure_runs_in_its_own_project("demo-ritual", "create", "lint")?;
-    /// # Ok::<(), rituals::Failure>(())
-    /// ```
-    pub fn ensure_runs_in_its_own_project(
+    pub(crate) fn ensure_runs_in_its_own_project(
         &self,
         package_name: &str,
         command: &str,
@@ -679,8 +672,8 @@ impl Metadata {
 /// The running binary cannot see what the project the person stands in
 /// calls its own command line, so the remedy names the default, `ritual`,
 /// and the shape a `--cli` project uses. `command` and `arguments` are what
-/// the person typed after the binary's name, as for
-/// [`Metadata::ensure_runs_in_its_own_project`], which refuses with it.
+/// the person typed after the binary's name, such as `import` and
+/// `greeter`, and `arguments` is empty for a command that takes none.
 ///
 /// # Examples
 ///

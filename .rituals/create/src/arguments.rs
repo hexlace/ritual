@@ -23,6 +23,9 @@ use rituals_compose::task_crate::Audience;
 /// `create` flattens these in beside where an outside-the-project crate takes
 /// `rituals` from. The deprecated `add` takes these alone, because inside a
 /// project every ritual inherits the workspace's `rituals`.
+///
+/// Public only for `add`, which is `create`'s in-project path under its old
+/// name. It stops being public when `add` is removed in 0.3.0.
 #[derive(clap::Args, Clone, Debug, PartialEq, Eq)]
 pub struct ScaffoldArguments {
     /// the ritual's name, or a path below .rituals/ whose last component is

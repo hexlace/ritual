@@ -1,9 +1,9 @@
 //! How a composed command line's generated file and manifests are
 //! maintained.
 //!
-//! This is what a scaffolding task links against — such as `add`, `create`,
-//! `import`, `migrate`, `new`, `regenerate` and `remove`, the task crates ritual's
-//! own bundle groups — for the renderers that produce a task crate's own files and
+//! This is what a scaffolding task links against — such as `create`, `import`,
+//! `migrate`, `new`, `regenerate` and `remove`, task crates ritual's own bundle
+//! groups — for the renderers that produce a task crate's own files and
 //! a composed command line's generated file, for the metadata and manifest
 //! operations those tasks need, for the [`cargo`] a task that runs Cargo uses
 //! and the [`shell`] that renders a command for a person to copy, for the
@@ -34,8 +34,10 @@
 //! - `test-util` — adds `git::fixture`, a `git` that reads nothing from the
 //!   machine it runs on and the commands that build a fixture repository, for
 //!   a crate whose tests run against `git`; and `test_util`, the scratch
-//!   directory and tree snapshot every crate's unit tests share. Nothing needs
-//!   it at run time.
+//!   directory and tree snapshot every crate's unit tests share. It is test
+//!   support for the crates of ritual's own repository, nothing needs it at
+//!   run time, and it sits outside this crate's stability promise: either
+//!   module can change or go in any release.
 //!
 //! # Examples
 //!

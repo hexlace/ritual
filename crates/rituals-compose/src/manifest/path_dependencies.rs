@@ -32,37 +32,8 @@ impl Manifest {
     ///
     /// The directories are those the manifest names. Whether anything is
     /// there is not asked.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::path::PathBuf;
-    ///
-    /// use rituals_compose::manifest::{Manifest, ManifestRole};
-    ///
-    /// # let directory = std::env::temp_dir().join(format!(
-    /// #     "rituals-compose-doctest-path-dependencies-{}",
-    /// #     std::process::id()
-    /// # ));
-    /// # std::fs::create_dir_all(&directory)?;
-    /// let manifest_path = directory.join("Cargo.toml");
-    /// # std::fs::write(
-    /// #     &manifest_path,
-    /// #     "[dependencies]\nserde = \"1\"\ngreet = { path = \"tasks/greet\", optional = true }\n\
-    /// #      \n[target.'cfg(unix)'.dev-dependencies]\n\
-    /// #      shout = { path = \"tasks/../tasks/shout\" }\n",
-    /// # )?;
-    /// let manifest = Manifest::read(&manifest_path)?;
-    ///
-    /// assert_eq!(
-    ///     manifest.path_dependency_directories(ManifestRole::Other),
-    ///     [directory.join("tasks/greet"), directory.join("tasks/shout")]
-    /// );
-    /// # std::fs::remove_dir_all(&directory)?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
     #[must_use]
-    pub fn path_dependency_directories(&self, role: ManifestRole) -> Vec<PathBuf> {
+    pub(crate) fn path_dependency_directories(&self, role: ManifestRole) -> Vec<PathBuf> {
         let base = self.directory();
         let root = self.document.as_table();
         let mut written: Vec<&str> = Vec::new();

@@ -219,9 +219,9 @@ mod tests {
 
     #[test]
     fn refusal_line_carries_the_bin_prefix_exactly_once() {
-        let failure = Failure::new("tasks/lint already exists");
+        let failure = Failure::new(".rituals/lint already exists");
         let line = refusal_line("myapp-ritual", &failure);
-        assert_eq!(line, "myapp-ritual: tasks/lint already exists");
+        assert_eq!(line, "myapp-ritual: .rituals/lint already exists");
         assert_eq!(line.matches("myapp-ritual:").count(), 1);
     }
 

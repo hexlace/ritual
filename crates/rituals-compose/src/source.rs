@@ -156,7 +156,7 @@ pub const MANAGEMENT_BUNDLE_IN_CHECKOUT: &str = ".rituals/ritual";
 /// # Examples
 ///
 /// ```
-/// use rituals_compose::source::assert_is_a_ritual_checkout;
+/// use rituals_compose::source::ensure_a_ritual_checkout;
 ///
 /// # let checkout_root = std::env::temp_dir()
 /// #     .join(format!("rituals-compose-doctest-checkout-{}", std::process::id()));
@@ -164,14 +164,14 @@ pub const MANAGEMENT_BUNDLE_IN_CHECKOUT: &str = ".rituals/ritual";
 /// # std::fs::write(checkout_root.join("crates/rituals/Cargo.toml"), "[package]\n")?;
 /// # std::fs::create_dir_all(checkout_root.join(".rituals/ritual"))?;
 /// # std::fs::write(checkout_root.join(".rituals/ritual/Cargo.toml"), "[package]\n")?;
-/// assert!(assert_is_a_ritual_checkout(&checkout_root).is_ok());
+/// assert!(ensure_a_ritual_checkout(&checkout_root).is_ok());
 ///
 /// let not_a_checkout = std::env::temp_dir();
-/// assert!(assert_is_a_ritual_checkout(&not_a_checkout).is_err());
+/// assert!(ensure_a_ritual_checkout(&not_a_checkout).is_err());
 /// # std::fs::remove_dir_all(&checkout_root)?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub fn assert_is_a_ritual_checkout(checkout_root: &std::path::Path) -> Result<(), InvalidCheckout> {
+pub fn ensure_a_ritual_checkout(checkout_root: &std::path::Path) -> Result<(), InvalidCheckout> {
     let missing = if !checkout_root.join(RITUALS_MANIFEST_IN_CHECKOUT).is_file() {
         Missing::Rituals
     } else if !checkout_root
@@ -283,7 +283,7 @@ pub fn escape_toml_string(value: &str) -> String {
 mod tests {
     use rituals::clap::{self, Parser};
 
-    use super::{Source, SourceArguments, assert_is_a_ritual_checkout};
+    use super::{Source, SourceArguments, ensure_a_ritual_checkout};
     use crate::test_support::{ScratchDir, TestOutcome};
 
     fn assert_send<T: Send>() {}
@@ -365,7 +365,7 @@ mod tests {
         std::fs::create_dir_all(root.join("crates/rituals"))?;
         std::fs::write(root.join("crates/rituals/Cargo.toml"), "[package]\n")?;
 
-        let message = assert_is_a_ritual_checkout(root)
+        let message = ensure_a_ritual_checkout(root)
             .err()
             .ok_or("a checkout without .rituals/ritual must be refused")?
             .to_string();
@@ -374,13 +374,13 @@ mod tests {
 
         std::fs::create_dir_all(root.join(".rituals/ritual"))?;
         std::fs::write(root.join(".rituals/ritual/Cargo.toml"), "[package]\n")?;
-        assert_eq!(assert_is_a_ritual_checkout(root), Ok(()));
+        assert_eq!(ensure_a_ritual_checkout(root), Ok(()));
         Ok(())
     }
 
     #[test]
     fn a_directory_without_the_ritual_manifest_is_refused_naming_it() {
-        let result = assert_is_a_ritual_checkout(&std::env::temp_dir());
+        let result = ensure_a_ritual_checkout(&std::env::temp_dir());
         assert!(result.is_err(), "expected a bare temp dir to be refused");
         if let Err(error) = result {
             let message = error.to_string();
@@ -396,7 +396,7 @@ mod tests {
     /// Cargo decides membership, however the root's `members` spells it.
     ///
     /// The marker is tested here with its literal path rather than through
-    /// [`assert_is_a_ritual_checkout`] or [`RITUALS_MANIFEST_IN_CHECKOUT`],
+    /// [`ensure_a_ritual_checkout`] or [`RITUALS_MANIFEST_IN_CHECKOUT`],
     /// which are what the test below checks: gating on them would skip the
     /// test exactly when they are wrong. Otherwise returns why not.
     fn enclosing_checkout() -> Result<std::path::PathBuf, String> {
@@ -445,7 +445,7 @@ mod tests {
             }
         };
 
-        let result = assert_is_a_ritual_checkout(&checkout_root);
+        let result = ensure_a_ritual_checkout(&checkout_root);
         assert!(
             result.is_ok(),
             "expected {} to be accepted as a ritual checkout: {result:?}",
@@ -455,7 +455,7 @@ mod tests {
 
     #[test]
     fn from_invalid_checkout_keeps_the_message_verbatim() {
-        let checked = assert_is_a_ritual_checkout(&std::env::temp_dir());
+        let checked = ensure_a_ritual_checkout(&std::env::temp_dir());
         assert!(
             checked.is_err(),
             "a bare temp dir must be refused as a checkout"

@@ -409,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn undo_leaves_the_tasks_directory_when_create_did_not_make_it() -> TestOutcome {
+    fn undo_leaves_the_rituals_directory_when_create_did_not_make_it() -> TestOutcome {
         let project = ScratchProject::new("undo-preexisting-tasks")?;
         std::fs::create_dir_all(project.workspace_root.join(".rituals"))?;
         std::fs::write(
