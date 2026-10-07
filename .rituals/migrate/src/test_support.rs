@@ -15,6 +15,7 @@
 use std::error::Error;
 use std::path::Path;
 
+use rituals::{CommandLine, Identity};
 use rituals_compose::git::fixture;
 
 // Every test in this crate asks for `ScratchDir::resolved`. `migrate`
@@ -29,6 +30,19 @@ pub(crate) use rituals_compose::test_util::ScratchDir;
 /// never the property under test, which is always carried by an
 /// `assert!`/`assert_eq!` instead.
 pub(crate) type TestOutcome = Result<(), Box<dyn Error>>;
+
+/// A command line built as `bin`, reached through `path`, as dispatch would
+/// hand it to `migrate`.
+pub(crate) fn command_line(
+    bin: &'static str,
+    path: impl IntoIterator<Item = &'static str>,
+) -> CommandLine {
+    CommandLine::from_dispatch(
+        Identity::from_macro_expansion("demo-ritual", bin, "0.1.0"),
+        ["add", "regenerate"],
+        path,
+    )
+}
 
 /// Makes `directory` a repository and commits everything in it.
 pub(crate) fn init_and_commit(directory: &Path) -> TestOutcome {

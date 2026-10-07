@@ -54,7 +54,7 @@
 //! let created = directory.join("notes.txt");
 //! std::fs::write(&lockfile, "version = 4\n")?;
 //!
-//! let wording = Wording::project(&directory, "running `import lint` again");
+//! let wording = Wording::project(&directory, "running `cargo ritual import lint` again");
 //! let outcome = rollback::attempt(wording, |changes| {
 //!     changes.write(&lockfile, "version = 4\n# changed\n")?;
 //!     changes.write(&created, "a file that was not there before\n")?;
@@ -127,7 +127,7 @@ pub use wording::Wording;
 /// # std::fs::create_dir_all(&directory)?;
 /// let task_directory = directory.join(".rituals/lint");
 ///
-/// let wording = Wording::project(&directory, "running `create lint` again");
+/// let wording = Wording::project(&directory, "running `cargo ritual create lint` again");
 /// let outcome = rollback::attempt(wording, |changes| {
 ///     changes.reserve_directory(&task_directory)?;
 ///     std::fs::create_dir_all(task_directory.join("src")).map_err(|error| {
@@ -267,7 +267,7 @@ impl Changes {
     /// let original = "fn main() { rituals::run(); }\n";
     /// std::fs::write(&generated, original)?;
     ///
-    /// let wording = Wording::project(&directory, "running `remove lint` again");
+    /// let wording = Wording::project(&directory, "running `cargo ritual remove lint` again");
     /// let outcome = rollback::attempt(wording, |changes| {
     ///     changes.write(&generated, "fn main() {}\n")?;
     ///     Err::<(), _>(Failure::new("removing the dependency failed"))
@@ -313,7 +313,7 @@ impl Changes {
     /// # std::fs::create_dir_all(&directory)?;
     /// let lockfile = directory.join("Cargo.lock");
     ///
-    /// let wording = Wording::project(&directory, "running `import lint` again");
+    /// let wording = Wording::project(&directory, "running `cargo ritual import lint` again");
     /// let outcome = rollback::attempt(wording, |changes| {
     ///     changes.run_changing(&[lockfile.as_path()], || {
     ///         // Stands in for running `cargo add`.
@@ -373,7 +373,7 @@ impl Changes {
     /// std::fs::create_dir_all(&existing)?;
     ///
     /// // A directory that already exists is not the run's to remove.
-    /// let wording = Wording::project(&directory, "running `create lint` again");
+    /// let wording = Wording::project(&directory, "running `cargo ritual create lint` again");
     /// let outcome = rollback::attempt(wording, |changes| {
     ///     changes.reserve_directory(&existing)
     /// });
@@ -449,7 +449,7 @@ impl Changes {
     /// # std::fs::create_dir_all(from.join("target"))?;
     /// std::fs::write(from.join("target/lint.d"), "built\n")?;
     ///
-    /// let wording = Wording::project(&directory, "running `migrate` again");
+    /// let wording = Wording::project(&directory, "running `cargo ritual migrate` again");
     /// let outcome = rollback::attempt(wording, |changes| {
     ///     changes.rename(&from, &to)?;
     ///     Err::<(), _>(Failure::new("the project no longer builds"))
@@ -556,7 +556,7 @@ impl Changes {
     /// # std::fs::create_dir_all(&from)?;
     /// std::fs::write(from.join("Cargo.toml"), "[package]\n")?;
     ///
-    /// let wording = Wording::project(&directory, "running `migrate` again");
+    /// let wording = Wording::project(&directory, "running `cargo ritual migrate` again");
     /// let outcome = rollback::attempt(wording, |changes| {
     ///     changes.rename(&from, &to)?;
     ///     changes
@@ -664,7 +664,7 @@ impl Changes {
     /// # std::fs::create_dir_all(&directory)?;
     /// let lockfile = directory.join("Cargo.lock");
     ///
-    /// let wording = Wording::project(&directory, "running `import lint` again");
+    /// let wording = Wording::project(&directory, "running `cargo ritual import lint` again");
     /// let verb = rollback::attempt(wording, |changes| {
     ///     changes.write(&lockfile, "version = 4\n")?;
     ///     Ok(if changes.recorded_as_absent(&lockfile) { "created" } else { "updated" })

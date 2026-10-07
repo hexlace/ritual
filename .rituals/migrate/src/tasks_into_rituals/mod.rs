@@ -104,7 +104,7 @@ mod tests {
     use crate::precondition::WorkTree;
     use crate::step::Migrating;
     use crate::test_support::{
-        ScratchDir, TestOutcome, init_and_commit, package, workspace, write_files,
+        ScratchDir, TestOutcome, command_line, init_and_commit, package, workspace, write_files,
     };
 
     const MIGRATE: &str = "cargo ritual migrate";
@@ -278,7 +278,7 @@ mod tests {
             return Err("fixture precondition: the project must have tasks to move".into());
         };
         let outcome = rollback::attempt(
-            Wording::project(root, "running `migrate` again"),
+            Wording::project(root, &crate::retry(&command_line("ritual", ["migrate"]))),
             |changes| apply(&candidates, &migrating, &before, changes),
         );
         Ok(outcome

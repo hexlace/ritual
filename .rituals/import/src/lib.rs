@@ -51,7 +51,7 @@ fn run(command_line: &CommandLine, arguments: &ImportArguments) -> Outcome {
     // the `created` and `updated` lines do. `cargo locate-project` writes
     // nothing, and the run's first step asks it the same question.
     let root = workspace::root(&current_dir)?;
-    let retry = import::retry(&again);
+    let retry = import::retry(command_line, &again);
 
     let import = rollback::attempt(Wording::project(&root, &retry), |changes| {
         let import = prepare(command_line, arguments, &current_dir, key, &again, changes)?;
@@ -162,7 +162,7 @@ mod tests {
         metadata::ensure_inside_a_project(current_dir, "import", &again)?;
         let root = workspace::root(current_dir)?;
         rollback::attempt(
-            Wording::project(&root, "running `import` again"),
+            Wording::project(&root, &crate::import::retry(command_line, &again)),
             |changes| prepare(command_line, &arguments, current_dir, key, &again, changes),
         )
     }

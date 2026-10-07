@@ -81,21 +81,18 @@ fn run(command_line: &CommandLine) -> Outcome {
     let work_tree = WorkTree::take(&root);
     let migrate_command = command_line.cargo_command();
 
-    let done = rollback::attempt(
-        Wording::project(&root, "running `migrate` again"),
-        |changes| {
-            run_every_step_that_applies(
-                changes,
-                command_line.identity().package_name(),
-                &current_dir,
-                &Invocation {
-                    root: &root,
-                    work_tree: &work_tree,
-                    migrate_command: &migrate_command,
-                },
-            )
-        },
-    )?;
+    let done = rollback::attempt(Wording::project(&root, &retry(command_line)), |changes| {
+        run_every_step_that_applies(
+            changes,
+            command_line.identity().package_name(),
+            &current_dir,
+            &Invocation {
+                root: &root,
+                work_tree: &work_tree,
+                migrate_command: &migrate_command,
+            },
+        )
+    })?;
 
     match done {
         None => report(report::NOTHING_TO_MIGRATE),
@@ -113,6 +110,15 @@ fn run(command_line: &CommandLine) -> Outcome {
         }
     }
     Ok(())
+}
+
+/// What a person runs again once they have checked whatever a failed run
+/// could not put back: the command that reached this migration, as
+/// [`CommandLine::cargo_command`] renders it. That command is the key
+/// `migrate` was mounted under, so the retry can be pasted wherever it was
+/// mounted, on its own included.
+pub(crate) fn retry(command_line: &CommandLine) -> String {
+    format!("running `{}` again", command_line.cargo_command())
 }
 
 /// Runs each step that applies, in release order, each reading the project
@@ -157,4 +163,29 @@ fn run_every_step_that_applies<'a>(
         document = applied.after;
     }
     Ok(done)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::retry;
+    use crate::test_support::command_line;
+
+    #[test]
+    fn the_retry_names_migrate_as_it_was_reached() {
+        assert_eq!(
+            retry(&command_line("ritual", ["migrate"])),
+            "running `cargo ritual migrate` again"
+        );
+    }
+
+    /// `migrate` mounted on its own, under `mig`, in a project made with
+    /// `--cli acme`, is reached as `cargo acme mig`; a retry that named
+    /// `migrate` would send a person to a command that is not there.
+    #[test]
+    fn the_retry_names_the_key_migrate_was_mounted_under() {
+        assert_eq!(
+            retry(&command_line("acme", ["mig"])),
+            "running `cargo acme mig` again"
+        );
+    }
 }
