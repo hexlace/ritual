@@ -241,9 +241,12 @@ impl Task {
             // reach it, the same as a project's key for a task, so it is
             // held to the same rule. A key with a space renders as two words
             // that reach nothing when pasted.
-            if let Err(error) = Name::new(name) {
-                panic!("a bundle's children are named like any task: {error}");
-            }
+            let refusal = Name::new(name).err();
+            assert!(
+                refusal.is_none(),
+                "a bundle's children are named like any task: {}",
+                refusal.map_or_else(String::new, |refusal| refusal.to_string())
+            );
 
             // clap adds its own `help` command under every group that has
             // subcommands, so a child called that is two commands with one
