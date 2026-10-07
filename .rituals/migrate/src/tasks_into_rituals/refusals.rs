@@ -528,7 +528,7 @@ mod tests {
 
     #[test]
     fn a_tracked_manifest_that_needs_an_edit_is_fine() -> TestOutcome {
-        let scratch = ScratchDir::new("refusals-tracked-manifest")?;
+        let scratch = ScratchDir::resolved("refusals-tracked-manifest")?;
         let root = scratch.path();
         write_files(root, &[("Cargo.toml", "# committed\n")])?;
         init_and_commit(root)?;
@@ -635,7 +635,7 @@ mod tests {
 
     #[test]
     fn free_destinations_are_accepted_whether_or_not_the_directory_exists() -> TestOutcome {
-        let scratch = ScratchDir::new("refusals-free")?;
+        let scratch = ScratchDir::resolved("refusals-free")?;
         let root = scratch.path();
         let moves = moves(root, &["greet"]);
         assert!(
@@ -652,7 +652,7 @@ mod tests {
     #[test]
     fn a_file_where_the_directory_goes_is_refused_before_any_destination_is_looked_at()
     -> TestOutcome {
-        let scratch = ScratchDir::new("refusals-file")?;
+        let scratch = ScratchDir::resolved("refusals-file")?;
         let root = scratch.path();
         write_files(root, &[(".rituals", "not a directory\n")])?;
 
@@ -677,7 +677,7 @@ mod tests {
 
     #[test]
     fn a_taken_destination_is_refused_whatever_is_in_it() -> TestOutcome {
-        let scratch = ScratchDir::new("refusals-taken")?;
+        let scratch = ScratchDir::resolved("refusals-taken")?;
         let root = scratch.path();
         write_files(root, &[(".rituals/shout/mine.txt", "mine\n")])?;
 
@@ -704,7 +704,7 @@ mod tests {
     /// name as taken.
     #[test]
     fn a_link_to_nothing_where_a_task_goes_is_taken() -> TestOutcome {
-        let scratch = ScratchDir::new("refusals-dangling")?;
+        let scratch = ScratchDir::resolved("refusals-dangling")?;
         let root = scratch.path();
         std::fs::create_dir_all(root.join(".rituals"))?;
         std::os::unix::fs::symlink(root.join("nowhere"), root.join(".rituals/greet"))?;
@@ -727,7 +727,7 @@ mod tests {
 
     #[test]
     fn a_task_directory_with_no_submodule_is_fine() -> TestOutcome {
-        let scratch = ScratchDir::new("refusals-no-submodule")?;
+        let scratch = ScratchDir::resolved("refusals-no-submodule")?;
         let root = scratch.path();
         write_files(root, &[("tasks/greet/Cargo.toml", "x\n")])?;
         let work_tree = repository_of(root)?;
@@ -762,7 +762,7 @@ mod tests {
 
     #[test]
     fn a_submodule_inside_a_task_directory_is_refused_naming_it() -> TestOutcome {
-        let scratch = ScratchDir::new("refusals-submodule")?;
+        let scratch = ScratchDir::resolved("refusals-submodule")?;
         let root = scratch.path();
         write_files(root, &[("tasks/greet/Cargo.toml", "x\n")])?;
         init_and_commit(root)?;
@@ -791,7 +791,7 @@ mod tests {
 
     #[test]
     fn a_task_directory_that_is_itself_a_submodule_is_refused_naming_it() -> TestOutcome {
-        let scratch = ScratchDir::new("refusals-submodule-itself")?;
+        let scratch = ScratchDir::resolved("refusals-submodule-itself")?;
         let root = scratch.path();
         write_files(root, &[("a.txt", "x\n")])?;
         init_and_commit(root)?;
@@ -942,7 +942,7 @@ mod tests {
     #[test]
     fn the_check_refuses_a_rule_that_would_ignore_the_new_directory_and_passes_once_it_is_fixed()
     -> TestOutcome {
-        let scratch = ScratchDir::new("refusals-sight")?;
+        let scratch = ScratchDir::resolved("refusals-sight")?;
         let root = scratch.path();
         write_files(
             root,

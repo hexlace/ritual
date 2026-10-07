@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn every_task_under_tasks_is_a_candidate_in_path_order() -> TestOutcome {
-        let scratch = ScratchDir::new("step1-find")?;
+        let scratch = ScratchDir::resolved("step1-find")?;
         let root = scratch.path();
         legacy_project(root)?;
 
@@ -184,7 +184,7 @@ mod tests {
     /// the other is left as written.
     #[test]
     fn every_task_under_tasks_is_a_candidate_whatever_the_command_line_imports() -> TestOutcome {
-        let scratch = ScratchDir::new("step1-dependency-only")?;
+        let scratch = ScratchDir::resolved("step1-dependency-only")?;
         let root = scratch.path();
         legacy_project(root)?;
         write_files(
@@ -229,7 +229,7 @@ mod tests {
     /// `.rituals/` keeps the level.
     #[test]
     fn a_task_nested_under_tasks_is_a_candidate() -> TestOutcome {
-        let scratch = ScratchDir::new("step1-nested")?;
+        let scratch = ScratchDir::resolved("step1-nested")?;
         let root = scratch.path();
         workspace(root, &["tasks/group/deep"], &["tasks/group/deep"], &[])?;
 
@@ -239,7 +239,7 @@ mod tests {
 
     #[test]
     fn a_plain_crate_in_tasks_is_not_a_candidate_beside_a_task() -> TestOutcome {
-        let scratch = ScratchDir::new("step1-plain")?;
+        let scratch = ScratchDir::resolved("step1-plain")?;
         let root = scratch.path();
         workspace(
             root,
@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn the_step_moves_each_task_and_says_what_it_edited_and_deleted_in_the_order_it_did_it()
     -> TestOutcome {
-        let scratch = ScratchDir::new("step1-apply")?;
+        let scratch = ScratchDir::resolved("step1-apply")?;
         let root = scratch.path();
         legacy_project(root)?;
 
@@ -318,7 +318,7 @@ mod tests {
     /// is the way it was, and the person's spelling is kept.
     #[test]
     fn a_path_between_two_moved_tasks_is_left_as_written() -> TestOutcome {
-        let scratch = ScratchDir::new("step1-sibling")?;
+        let scratch = ScratchDir::resolved("step1-sibling")?;
         let root = scratch.path();
         legacy_project(root)?;
 
@@ -335,7 +335,7 @@ mod tests {
     /// round, the edit would land in a directory that is already gone.
     #[test]
     fn a_task_that_depends_on_something_left_behind_is_edited_and_carried() -> TestOutcome {
-        let scratch = ScratchDir::new("step1-carried")?;
+        let scratch = ScratchDir::resolved("step1-carried")?;
         let root = scratch.path();
         legacy_project(root)?;
         write_files(
@@ -408,7 +408,7 @@ mod tests {
     /// move, so its own base is the same before and after.
     #[test]
     fn an_excluded_crate_reached_only_through_an_optional_dependency_is_repointed() -> TestOutcome {
-        let scratch = ScratchDir::new("step1-excluded")?;
+        let scratch = ScratchDir::resolved("step1-excluded")?;
         let root = scratch.path();
         with_an_excluded_crate_that_reaches_greet(root)?;
 
@@ -436,7 +436,7 @@ mod tests {
     /// anything back.
     #[test]
     fn an_untracked_manifest_that_needs_an_edit_is_refused() -> TestOutcome {
-        let scratch = ScratchDir::new("step1-untracked")?;
+        let scratch = ScratchDir::resolved("step1-untracked")?;
         let root = scratch.path();
         with_an_excluded_crate_that_reaches_greet(root)?;
         write_files(root, &[(".gitignore", "/vendor/x/\n")])?;
@@ -462,7 +462,7 @@ mod tests {
     /// manifests and directories both, and the failure says so.
     #[test]
     fn a_project_that_does_not_resolve_after_the_move_is_put_back() -> TestOutcome {
-        let scratch = ScratchDir::new("step1-rollback")?;
+        let scratch = ScratchDir::resolved("step1-rollback")?;
         let root = scratch.path();
         legacy_project(root)?;
         write_files(
@@ -493,7 +493,7 @@ mod tests {
     /// the move is undone.
     #[test]
     fn a_tasks_glob_that_would_match_a_grouping_directory_is_put_back() -> TestOutcome {
-        let scratch = ScratchDir::new("step1-grouping-glob")?;
+        let scratch = ScratchDir::resolved("step1-grouping-glob")?;
         let root = scratch.path();
         legacy_project(root)?;
         let members = std::fs::read_to_string(root.join("Cargo.toml"))?
@@ -532,7 +532,7 @@ mod tests {
     /// move names it and the move is undone.
     #[test]
     fn a_member_the_move_leaves_unreachable_is_named_and_the_project_put_back() -> TestOutcome {
-        let scratch = ScratchDir::new("step1-lost-member")?;
+        let scratch = ScratchDir::resolved("step1-lost-member")?;
         let root = scratch.path();
         legacy_project(root)?;
         write_files(
@@ -572,7 +572,7 @@ mod tests {
 
     #[test]
     fn a_task_directory_holding_a_member_is_refused_before_anything_moves() -> TestOutcome {
-        let scratch = ScratchDir::new("step1-holds")?;
+        let scratch = ScratchDir::resolved("step1-holds")?;
         let root = scratch.path();
         workspace(
             root,

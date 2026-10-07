@@ -101,7 +101,7 @@ mod tests {
 
     #[test]
     fn a_task_in_tasks_applies() -> TestOutcome {
-        let scratch = ScratchDir::new("step-applies")?;
+        let scratch = ScratchDir::resolved("step-applies")?;
         workspace(scratch.path(), &["tasks/greet"], &["tasks/greet"], &[])?;
         assert!(applies(scratch.path())?);
         Ok(())
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn a_task_in_dot_rituals_does_not() -> TestOutcome {
-        let scratch = ScratchDir::new("step-new-layout")?;
+        let scratch = ScratchDir::resolved("step-new-layout")?;
         workspace(
             scratch.path(),
             &[".rituals/greet"],
@@ -126,7 +126,7 @@ mod tests {
     /// stop at the first.
     #[test]
     fn a_task_nested_at_any_depth_in_dot_rituals_does_not_apply() -> TestOutcome {
-        let scratch = ScratchDir::new("step-nested-new-layout")?;
+        let scratch = ScratchDir::resolved("step-nested-new-layout")?;
         let members = [".rituals/private/lint", ".rituals/a/b/format"];
         workspace(scratch.path(), &members, &members, &[])?;
         assert!(!applies(scratch.path())?);
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn a_crate_in_tasks_that_is_not_a_task_does_not() -> TestOutcome {
-        let scratch = ScratchDir::new("step-plain")?;
+        let scratch = ScratchDir::resolved("step-plain")?;
         workspace(
             scratch.path(),
             &["tasks/helper"],
@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn a_task_elsewhere_does_not() -> TestOutcome {
-        let scratch = ScratchDir::new("step-elsewhere")?;
+        let scratch = ScratchDir::resolved("step-elsewhere")?;
         workspace(scratch.path(), &["tools/greet"], &["tools/greet"], &[])?;
         assert!(!applies(scratch.path())?);
         Ok(())
@@ -158,7 +158,7 @@ mod tests {
     /// not under it.
     #[test]
     fn a_task_in_a_directory_sharing_the_prefix_does_not() -> TestOutcome {
-        let scratch = ScratchDir::new("step-prefix")?;
+        let scratch = ScratchDir::resolved("step-prefix")?;
         workspace(
             scratch.path(),
             &["tasks-extra/greet"],
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn a_project_with_no_members_but_its_own_package_does_not() -> TestOutcome {
-        let scratch = ScratchDir::new("step-no-tasks")?;
+        let scratch = ScratchDir::resolved("step-no-tasks")?;
         workspace(scratch.path(), &["ritual"], &["ritual"], &["ritual"])?;
         assert!(!applies(scratch.path())?);
         Ok(())
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn a_project_with_a_task_in_each_layout_applies_for_the_old_one() -> TestOutcome {
-        let scratch = ScratchDir::new("step-both")?;
+        let scratch = ScratchDir::resolved("step-both")?;
         workspace(
             scratch.path(),
             &[".rituals/new", "tasks/old"],

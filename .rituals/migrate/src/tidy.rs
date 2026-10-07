@@ -142,7 +142,7 @@ mod tests {
     /// so the moves can be undone into them.
     #[test]
     fn a_run_that_fails_after_tidying_has_the_directories_back() -> TestOutcome {
-        let scratch = ScratchDir::new("tidy-undone")?;
+        let scratch = ScratchDir::resolved("tidy-undone")?;
         let root = scratch.path();
         std::fs::create_dir_all(root.join("tasks/group"))?;
 
@@ -161,7 +161,7 @@ mod tests {
     /// line says so.
     #[test]
     fn a_directory_the_moves_emptied_is_deleted() -> TestOutcome {
-        let scratch = ScratchDir::new("tidy-empty")?;
+        let scratch = ScratchDir::resolved("tidy-empty")?;
         let root = scratch.path();
         std::fs::create_dir_all(root.join("tasks"))?;
 
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn a_directory_with_something_else_in_it_is_kept_and_what_is_left_is_named() -> TestOutcome {
-        let scratch = ScratchDir::new("tidy-kept")?;
+        let scratch = ScratchDir::resolved("tidy-kept")?;
         let root = scratch.path();
         std::fs::create_dir_all(root.join("tasks/helper"))?;
         std::fs::write(root.join("tasks/notes.md"), "keep\n")?;
@@ -193,7 +193,7 @@ mod tests {
     /// and the boundary goes last once it is empty.
     #[test]
     fn nested_directories_go_deepest_first() -> TestOutcome {
-        let scratch = ScratchDir::new("tidy-nested")?;
+        let scratch = ScratchDir::resolved("tidy-nested")?;
         let root = scratch.path();
         std::fs::create_dir_all(root.join("tasks/group"))?;
 
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn a_nested_directory_still_holding_something_stops_the_walk_there() -> TestOutcome {
-        let scratch = ScratchDir::new("tidy-nested-kept")?;
+        let scratch = ScratchDir::resolved("tidy-nested-kept")?;
         let root = scratch.path();
         std::fs::create_dir_all(root.join("tasks/group/other"))?;
 
@@ -227,7 +227,7 @@ mod tests {
     /// reaches it empty, and the other walk finds it gone and says nothing.
     #[test]
     fn a_directory_shared_by_two_sources_is_reported_once() -> TestOutcome {
-        let scratch = ScratchDir::new("tidy-shared")?;
+        let scratch = ScratchDir::resolved("tidy-shared")?;
         let root = scratch.path();
         std::fs::create_dir_all(root.join("tasks/group"))?;
 
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn a_boundary_that_is_already_gone_reports_nothing() -> TestOutcome {
-        let scratch = ScratchDir::new("tidy-gone")?;
+        let scratch = ScratchDir::resolved("tidy-gone")?;
         let root = scratch.path();
 
         let lines = tidied(root, &["tasks/greet"])?;
@@ -262,7 +262,7 @@ mod tests {
     fn a_directory_that_cannot_be_deleted_is_reported_as_a_line() -> TestOutcome {
         use std::os::unix::fs::PermissionsExt;
 
-        let scratch = ScratchDir::new("tidy-denied")?;
+        let scratch = ScratchDir::resolved("tidy-denied")?;
         let root = scratch.path();
         std::fs::create_dir_all(root.join("tasks/group"))?;
         // `tasks/group` cannot be removed from a `tasks` that cannot be
@@ -293,7 +293,7 @@ mod tests {
     fn an_empty_directory_that_cannot_be_deleted_is_reported_once_and_not_as_kept() -> TestOutcome {
         use std::os::unix::fs::PermissionsExt;
 
-        let scratch = ScratchDir::new("tidy-denied-empty")?;
+        let scratch = ScratchDir::resolved("tidy-denied-empty")?;
         let root = scratch.path();
         std::fs::create_dir_all(root.join("tasks"))?;
         // `tasks` cannot be removed from a root that cannot be written.

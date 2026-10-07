@@ -33,7 +33,9 @@
 //!
 //! - `test-util` — adds `git::fixture`, a `git` that reads nothing from the
 //!   machine it runs on and the commands that build a fixture repository, for
-//!   a crate whose tests run against `git`. Nothing needs it at run time.
+//!   a crate whose tests run against `git`; and `test_util`, the scratch
+//!   directory and tree snapshot every crate's unit tests share. Nothing needs
+//!   it at run time.
 //!
 //! # Examples
 //!
@@ -76,5 +78,7 @@ mod task_imports;
 mod task_list;
 #[cfg(test)]
 mod test_support;
+#[cfg(any(test, feature = "test-util"))]
+pub mod test_util;
 pub mod top_level;
 pub mod workspace;
