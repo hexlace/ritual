@@ -271,7 +271,7 @@ mod tests {
         let work_tree = WorkTree::take(root);
         let repository = work_tree
             .ensure_clean(MIGRATE)
-            .map_err(|failure| failure.to_string())?;
+            .map_err(|failure| failure.with_causes().to_string())?;
         let migrating = migrating(root, repository);
         let before = metadata::fetch(root)?;
         let Some(candidates) = find(&before, root) else {
@@ -283,7 +283,7 @@ mod tests {
         );
         Ok(outcome
             .map(|applied| applied.lines)
-            .map_err(|failure| failure.to_string()))
+            .map_err(|failure| failure.with_causes().to_string()))
     }
 
     #[test]

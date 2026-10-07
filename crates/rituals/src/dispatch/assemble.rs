@@ -13,11 +13,11 @@ use crate::report::write_to_stderr;
 /// collides with a name already assembled, or is not a usable [`Name`] —
 /// with no prefix of its own: [`refusal_line`] is the one place that is
 /// added.
-fn mount_refusal(name: &str) -> String {
-    format!(
+fn mount_refusal(name: &str) -> Failure {
+    Failure::new(format!(
         "`{name}` collides with an earlier import, or is not a usable name; dropped from this \
          command line — run `regenerate` to fix its generated file"
-    )
+    ))
 }
 
 /// Assembles `imported` into one command line, in order, dropping — rather
@@ -40,7 +40,7 @@ pub(super) fn assemble(
         let usable = Name::new(name).is_ok();
 
         if already_present || !usable {
-            write_to_stderr(&refusal_line(binary_name, mount_refusal(name)));
+            write_to_stderr(&refusal_line(binary_name, &mount_refusal(name)));
             continue;
         }
 
@@ -254,7 +254,7 @@ mod tests {
     /// by capturing a subprocess's stderr.
     #[test]
     fn a_mount_refusal_leads_with_the_bin_name() {
-        let line = refusal_line("ritual", mount_refusal("new"));
+        let line = refusal_line("ritual", &mount_refusal("new"));
         assert!(line.starts_with("ritual: "));
         assert!(line.contains("`new`"));
         assert!(line.contains("collides"));

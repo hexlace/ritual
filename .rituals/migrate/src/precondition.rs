@@ -218,7 +218,7 @@ mod tests {
 
         let repository = work_tree
             .ensure_clean(MIGRATE)
-            .map_err(|failure| failure.to_string())?;
+            .map_err(|failure| failure.with_causes().to_string())?;
         assert_eq!(
             repository.shown(std::path::Path::new("ritual/Cargo.toml")),
             "ritual/Cargo.toml"
@@ -243,7 +243,7 @@ mod tests {
 
         let repository = work_tree
             .ensure_clean(MIGRATE)
-            .map_err(|failure| failure.to_string())?;
+            .map_err(|failure| failure.with_causes().to_string())?;
         assert_eq!(
             repository.shown(std::path::Path::new("project/Cargo.toml")),
             "Cargo.toml"

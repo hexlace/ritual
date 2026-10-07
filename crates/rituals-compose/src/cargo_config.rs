@@ -702,6 +702,7 @@ mod tests {
             .ok_or("an invalid file was meant to fail")?;
         assert!(
             failure
+                .with_causes()
                 .to_string()
                 .contains("config.toml is not valid TOML")
         );

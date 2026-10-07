@@ -142,12 +142,14 @@ fn reported_lines(
 }
 
 /// The failure for a run whose writes all went through but whose regenerate
-/// did not: the task is imported, so what is left is the one command that
-/// finishes it.
+/// did not, every cause of it included and at its status: the task is
+/// imported, so what is left is the one command that finishes it.
 fn imported_but_not_regenerated(failure: &Failure, key: &Name, regenerate: &str) -> Failure {
     Failure::new(format!(
-        "{failure}; `{key}` is imported — run `{regenerate}` to finish"
+        "{}; `{key}` is imported — run `{regenerate}` to finish",
+        failure.with_causes()
     ))
+    .exiting_with(failure.status())
 }
 
 /// The line `import` ends on: what a person types to run the task it
@@ -160,7 +162,7 @@ fn next_step(key: &Name, binary_name: &str) -> String {
 mod tests {
     use std::path::Path;
 
-    use rituals::{CommandLine, Failure, Identity, Name};
+    use rituals::{CommandLine, Failure, Identity, Name, RefusalStatus};
     use rituals_compose::generated_file::TaskKey;
     use rituals_compose::rollback::{self, Wording};
 
@@ -180,6 +182,35 @@ mod tests {
             next_step(&valid_name("hail"), "acme"),
             "next: run cargo acme hail"
         );
+    }
+
+    #[test]
+    fn a_failed_regenerate_keeps_its_cause_before_what_finishes_it() {
+        let failure = imported_but_not_regenerated(
+            &Failure::new("cargo metadata failed")
+                .caused_by(std::io::Error::other("no space left")),
+            &valid_name("hail"),
+            "cargo ritual regenerate",
+        );
+
+        assert_eq!(
+            failure.with_causes().to_string(),
+            "cargo metadata failed: no space left; `hail` is imported — run `cargo ritual \
+             regenerate` to finish"
+        );
+    }
+
+    #[test]
+    fn a_failed_regenerate_keeps_the_status_it_refused_with() -> TestOutcome {
+        let status = RefusalStatus::new(3)?;
+        let failure = imported_but_not_regenerated(
+            &Failure::new("cargo metadata failed").exiting_with(status),
+            &valid_name("hail"),
+            "cargo ritual regenerate",
+        );
+
+        assert_eq!(failure.status(), status);
+        Ok(())
     }
 
     #[test]

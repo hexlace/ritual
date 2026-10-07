@@ -733,7 +733,7 @@ mod tests {
         let work_tree = repository_of(root)?;
         let repository = work_tree
             .ensure_clean(MIGRATE)
-            .map_err(|failure| failure.to_string())?;
+            .map_err(|failure| failure.with_causes().to_string())?;
 
         let checked =
             ensure_none_holds_a_submodule(&[root.join("tasks/greet")], repository, root, MIGRATE);
@@ -771,7 +771,7 @@ mod tests {
         let work_tree = WorkTree::take(root);
         let repository = work_tree
             .ensure_clean(MIGRATE)
-            .map_err(|failure| failure.to_string())?;
+            .map_err(|failure| failure.with_causes().to_string())?;
 
         let refused =
             ensure_none_holds_a_submodule(&[root.join("tasks/greet")], repository, root, MIGRATE)
@@ -800,7 +800,7 @@ mod tests {
         let work_tree = WorkTree::take(root);
         let repository = work_tree
             .ensure_clean(MIGRATE)
-            .map_err(|failure| failure.to_string())?;
+            .map_err(|failure| failure.with_causes().to_string())?;
 
         let refused =
             ensure_none_holds_a_submodule(&[root.join("tasks/greet")], repository, root, MIGRATE)
@@ -955,7 +955,7 @@ mod tests {
         let work_tree = WorkTree::take(root);
         let repository = work_tree
             .ensure_clean(MIGRATE)
-            .map_err(|failure| failure.to_string())?;
+            .map_err(|failure| failure.with_causes().to_string())?;
         let relocation = Relocation::new(
             &root.join("tasks"),
             &root.join(".rituals"),
