@@ -113,14 +113,14 @@ dependencies = [
 
 [[package]]
 name = "rituals"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "clap",
 ]
 
 [[package]]
 name = "rituals-cli"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "rituals",
  "rituals-core",
@@ -130,7 +130,7 @@ dependencies = [
 
 [[package]]
 name = "rituals-compose"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "glob",
  "rituals",
@@ -141,7 +141,7 @@ dependencies = [
 
 [[package]]
 name = "rituals-core"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "rituals",
  "rituals-core-add",
@@ -155,7 +155,7 @@ dependencies = [
 
 [[package]]
 name = "rituals-core-add"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "rituals",
  "rituals-core-create",
@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "rituals-core-create"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "rituals",
  "rituals-compose",
@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "rituals-core-import"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "rituals",
  "rituals-compose",
@@ -179,7 +179,7 @@ dependencies = [
 
 [[package]]
 name = "rituals-core-migrate"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "rituals",
  "rituals-compose",
@@ -187,7 +187,7 @@ dependencies = [
 
 [[package]]
 name = "rituals-core-new"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "rituals",
  "rituals-compose",
@@ -196,7 +196,7 @@ dependencies = [
 
 [[package]]
 name = "rituals-core-regenerate"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "rituals",
  "rituals-compose",
@@ -204,7 +204,7 @@ dependencies = [
 
 [[package]]
 name = "rituals-core-remove"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "rituals",
  "rituals-compose",
@@ -311,7 +311,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "serde_json",
  "toml_edit",
