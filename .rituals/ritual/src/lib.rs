@@ -38,7 +38,7 @@ use rituals::Task;
 //
 // No assertions of its own either. The whole body is one `Task::group`
 // call, which asserts four things at construction — at least one child,
-// distinct names, each spelled like a `Name`, no child called `help`. A
+// distinct names, each one `Name::new` accepts, no child called `help`. A
 // second check here could only re-test `Task::group`'s own contract from
 // outside it. The one property this function adds, the order of the
 // children, is held by the unit test below and by the integration test that

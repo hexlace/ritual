@@ -263,10 +263,13 @@ name is compiled into a bundle crate, not written in the generated file, so
 `regenerate` cannot fix it.
 
 **Inside a bundle,** `Task::group` asserts at construction that there is at
-least one child, that the names are distinct, that each is spelled the way a
-`Name` is, and that none is `help`. A child's name is a word of the command a
+least one child, that the names are distinct, that each is one `Name::new`
+accepts, and that none is `help`. A child's name is a word of the command a
 person types, the same as a project's key for a task, so it meets the same
-rule; a name with a space would print a command that can't be pasted. These
+rule; a name with a space would print a command that can't be pasted. The rule
+refuses `crate`, `self` and `super` as well, which are spelled like names but
+can't be written as a Rust identifier, so a bundle with a child under one of
+those panics too. These
 are contract violations in the bundle crate's own source, with no user input
 involved, so they panic, in both build profiles, at every depth.
 

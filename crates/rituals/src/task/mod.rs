@@ -43,8 +43,8 @@ enum Body {
     },
     /// A bundle: named children, in the order given to [`Task::group`],
     /// which is also where the invariants this variant relies on — at
-    /// least one child, distinct names, none of them `help` — are
-    /// enforced, once, at construction.
+    /// least one child, distinct names, each one a [`Name`], none of them
+    /// `help` — are enforced, once, at construction.
     Children(Vec<(&'static str, Task)>),
 }
 
@@ -206,9 +206,12 @@ impl Task {
     /// # Panics
     ///
     /// Panics when `children` is empty, when it names one command twice,
-    /// when a name is not spelled the way [`Name`] requires, or when it names
-    /// a command `help`: clap adds a `help` command under every group, so a
-    /// child called that is two commands with one name.
+    /// when a name is one [`Name::new`] refuses, or when it names a command
+    /// `help`: clap adds a `help` command under every group, so a child
+    /// called that is two commands with one name. [`Name::new`] refuses a
+    /// name that is not spelled the way [`Name`] requires, and `crate`,
+    /// `self` and `super`, which are spelled that way but cannot be written
+    /// as a Rust identifier.
     #[must_use]
     pub fn group(
         about: &'static str,
@@ -241,12 +244,16 @@ impl Task {
             // reach it, the same as a project's key for a task, so it is
             // held to the same rule. A key with a space renders as two words
             // that reach nothing when pasted.
-            let refusal = Name::new(name).err();
-            assert!(
-                refusal.is_none(),
-                "a bundle's children are named like any task: {}",
-                refusal.map_or_else(String::new, |refusal| refusal.to_string())
-            );
+            if let Err(refusal) = Name::new(name) {
+                #[expect(
+                    clippy::panic,
+                    reason = "a contract violation in the bundle crate's own source, like the \
+                              assertions around it, whose message is the refusal's own reason"
+                )]
+                {
+                    panic!("a bundle's children are named like any task: {refusal}");
+                }
+            }
 
             // clap adds its own `help` command under every group that has
             // subcommands, so a child called that is two commands with one
@@ -551,6 +558,18 @@ mod tests {
     #[should_panic(expected = "named like any task: `db_sync` is not a usable name; a name starts")]
     fn group_panics_on_an_underscored_child_key() {
         let _ = Task::group("a bundle", [("db_sync", Task::new("sync", run_ok))]);
+    }
+
+    // `crate` is spelled like a name but cannot be written as a Rust
+    // identifier, so `Name::new` refuses it for its own reason, not the
+    // spelling rule's.
+    #[test]
+    #[should_panic(
+        expected = "named like any task: `crate` is not a usable name; `crate`, `self` and `super` \
+                    cannot be written as a Rust identifier"
+    )]
+    fn group_panics_on_a_child_key_named_crate() {
+        let _ = Task::group("a bundle", [("crate", Task::new("crate", run_ok))]);
     }
 
     /// A bundle whose keys are distinct, not `help`, and spelled like a
