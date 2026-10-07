@@ -1007,7 +1007,8 @@ person reading it and none is printed twice.
 
 Refusals exit with status 1, or with a `RefusalStatus` the task chose, for a
 caller that has to tell two refusals apart without reading stderr. Only 1 and
-3 to 125 can be built: 0 is success, 2 is clap's usage error, and 126 and
-above belong to the shell. When one `Failure` wraps another, the outer one's
-status decides. Argument errors clap raises on its own, such as an unknown
-flag or a missing value, keep clap's formatting and exit with status 2.
+3 to 125 but 101 can be built: 0 is success, 2 is clap's usage error, 101 is
+what a panic exits with, and 126 and above belong to the shell. When one
+`Failure` wraps another, the outer one's status decides. Argument errors clap
+raises on its own, such as an unknown flag or a missing value, keep clap's
+formatting and exit with status 2.

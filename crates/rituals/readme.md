@@ -109,11 +109,12 @@ fn sync() -> Outcome {
 }
 ```
 
-A status is 1 or anything from 3 to 125. `RefusalStatus::new` refuses 0, which
-is success, 2, which a usage error exits with, and 126 and above, which a
-shell uses for itself. When one `Failure` wraps another, the outer one's
-status is the one the process exits with. `new` is `const`, so a status
-named as a constant, as above, is checked when the task compiles.
+A status is 1, or anything from 3 to 125 but 101. `RefusalStatus::new`
+refuses 0, which is success, 2, which a usage error exits with, 101, which a
+panic exits with, and 126 and above, which a shell uses for itself. When one
+`Failure` wraps another, the outer one's status is the one the process exits
+with. `new` is `const`, so a status named as a constant, as above, is checked
+when the task compiles.
 
 ## Running a task
 

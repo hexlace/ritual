@@ -56,8 +56,8 @@ pub struct Failure {
     status: RefusalStatus,
 }
 
-/// The exit status a refusal ends the process with: 1, or anything from 3
-/// to 125.
+/// The exit status a refusal ends the process with: 1, anything from 3 to
+/// 100, or anything from 102 to 125.
 ///
 /// A task that has more than one way to refuse can give each its own status,
 /// so a caller, such as a CI job, can tell them apart without reading stderr:
@@ -72,6 +72,8 @@ pub struct Failure {
 /// - **0** is success, and a refusal is never a success.
 /// - **2** is what the command line exits with on a usage error, such as an
 ///   unknown flag, which clap reports before any task runs.
+/// - **101** is what a Rust program exits with when it panics, so a task
+///   that refused with it would look exactly like one that crashed.
 /// - **126 and above** are what a shell reports for a command it found but
 ///   could not run (126), one it could not find (127), and one ended by a
 ///   signal (128 plus the signal's number).
@@ -98,10 +100,14 @@ pub struct Failure {
 /// assert_eq!(check(2).map_err(|failure| failure.status().get()), Err(3));
 /// assert!(RefusalStatus::new(0).is_err());
 /// assert!(RefusalStatus::new(2).is_err());
+/// assert!(RefusalStatus::new(101).is_err());
 /// assert!(RefusalStatus::new(126).is_err());
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RefusalStatus(u8);
+
+/// What a Rust program exits with when it panics.
+const PANIC_STATUS: u8 = 101;
 
 /// The first status a shell reserves; every status from here up is its own.
 const FIRST_SHELL_STATUS: u8 = 126;
@@ -115,13 +121,14 @@ impl RefusalStatus {
     ///
     /// # Errors
     ///
-    /// Returns [`InvalidRefusalStatus`] when `code` is 0, 2, or 126 or above,
-    /// each of which means something else to whoever runs the command (see
-    /// [`RefusalStatus`]).
+    /// Returns [`InvalidRefusalStatus`] when `code` is 0, 2, 101, or 126 or
+    /// above, each of which means something else to whoever runs the command
+    /// (see [`RefusalStatus`]).
     pub const fn new(code: u8) -> Result<Self, InvalidRefusalStatus> {
         let reason = match code {
             0 => Reserved::Success,
             2 => Reserved::UsageError,
+            PANIC_STATUS => Reserved::Panic,
             FIRST_SHELL_STATUS..=u8::MAX => Reserved::Shell,
             _ => return Ok(Self(code)),
         };
@@ -149,6 +156,8 @@ enum Reserved {
     Success,
     /// 2: the command line was used wrongly, which clap reports.
     UsageError,
+    /// 101: a Rust program panicked.
+    Panic,
     /// 126 and above: a shell's own statuses.
     Shell,
 }
@@ -165,11 +174,12 @@ impl fmt::Display for InvalidRefusalStatus {
         let reason = match self.reason {
             Reserved::Success => "0 means success",
             Reserved::UsageError => "2 is what a usage error exits with",
+            Reserved::Panic => "101 is what a panic exits with",
             Reserved::Shell => "126 and above are what a shell exits with",
         };
         write!(
             formatter,
-            "{} cannot be a refusal's exit status; {reason}, so a refusal uses 1 or 3 to 125",
+            "{} cannot be a refusal's exit status; {reason}, so a refusal uses 1, 3 to 100, or 102 to 125",
             self.code
         )
     }
@@ -387,8 +397,13 @@ mod tests {
     }
 
     #[test]
-    fn one_and_three_to_one_hundred_and_twenty_five_are_refusal_statuses() {
-        let usable = std::iter::once(1).chain(3..=125);
+    fn one_hundred_and_one_is_a_panic_and_cannot_be_a_refusal_status() {
+        assert!(RefusalStatus::new(101).is_err());
+    }
+
+    #[test]
+    fn one_and_three_to_one_hundred_and_twenty_five_but_one_hundred_and_one_are_refusal_statuses() {
+        let usable = std::iter::once(1).chain(3..=100).chain(102..=125);
         for code in usable {
             assert_eq!(RefusalStatus::new(code).map(RefusalStatus::get), Ok(code));
         }
@@ -399,6 +414,7 @@ mod tests {
         let reasons = [
             (0, "0 means success"),
             (2, "2 is what a usage error exits with"),
+            (101, "101 is what a panic exits with"),
             (126, "126 and above are what a shell exits with"),
         ];
         for (code, reason) in reasons {
