@@ -377,8 +377,8 @@ mean to publish, or remove the key from its manifest later
 `migrate` is for any release's change to the layout. It runs every migration
 that applies, oldest first, and stores nothing, so there is no version to keep
 in step and a project that needs nothing is told `nothing to migrate`. It runs
-from the new version, which is why the bump comes first. This release has one
-migration, from `tasks/` to `.rituals/`.
+from the new version, which is why the bump comes first. Migrations so far:
+from `tasks/` to `.rituals/`.
 
 For each workspace member under `tasks/` that is a task, it:
 
@@ -465,8 +465,8 @@ has already moved and Cargo reads the project as it should.
 ### Inside a project, use `cargo ritual`
 
 `cargo ritual` works from any directory inside the project. The global
-`ritual` carries `create`, `regenerate`, `import`, `remove` and `migrate` too,
-but they refuse in your project: use `cargo ritual create`. `add` is `create`'s
+`ritual` carries `create`, `regenerate`, `import`, `remove`, `migrate` and
+`add` too, but they refuse in your project: use `cargo ritual create`. `add` is `create`'s
 old name: it still works in 0.2.0, says on standard error that it is
 deprecated, and goes in 0.3.0.
 

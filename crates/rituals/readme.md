@@ -16,7 +16,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rituals = "0.1"
+rituals = "0.2"
 
 [package.metadata.ritual]
 task = true
@@ -132,20 +132,25 @@ cargo install --locked rituals-cli
 ritual new demo
 cd demo
 cargo ritual create hello
-cargo ritual hello world
+cargo ritual hello
 ```
 
-`create` writes the manifest and the `task()` above into `.rituals/hello`,
-imports it, and regenerates the command line. Run outside any project, `ritual
-create hello` writes a task crate of its own instead, for several projects to
-share; [import it](https://github.com/hexlace/ritual#import-a-task-from-somewhere-else).
+`create` writes a task crate into `.rituals/hello`, imports it, and
+regenerates the command line. Its `task()` is a placeholder, so
+`cargo ritual hello` answers `hello has nothing to do yet`. Replace
+`.rituals/hello/src/lib.rs` with the greeting task above, and
+`cargo ritual hello world` answers `hello, world`. Run outside any project,
+`ritual create hello` writes a task crate of its own instead, for several
+projects to share; [import it](https://github.com/hexlace/ritual#import-a-task-from-somewhere-else).
 
 ## More than one command
 
 - `Task::group` builds a bundle: a task whose command is a group of named
   child tasks. A bundle is imported like any other task, and bundles nest.
 - `Task::receiving_command_line` builds a task that is handed the command
-  line it runs in: its name and version, and the commands at its top level.
+  line it runs in: its name and version, the commands at its top level, the
+  command path that reached the task (`command_path()`), and the command a
+  person types to run it again (`cargo_command()`).
 
 The [ritual readme](https://github.com/hexlace/ritual#readme) covers the
 concepts, and [the design](https://github.com/hexlace/ritual/blob/main/.docs/design.md)

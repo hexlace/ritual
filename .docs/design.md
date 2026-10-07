@@ -76,8 +76,7 @@ Nothing else declares a source.
 **The dependency key is the command name.** A task crate does not name the
 command it answers to. The project that imports it does, by the key it gives
 the dependency. Importing a crate under a different name is Cargo's own
-`package = "…"` rename, and the same crate can be mounted twice under two
-names.
+`package = "…"` rename.
 
 **A task is an unconditional dependency.** The generated file is
 unconditional, so a task has to be present on every target the command line
@@ -348,8 +347,8 @@ a refusal tells a person to run again.
 ## Each task owns its precondition
 
 The whole bundle mounts everywhere. A project's command line carries `new`,
-and the global binary carries `create`, `import`, `regenerate`, `remove` and
-`migrate`.
+and the global binary carries `create`, `import`, `regenerate`, `remove`,
+`migrate` and `add`.
 The alternative was a conditional import, where a task is present or absent
 depending on where the command line stands. That would be the first exception
 to the tree being the same shape everywhere. So each task guards itself
@@ -1009,7 +1008,9 @@ writes that prefix itself.
 A `Failure` follows the usual convention for an error: its `Display` is the
 message alone and its cause is `source()`. The refusal line walks that chain,
 joining each link with `: `, so a cause several levels down still reaches the
-person reading it and none is printed twice.
+person reading it. None is printed twice as long as each cause's `Display`
+names only its own situation; a cause whose message already includes its
+source shows that source twice.
 
 Refusals exit with status 1, or with a `RefusalStatus` the task chose, for a
 caller that has to tell two refusals apart without reading stderr. Only 1 and
